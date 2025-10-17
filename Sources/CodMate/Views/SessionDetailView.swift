@@ -15,9 +15,8 @@ struct SessionDetailView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
-                header
-                metaSection
+            VStack(alignment: .leading, spacing: 16) {
+                sessionInfoCard
                 instructionsSection
 
                 Divider()
@@ -32,7 +31,7 @@ struct SessionDetailView: View {
                     }
                 }
             }
-            .padding(28)
+            .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .task(id: summary.id) {
@@ -44,40 +43,40 @@ struct SessionDetailView: View {
 
     // moved actions to fixed top bar
 
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(summary.displayName)
-                .font(.largeTitle.weight(.semibold))
-            HStack(spacing: 12) {
-                Label(
-                    summary.startedAt.formatted(date: .numeric, time: .shortened),
-                    systemImage: "calendar")
-                Label(summary.readableDuration, systemImage: "clock")
+    private var sessionInfoCard: some View {
+        GroupBox {
+            LazyVGrid(
+                columns: [
+                    GridItem(.flexible(), alignment: .topLeading),
+                    GridItem(.flexible(), alignment: .topLeading),
+                    GridItem(.flexible(), alignment: .topLeading),
+                    GridItem(.flexible(), alignment: .topLeading),
+                ], spacing: 12
+            ) {
+                infoRow(
+                    title: "STARTED",
+                    value: summary.startedAt.formatted(date: .numeric, time: .shortened),
+                    icon: "calendar")
+                infoRow(title: "DURATION", value: summary.readableDuration, icon: "clock")
+
                 if let model = summary.model {
-                    Label(model, systemImage: "cpu")
+                    infoRow(title: "MODEL", value: model, icon: "cpu")
                 }
                 if let approval = summary.approvalPolicy {
-                    Label(approval, systemImage: "checkmark.shield")
+                    infoRow(title: "APPROVAL", value: approval, icon: "checkmark.shield")
                 }
-            }
-            .font(.subheadline)
-            .foregroundStyle(.secondary)
-        }
-    }
 
-    // metrics moved to list row per request
-
-    private var metaSection: some View {
-        GroupBox("Session Info") {
-            VStack(alignment: .leading, spacing: 8) {
                 infoRow(title: "CLI VERSION", value: summary.cliVersion, icon: "terminal")
-                infoRow(title: "Originator", value: summary.originator, icon: "person.circle")
+                infoRow(title: "ORIGINATOR", value: summary.originator, icon: "person.circle")
+
                 infoRow(title: "WORKING DIRECTORY", value: summary.cwd, icon: "folder")
                 infoRow(title: "FILE SIZE", value: summary.fileSizeDisplay, icon: "externaldrive")
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
+
+    // metrics moved to list row per request
 
     private func infoRow(title: String, value: String, icon: String) -> some View {
         HStack(alignment: .top, spacing: 12) {
@@ -191,7 +190,8 @@ extension SessionDetailView {
         cliVersion: "1.2.3",
         cwd: "/Users/developer/projects/codmate",
         originator: "developer",
-        instructions: "Please help optimize this SwiftUI app's performance, especially list scroll stutter.",
+        instructions:
+            "Please help optimize this SwiftUI app's performance, especially list scroll stutter.",
         model: "gpt-4o-mini",
         approvalPolicy: "auto",
         userMessageCount: 5,
