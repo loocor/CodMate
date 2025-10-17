@@ -11,8 +11,12 @@ final class SessionListViewModel: ObservableObject {
     }
     @Published var isLoading = false
     @Published var errorMessage: String?
-    @Published var navigationSelection: SessionNavigationItem { didSet { applyFilters() } }
+    
+    // 新的过滤状态：支持组合过滤
+    @Published var selectedPath: String? = nil { didSet { applyFilters() } }
+    @Published var selectedDay: Date? = nil { didSet { applyFilters() } }
     @Published var dateDimension: DateDimension = .updated { didSet { applyFilters() } }
+    
     let preferences: SessionPreferencesStore
 
     private let indexer: SessionIndexer
@@ -33,10 +37,7 @@ final class SessionListViewModel: ObservableObject {
         self.preferences = preferences
         self.indexer = indexer
         self.actions = actions
-        
-        // 默认选中今天的日期
-        let today = Calendar.current.startOfDay(for: Date())
-        self.navigationSelection = .calendarDay(today)
+        // 默认不选中任何过滤条件，显示所有会话
     }
 
     func refreshSessions() async {
@@ -120,6 +121,22 @@ final class SessionListViewModel: ObservableObject {
             await MainActor.run { self.pathTreeRootPublished = tree }
         }
     }
+    
+    // MARK: - 过滤状态管理
+    
+    func setSelectedPath(_ path: String?) {
+        selectedPath = path
+    }
+    
+    func setSelectedDay(_ day: Date?) {
+        selectedDay = day
+    }
+    
+    func clearAllFilters() {
+        selectedPath = nil
+        selectedDay = nil
+        // searchText 保持不变，便于连续检索
+    }
 
     private func applyFilters() {
         guard !allSessions.isEmpty else {
@@ -128,32 +145,40 @@ final class SessionListViewModel: ObservableObject {
         }
 
         var filtered = allSessions
-        switch navigationSelection {
-        case .allSessions:
-            break
-        case let .calendarDay(day):
+        
+        // 1. 目录过滤
+        if let path = selectedPath {
+            filtered = filtered.filter { $0.cwd.hasPrefix(path) }
+        }
+        
+        // 2. 日期过滤
+        if let day = selectedDay {
             filtered = filtered.filter { sess in
                 let cal = Calendar.current
                 switch dateDimension {
                 case .created:
                     return cal.isDate(sess.startedAt, inSameDayAs: day)
                 case .updated:
-                    if let end = sess.lastUpdatedAt { return cal.isDate(end, inSameDayAs: day) }
+                    if let end = sess.lastUpdatedAt {
+                        return cal.isDate(end, inSameDayAs: day)
+                    }
                     return cal.isDate(sess.startedAt, inSameDayAs: day)
                 }
             }
-        case let .pathPrefix(prefix):
-            filtered = filtered.filter { $0.cwd.hasPrefix(prefix) }
         }
-
+        
+        // 3. 搜索过滤
         let term = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         if !term.isEmpty {
             filtered = filtered.filter { summary in
                 summary.matches(search: term) || fulltextMatches.contains(summary.id)
             }
         }
+        
+        // 4. 排序
         filtered = sortOrder.sort(filtered)
-
+        
+        // 5. 分组
         sections = Self.groupSessions(filtered)
     }
 
@@ -268,14 +293,12 @@ final class SessionListViewModel: ObservableObject {
     }
 
     private func currentScope() -> SessionLoadScope {
-        switch navigationSelection {
-        case .allSessions:
-            return .today
-        case let .calendarDay(day):
+        // 如果选中了具体日期，只加载该日的数据
+        if let day = selectedDay {
             return .day(day)
-        case .pathPrefix:
-            return .today
         }
+        // 否则默认加载今天的数据（快速启动）
+        return .today
     }
 }
 

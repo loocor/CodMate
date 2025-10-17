@@ -6,7 +6,6 @@ struct ContentView: View {
     @ObservedObject var viewModel: SessionListViewModel
 
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
-    @State private var navigationSelection: SessionNavigationItem
     @State private var selection = Set<SessionSummary.ID>()
     @State private var isPerformingAction = false
     @State private var deleteConfirmationPresented = false
@@ -17,8 +16,6 @@ struct ContentView: View {
 
     init(viewModel: SessionListViewModel) {
         self.viewModel = viewModel
-        let initialSelection: SessionNavigationItem = viewModel.navigationSelection
-        _navigationSelection = State<SessionNavigationItem>(initialValue: initialSelection)
     }
 
     var body: some View {
@@ -27,7 +24,6 @@ struct ContentView: View {
             
             NavigationSplitView(columnVisibility: $columnVisibility) {
                 SessionNavigationView(
-                    selection: navSelectionBinding,
                     totalCount: viewModel.totalSessionCount,
                     isLoading: viewModel.isLoading
                 )
@@ -59,16 +55,8 @@ struct ContentView: View {
             alertState = AlertState(title: "Operation Failed", message: message)
             viewModel.errorMessage = nil
         }
-        .onChange(of: navigationSelection) { _, newValue in
-            if viewModel.navigationSelection != newValue {
-                viewModel.navigationSelection = newValue
-            }
-        }
-        .onChange(of: viewModel.navigationSelection) { _, newValue in
-            if navigationSelection != newValue {
-                navigationSelection = newValue
-            }
-            // After changing filters (calendar/path), reload within scope
+        .onChange(of: viewModel.selectedDay) { _, _ in
+            // 当日期过滤变更时，重新加载该范围内的 sessions
             Task { await viewModel.refreshSessions() }
         }
         .toolbar {
@@ -127,16 +115,6 @@ struct ContentView: View {
             }
         }
         }
-    }
-
-    private var navSelectionBinding: Binding<SessionNavigationItem> {
-        Binding(
-            get: { navigationSelection },
-            set: { newValue in
-                navigationSelection = newValue
-                viewModel.navigationSelection = newValue
-            }
-        )
     }
 
     private var detailColumn: some View {
