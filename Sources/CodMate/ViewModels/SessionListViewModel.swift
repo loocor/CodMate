@@ -21,6 +21,9 @@ final class SessionListViewModel: ObservableObject {
     private var fulltextMatches: Set<String> = [] // SessionSummary.id set
     private var fulltextTask: Task<Void, Never>?
     private var enrichmentTask: Task<Void, Never>?
+    @Published var globalSessionCount: Int = 0
+    @Published private(set) var pathTreeRootPublished: PathTreeNode?
+    private var monthCountsCache: [String: [Int: Int]] = [:] // key: "dim|yyyy-MM"
 
     init(
         preferences: SessionPreferencesStore,
@@ -43,6 +46,7 @@ final class SessionListViewModel: ObservableObject {
             await computeCalendarCaches()
             applyFilters()
             startBackgroundEnrichment()
+            Task { await self.refreshGlobalCount() }
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -90,23 +94,27 @@ final class SessionListViewModel: ObservableObject {
 
     // Expose data for navigation helpers
     func calendarCounts(for monthStart: Date, dimension: DateDimension) -> [Int: Int] {
-        let cal = Calendar.current
-        guard let range = cal.range(of: .day, in: .month, for: monthStart) else { return [:] }
-        var counts: [Int: Int] = [:]
-        for s in allSessions {
-            let date: Date = (dimension == .created) ? s.startedAt : (s.lastUpdatedAt ?? s.startedAt)
-            if cal.isDate(date, equalTo: monthStart, toGranularity: .month) {
-                let day = cal.component(.day, from: date)
-                if range.contains(day) {
-                    counts[day, default: 0] += 1
-                }
+        let key = cacheKey(monthStart, dimension)
+        if let cached = monthCountsCache[key] { return cached }
+        Task { [monthStart, dimension] in
+            let counts = await indexer.computeCalendarCounts(root: preferences.sessionsRoot, monthStart: monthStart, dimension: dimension)
+            await MainActor.run {
+                self.monthCountsCache[self.cacheKey(monthStart, dimension)] = counts
+                self.objectWillChange.send()
             }
         }
-        return counts
+        return [:]
     }
 
-    var pathTreeRoot: PathTreeNode? {
-        allSessions.buildPathTree()
+    var pathTreeRoot: PathTreeNode? { pathTreeRootPublished }
+
+    func ensurePathTree() {
+        if pathTreeRootPublished != nil { return }
+        Task {
+            let counts = await indexer.collectCWDCounts(root: preferences.sessionsRoot)
+            let tree = counts.buildPathTreeFromCounts()
+            await MainActor.run { self.pathTreeRootPublished = tree }
+        }
     }
 
     private func applyFilters() {
@@ -264,5 +272,18 @@ final class SessionListViewModel: ObservableObject {
         case .pathPrefix:
             return .today
         }
+    }
+}
+
+extension SessionListViewModel {
+    func refreshGlobalCount() async {
+        let count = await indexer.countAllSessions(root: preferences.sessionsRoot)
+        await MainActor.run { self.globalSessionCount = count }
+    }
+}
+
+private extension SessionListViewModel {
+    func cacheKey(_ monthStart: Date, _ dimension: DateDimension) -> String {
+        let df = DateFormatter(); df.dateFormat = "yyyy-MM"; return dimension.rawValue + "|" + df.string(from: monthStart)
     }
 }

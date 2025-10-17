@@ -17,7 +17,8 @@ struct ContentView: View {
 
     init(viewModel: SessionListViewModel) {
         self.viewModel = viewModel
-        _navigationSelection = State(initialValue: viewModel.navigationSelection)
+        let initialSelection = viewModel.navigationSelection
+        _navigationSelection = State(initialValue: initialSelection)
     }
 
     var body: some View {
@@ -64,10 +65,16 @@ struct ContentView: View {
             if navigationSelection != newValue {
                 navigationSelection = newValue
             }
+            // 切换日历或其他筛选后，按范围重新加载
+            Task { await viewModel.refreshSessions() }
         }
-        .searchable(text: $viewModel.searchText, placement: .toolbar, prompt: Text("搜索会话"))
         .toolbar {
-            ToolbarItem(placement: .primaryAction) {
+            ToolbarItem(placement: .automatic) {
+                TextField("搜索会话", text: $viewModel.searchText)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 260)
+            }
+            ToolbarItem(placement: .automatic) {
                 Button {
                     Task { await viewModel.refreshSessions() }
                 } label: {
