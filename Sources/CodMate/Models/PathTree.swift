@@ -96,7 +96,7 @@ extension Dictionary where Key == String, Value == Int {
         }
         let rootPath = prefix.isEmpty ? "/" : NSString.path(withComponents: prefix)
         let rootName = prefix.last ?? "/"
-        var root = PathTreeNode(id: rootPath, name: rootName.isEmpty ? "/" : rootName, count: 0, children: [])
+        let root = PathTreeNode(id: rootPath, name: rootName.isEmpty ? "/" : rootName, count: 0, children: [])
 
         var nodeMap: [String: Int] = [root.id: 0]
         var flat: [PathTreeNode] = [root]

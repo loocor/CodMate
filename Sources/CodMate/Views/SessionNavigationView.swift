@@ -94,7 +94,7 @@ struct SessionNavigationView: View {
                     selection = .calendarDay(picked)
                     viewModel.dateDimension = dimension
                 }
-                .frame(maxWidth: .infinity)
+                .frame(height: 280)
             }
             .padding(.vertical, 6)
             .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 6, trailing: 0))
@@ -105,7 +105,7 @@ struct SessionNavigationView: View {
         let cal = Calendar.current
         let monthTitle: String = {
             let df = DateFormatter()
-            df.dateFormat = "yyyy年MM月"
+            df.dateFormat = "MMM yyyy"
             return df.string(from: monthStart)
         }()
         return GeometryReader { geometry in

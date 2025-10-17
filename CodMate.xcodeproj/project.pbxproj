@@ -356,6 +356,7 @@
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = AN5X2K46ER;
 				INFOPLIST_FILE = CodMate/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = CodMate;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright © 2025 CodMate";
 				INFOPLIST_KEY_NSMainStoryboardFile = "";
@@ -369,8 +370,8 @@
 				PRODUCT_NAME = CodMate;
 				SDKROOT = macosx;
 				SUPPORTS_MACCATALYST = NO;
-				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_COMPILATION_MODE = singlefile;
+				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = 1;
@@ -388,6 +389,7 @@
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = AN5X2K46ER;
 				INFOPLIST_FILE = CodMate/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = CodMate;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright © 2025 CodMate";
 				INFOPLIST_KEY_NSMainStoryboardFile = "";

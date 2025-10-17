@@ -10,7 +10,7 @@ struct PathTreeView: View {
                 PathTreeNodeView(node: node, level: 0, onSelect: onSelect)
             }
         } else {
-            ContentUnavailableView("暂无目录", systemImage: "folder")
+            ContentUnavailableView("No Directories", systemImage: "folder")
         }
     }
 }
