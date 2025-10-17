@@ -35,25 +35,27 @@ struct CalendarMonthView: View {
                             } label: {
                                 ZStack {
                                     RoundedRectangle(cornerRadius: 6)
-                                        .fill(day > 0 ? Color.secondary.opacity(0.08) : Color.clear)
+                                        .fill(day > 0 ? Color.secondary.opacity(0.06) : Color.clear)
                                     VStack(spacing: 2) {
                                         Text(day > 0 ? "\(day)" : "")
-                                            .font(.caption2)
+                                            .font(.caption)
                                             .frame(maxWidth: .infinity, alignment: .leading)
-                                        if day > 0, let c = counts[day], c > 0 {
-                                            Text("\(c)")
-                                                .font(.caption2.monospacedDigit())
-                                                .foregroundStyle(.secondary)
-                                        } else {
-                                            Text("")
-                                                .font(.caption2)
+                                        Group {
+                                            if day > 0, let c = counts[day], c > 0 {
+                                                Text("\(c)")
+                                                    .font(.caption2.bold())
+                                                    .foregroundStyle(.white)
+                                                    .padding(.horizontal, 6)
+                                                    .padding(.vertical, 2)
+                                                    .background(Capsule().fill(Color.accentColor.opacity(0.85)))
+                                            } else { EmptyView() }
                                         }
                                     }
                                     .padding(6)
                                 }
                             }
                             .buttonStyle(.plain)
-                            .frame(maxWidth: .infinity, minHeight: 32)
+                            .frame(maxWidth: .infinity, minHeight: 34)
                         }
                     }
                 }
@@ -71,4 +73,3 @@ struct CalendarMonthView: View {
         return stride(from: 0, to: days.count, by: 7).map { Array(days[$0..<$0+7]) }
     }
 }
-

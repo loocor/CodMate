@@ -10,7 +10,7 @@ struct SessionListColumnView: View {
     let onDeleteRequest: (SessionSummary) -> Void
 
     var body: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 8) {
             header
 
             if isLoading {
@@ -66,17 +66,17 @@ struct SessionListColumnView: View {
     }
 
     private var header: some View {
-        HStack {
+        HStack(alignment: .center, spacing: 12) {
             Picker("排序", selection: $sortOrder) {
                 ForEach(SessionSortOrder.allCases) { order in
                     Text(order.title).tag(order)
                 }
             }
             .pickerStyle(.segmented)
-            .frame(maxWidth: 240)
-
-            Spacer()
+            .frame(width: 320)
+            Spacer(minLength: 0)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

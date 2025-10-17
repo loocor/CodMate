@@ -7,11 +7,18 @@ struct PathTreeView: View {
     var body: some View {
         if let root {
             OutlineGroup([root], children: \.children) { node in
-                HStack {
+                HStack(spacing: 8) {
                     Text(node.name.isEmpty ? "/" : node.name)
-                    Spacer()
-                    Text("\(node.count)").foregroundStyle(.secondary)
+                        .font(.callout)
+                        .lineLimit(1)
+                    Spacer(minLength: 6)
+                    if node.count > 0 {
+                        Text("\(node.count)")
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
                 }
+                .padding(.vertical, 2)
                 .contentShape(Rectangle())
                 .onTapGesture { onSelect(node.id) }
             }
@@ -20,4 +27,3 @@ struct PathTreeView: View {
         }
     }
 }
-

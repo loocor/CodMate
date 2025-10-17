@@ -3,10 +3,12 @@ import SwiftUI
 @main
 struct CodMateApp: App {
     @StateObject private var listViewModel: SessionListViewModel
+    @StateObject private var preferences: SessionPreferencesStore
 
     init() {
-        let preferences = SessionPreferencesStore()
-        _listViewModel = StateObject(wrappedValue: SessionListViewModel(preferences: preferences))
+        let prefs = SessionPreferencesStore()
+        _preferences = StateObject(wrappedValue: prefs)
+        _listViewModel = StateObject(wrappedValue: SessionListViewModel(preferences: prefs))
     }
 
     var body: some Scene {
@@ -15,5 +17,9 @@ struct CodMateApp: App {
                 .frame(minWidth: 1100, minHeight: 720)
         }
         .defaultSize(width: 1200, height: 780)
+
+        Settings {
+            SettingsView(preferences: preferences)
+        }
     }
 }

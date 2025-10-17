@@ -16,7 +16,6 @@ struct SessionDetailView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                sessionActionBar
                 header
                 metaSection
                 instructionsSection
@@ -43,46 +42,7 @@ struct SessionDetailView: View {
         }
     }
 
-    private var sessionActionBar: some View {
-        HStack(spacing: 12) {
-            Button {
-                onResume()
-            } label: {
-                Label("恢复", systemImage: "play.fill")
-            }
-            .buttonStyle(.borderedProminent)
-            .disabled(isProcessing)
-            .help("使用 codex CLI 快速恢复该会话")
-
-            Button {
-                onReveal()
-            } label: {
-                Label("访达中查看", systemImage: "folder")
-            }
-            .buttonStyle(.bordered)
-            .help("在访达中打开会话所在文件夹")
-
-            Spacer()
-
-            Button(role: .destructive) {
-                onDelete()
-            } label: {
-                Label("删除会话", systemImage: "trash")
-            }
-            .buttonStyle(.bordered)
-            .disabled(isProcessing)
-            .help("将会话日志移至废纸篓")
-
-            Button {
-                exportMarkdown()
-            } label: {
-                Label("导出 Markdown", systemImage: "square.and.arrow.down")
-            }
-            .buttonStyle(.bordered)
-            .disabled(loadingTimeline || events.isEmpty)
-            .help("导出整个会话为 Markdown 文件")
-        }
-    }
+    // moved actions to fixed top bar
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 6) {

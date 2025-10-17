@@ -1,5 +1,6 @@
 import SwiftUI
 import UniformTypeIdentifiers
+import AppKit
 
 struct ContentView: View {
     @ObservedObject var viewModel: SessionListViewModel
@@ -65,6 +66,17 @@ struct ContentView: View {
             }
         }
         .searchable(text: $viewModel.searchText, placement: .toolbar, prompt: Text("搜索会话"))
+        .toolbar {
+            ToolbarItem(placement: .automatic) {
+                Button {
+                    Task { await viewModel.refreshSessions() }
+                } label: {
+                    Label("刷新", systemImage: "arrow.clockwise.circle.fill")
+                }
+                .controlSize(.large)
+                .help("刷新会话索引")
+            }
+        }
         .alert(item: $alertState) { state in
             Alert(
                 title: Text(state.title),
@@ -144,26 +156,21 @@ struct ContentView: View {
 
     private var detailActionBar: some View {
         HStack(spacing: 12) {
-            Button {
-                Task { await viewModel.refreshSessions() }
-            } label: {
-                Label("刷新", systemImage: "arrow.clockwise")
-            }
-            .disabled(isPerformingAction)
-
-            Button {
-                selectingSessionsRoot = true
-            } label: {
-                Label("选择目录", systemImage: "folder.badge.gear")
-            }
-
-            Button {
-                selectingExecutable = true
-            } label: {
-                Label("配置 CLI", systemImage: "terminal")
-            }
-
             Spacer()
+
+            Button {
+                if let focused = focusedSummary { resume(session: focused) }
+            } label: {
+                Label("恢复", systemImage: "play.fill")
+            }
+            .disabled(isPerformingAction || focusedSummary == nil)
+            
+            Button {
+                if let focused = focusedSummary { viewModel.reveal(session: focused) }
+            } label: {
+                Label("访达中查看", systemImage: "folder")
+            }
+            .disabled(focusedSummary == nil)
 
             Button(role: .destructive) {
                 presentDeleteConfirmation()
@@ -171,6 +178,13 @@ struct ContentView: View {
                 Label("删除会话", systemImage: "trash")
             }
             .disabled(selection.isEmpty || isPerformingAction)
+
+            Button {
+                exportMarkdownForFocused()
+            } label: {
+                Label("导出 Markdown", systemImage: "square.and.arrow.down")
+            }
+            .disabled(focusedSummary == nil)
         }
         .buttonStyle(.bordered)
     }
@@ -298,4 +312,36 @@ private struct AlertState: Identifiable {
     let id = UUID()
     let title: String
     let message: String
+}
+
+// MARK: - Export helper
+extension ContentView {
+    private func exportMarkdownForFocused() {
+        guard let focused = focusedSummary else { return }
+        let loader = SessionTimelineLoader()
+        let events = (try? loader.load(url: focused.fileURL)) ?? []
+        var lines: [String] = []
+        lines.append("# \(focused.displayName)")
+        lines.append("")
+        lines.append("- 开始时间：\(focused.startedAt)")
+        if let end = focused.lastUpdatedAt { lines.append("- 最后更新：\(end)") }
+        if let model = focused.model { lines.append("- 模型：\(model)") }
+        if let approval = focused.approvalPolicy { lines.append("- 审批策略：\(approval)") }
+        lines.append("")
+        for e in events {
+            let prefix: String
+            switch e.actor { case .user: prefix = "**用户**"; case .assistant: prefix = "**助手**"; case .tool: prefix = "**工具**"; case .info: prefix = "**信息**" }
+            lines.append("\(prefix) · \(e.timestamp)\n")
+            if let title = e.title { lines.append("> \(title)") }
+            if let text = e.text, !text.isEmpty { lines.append(text) }
+            if let meta = e.metadata, !meta.isEmpty { lines.append(""); for k in meta.keys.sorted() { lines.append("- \(k): \(meta[k] ?? "")") } }
+            lines.append("")
+        }
+        let md = lines.joined(separator: "\n")
+        let panel = NSSavePanel()
+        panel.title = "导出 Markdown"
+        panel.allowedContentTypes = [.plainText]
+        panel.nameFieldStringValue = focused.displayName + ".md"
+        if panel.runModal() == .OK, let url = panel.url { try? md.data(using: .utf8)?.write(to: url) }
+    }
 }

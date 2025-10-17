@@ -59,12 +59,12 @@ actor SessionIndexer {
                         guard values.isRegularFile == true else { return nil }
 
                         // In-memory cache
-                        if let cached = self.cachedSummary(for: url as NSURL, modificationDate: values.contentModificationDate) {
+                        if let cached = await self.cachedSummary(for: url as NSURL, modificationDate: values.contentModificationDate) {
                             return cached
                         }
                         // Disk cache
                         if let disk = await self.diskCache.get(path: url.path, modificationDate: values.contentModificationDate) {
-                            self.store(summary: disk, for: url as NSURL, modificationDate: values.contentModificationDate)
+                            await self.store(summary: disk, for: url as NSURL, modificationDate: values.contentModificationDate)
                             return disk
                         }
 
@@ -72,8 +72,8 @@ actor SessionIndexer {
                         if let size = values.fileSize { builder.setFileSize(UInt64(size)) }
                         // Seed updatedAt by fs metadata to avoid full scan for recency
                         if let m = values.contentModificationDate { builder.seedLastUpdated(m) }
-                        guard let summary = try self.buildSummaryFast(for: url, builder: &builder) else { return nil }
-                        self.store(summary: summary, for: url as NSURL, modificationDate: values.contentModificationDate)
+                        guard let summary = try await self.buildSummaryFast(for: url, builder: &builder) else { return nil }
+                        await self.store(summary: summary, for: url as NSURL, modificationDate: values.contentModificationDate)
                         await self.diskCache.set(path: url.path, modificationDate: values.contentModificationDate, summary: summary)
                         return summary
                     }
@@ -101,7 +101,7 @@ actor SessionIndexer {
 
     // MARK: - Private
 
-    private nonisolated func cachedSummary(for key: NSURL, modificationDate: Date?) -> SessionSummary? {
+    private func cachedSummary(for key: NSURL, modificationDate: Date?) -> SessionSummary? {
         guard let entry = cache.object(forKey: key) else {
             return nil
         }
@@ -111,7 +111,7 @@ actor SessionIndexer {
         return nil
     }
 
-    private nonisolated func store(summary: SessionSummary, for key: NSURL, modificationDate: Date?) {
+    private func store(summary: SessionSummary, for key: NSURL, modificationDate: Date?) {
         let entry = CacheEntry(modificationDate: modificationDate, summary: summary)
         cache.setObject(entry, forKey: key)
     }
@@ -134,7 +134,7 @@ actor SessionIndexer {
         return urls
     }
 
-    private nonisolated func buildSummaryFast(for url: URL, builder: inout SessionSummaryBuilder) throws -> SessionSummary? {
+    private func buildSummaryFast(for url: URL, builder: inout SessionSummaryBuilder) throws -> SessionSummary? {
         // Memory-map file (fast and low memory overhead)
         let data = try Data(contentsOf: url, options: [.mappedIfSafe])
         guard !data.isEmpty else { return nil }
@@ -168,7 +168,7 @@ actor SessionIndexer {
         return try buildSummaryFull(for: url, builder: &builder)
     }
 
-    private nonisolated func buildSummaryFull(for url: URL, builder: inout SessionSummaryBuilder) throws -> SessionSummary? {
+    private func buildSummaryFull(for url: URL, builder: inout SessionSummaryBuilder) throws -> SessionSummary? {
         let data = try Data(contentsOf: url, options: [.mappedIfSafe])
         guard !data.isEmpty else { return nil }
         let newline: UInt8 = 0x0A
@@ -187,6 +187,16 @@ actor SessionIndexer {
         if let result = builder.build(for: url) { return result }
         if let error = lastError { throw error }
         return nil
+    }
+
+    // Public API for background enrichment
+    func enrich(url: URL) async throws -> SessionSummary? {
+        let values = try url.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey])
+        var builder = SessionSummaryBuilder()
+        if let size = values.fileSize { builder.setFileSize(UInt64(size)) }
+        if let m = values.contentModificationDate { builder.seedLastUpdated(m) }
+        if let tailDate = readTailTimestamp(url: url) { builder.seedLastUpdated(tailDate) }
+        return try buildSummaryFull(for: url, builder: &builder)
     }
 
     // MARK: - Fulltext scanning
@@ -212,7 +222,7 @@ actor SessionIndexer {
     }
 
     // MARK: - Tail timestamp helper
-    private nonisolated func readTailTimestamp(url: URL) -> Date? {
+    private func readTailTimestamp(url: URL) -> Date? {
         guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
         defer { try? handle.close() }
         let fileSize = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.uint64Value ?? 0

@@ -20,6 +20,7 @@ final class SessionListViewModel: ObservableObject {
     private var allSessions: [SessionSummary] = []
     private var fulltextMatches: Set<String> = [] // SessionSummary.id set
     private var fulltextTask: Task<Void, Never>?
+    private var enrichmentTask: Task<Void, Never>?
 
     init(
         preferences: SessionPreferencesStore,
@@ -40,6 +41,7 @@ final class SessionListViewModel: ObservableObject {
             allSessions = sessions
             await computeCalendarCaches()
             applyFilters()
+            startBackgroundEnrichment()
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -206,4 +208,49 @@ final class SessionListViewModel: ObservableObject {
 
     // MARK: - Calendar caches (placeholder for future optimization)
     private func computeCalendarCaches() async { }
+
+    // MARK: - Background enrichment
+    private func startBackgroundEnrichment() {
+        enrichmentTask?.cancel()
+        let sessions = allSessions // snapshot
+        enrichmentTask = Task { [weak self] in
+            guard let self else { return }
+            let concurrency = max(2, ProcessInfo.processInfo.processorCount / 2)
+            try? await withThrowingTaskGroup(of: (String, SessionSummary)?.self) { group in
+                var iterator = sessions.makeIterator()
+                func addNext(_ n: Int) {
+                    for _ in 0..<n {
+                        guard let s = iterator.next() else { return }
+                        group.addTask { [weak self] in
+                            guard let self else { return nil }
+                            if let enriched = try await self.indexer.enrich(url: s.fileURL) {
+                                return (s.id, enriched)
+                            }
+                            return nil
+                        }
+                    }
+                }
+                addNext(concurrency)
+                var updatesBuffer: [(String, SessionSummary)] = []
+                func flush() async {
+                    guard !updatesBuffer.isEmpty else { return }
+                    await MainActor.run {
+                        var map = Dictionary(uniqueKeysWithValues: self.allSessions.map { ($0.id, $0) })
+                        for (id, item) in updatesBuffer { map[id] = item }
+                        self.allSessions = Array(map.values)
+                        self.applyFilters()
+                    }
+                    updatesBuffer.removeAll(keepingCapacity: true)
+                }
+                while let result = try await group.next() {
+                    if let (id, enriched) = result {
+                        updatesBuffer.append((id, enriched))
+                        if updatesBuffer.count >= 10 { await flush() }
+                    }
+                    addNext(1)
+                }
+                await flush()
+            }
+        }
+    }
 }
