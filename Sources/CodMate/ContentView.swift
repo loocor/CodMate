@@ -17,8 +17,8 @@ struct ContentView: View {
 
     init(viewModel: SessionListViewModel) {
         self.viewModel = viewModel
-        let initialSelection = viewModel.navigationSelection
-        _navigationSelection = State(initialValue: initialSelection)
+        let initialSelection: SessionNavigationItem = viewModel.navigationSelection
+        _navigationSelection = State<SessionNavigationItem>(initialValue: initialSelection)
     }
 
     var body: some View {
