@@ -13,8 +13,8 @@ struct SessionNavigationView: View {
         VStack(spacing: 0) {
             // 顶部固定：All Sessions
             allSessionsRow
-                .padding(.horizontal, 6)
-                .padding(.vertical, 6)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 8)
 
             Divider()
 
@@ -23,6 +23,8 @@ struct SessionNavigationView: View {
                 root: viewModel.pathTreeRoot,
                 selectedPath: $viewModel.selectedPath
             )
+            .padding(.horizontal, 8)
+            .padding(.top, 8)  // Add 8pt spacing below divider
             .frame(maxHeight: .infinity)
 
             // 底部固定：日历区域（与目录树间隔 8pt）
@@ -44,25 +46,29 @@ struct SessionNavigationView: View {
 
     private var allSessionsRow: some View {
         let isSelected = viewModel.selectedPath == nil && viewModel.selectedDay == nil
-        
+
         return HStack(spacing: 8) {
             Image(systemName: "tray.full")
                 .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
+                .font(.caption)
+
             Text("All Sessions")
-                .font(.headline)
+                .font(.caption)
+
             Spacer(minLength: 8)
+
             if isLoading {
                 ProgressView().controlSize(.small)
             } else {
                 Text(totalCount > 0 ? "\(totalCount)" : "—")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.tertiary)
             }
         }
-        .padding(.horizontal, 4)
-        .padding(.vertical, 2)
-        .background(isSelected ? Color.accentColor.opacity(0.1) : Color.clear)
-        .cornerRadius(6)
+        .frame(height: 16)
+        .padding(8)
+        .background(isSelected ? Color.accentColor.opacity(0.5) : Color.clear)
+        .cornerRadius(8)
         .contentShape(Rectangle())
         .onTapGesture {
             viewModel.clearAllFilters()
@@ -70,7 +76,7 @@ struct SessionNavigationView: View {
     }
 
     private var calendarSection: some View {
-        return VStack(spacing: 6) {
+        return VStack(spacing: 4) {
             calendarHeader
 
             Picker("", selection: $dimension) {
@@ -92,9 +98,8 @@ struct SessionNavigationView: View {
                 viewModel.setSelectedDay(picked)
             }
         }
-        .frame(height: 240)
-        .padding(.horizontal, 6)
-        .padding(.bottom, 6)
+        .frame(height: 280)
+        .padding(8)
     }
 
     private var calendarHeader: some View {
@@ -105,7 +110,7 @@ struct SessionNavigationView: View {
             return df.string(from: monthStart)
         }()
         return GeometryReader { geometry in
-            let columnWidth = geometry.size.width / 7
+            let columnWidth = geometry.size.width / 16
             HStack(spacing: 0) {
                 Button {
                     monthStart = cal.date(byAdding: .month, value: -1, to: monthStart)!

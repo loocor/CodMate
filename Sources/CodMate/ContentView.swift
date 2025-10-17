@@ -1,6 +1,6 @@
+import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
-import AppKit
 
 struct ContentView: View {
     @ObservedObject var viewModel: SessionListViewModel
@@ -21,99 +21,103 @@ struct ContentView: View {
     var body: some View {
         GeometryReader { geometry in
             let sidebarMaxWidth = geometry.size.width * 0.25
-            
+
             NavigationSplitView(columnVisibility: $columnVisibility) {
                 SessionNavigationView(
                     totalCount: viewModel.totalSessionCount,
                     isLoading: viewModel.isLoading
                 )
                 .environmentObject(viewModel)
-                .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: max(220, sidebarMaxWidth))
-        } content: {
-            SessionListColumnView(
-                sections: viewModel.sections,
-                selection: $selection,
-                sortOrder: $viewModel.sortOrder,
-                isLoading: viewModel.isLoading,
-                onResume: resumeFromList,
-                onReveal: { viewModel.reveal(session: $0) },
-                onDeleteRequest: handleDeleteRequest
-            )
-            .frame(minWidth: 320)
-        } detail: {
-            detailColumn
-        }
-        .navigationSplitViewStyle(.balanced)
-        .task {
-            await viewModel.refreshSessions()
-        }
-        .onChange(of: viewModel.sections) { _, _ in
-            normalizeSelection()
-        }
-        .onChange(of: viewModel.errorMessage) { _, message in
-            guard let message else { return }
-            alertState = AlertState(title: "Operation Failed", message: message)
-            viewModel.errorMessage = nil
-        }
-        .onChange(of: viewModel.selectedDay) { _, _ in
-            // 当日期过滤变更时，重新加载该范围内的 sessions
-            Task { await viewModel.refreshSessions() }
-        }
-        .toolbar {
-            ToolbarItem(placement: .automatic) {
-                TextField("Search Sessions", text: $viewModel.searchText)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 260)
+                .navigationSplitViewColumnWidth(
+                    min: 250, ideal: 270, max: max(250, sidebarMaxWidth))
+            } content: {
+                SessionListColumnView(
+                    sections: viewModel.sections,
+                    selection: $selection,
+                    sortOrder: $viewModel.sortOrder,
+                    isLoading: viewModel.isLoading,
+                    onResume: resumeFromList,
+                    onReveal: { viewModel.reveal(session: $0) },
+                    onDeleteRequest: handleDeleteRequest
+                )
+                .frame(minWidth: 320)
+            } detail: {
+                detailColumn
             }
-            ToolbarItem(placement: .automatic) {
-                Button {
-                    Task { await viewModel.refreshSessions() }
-                } label: {
-                    Label("Refresh", systemImage: "arrow.clockwise.circle.fill")
+            .navigationSplitViewStyle(.balanced)
+            .task {
+                await viewModel.refreshSessions()
+            }
+            .onChange(of: viewModel.sections) { _, _ in
+                normalizeSelection()
+            }
+            .onChange(of: viewModel.errorMessage) { _, message in
+                guard let message else { return }
+                alertState = AlertState(title: "Operation Failed", message: message)
+                viewModel.errorMessage = nil
+            }
+            .onChange(of: viewModel.selectedDay) { _, _ in
+                // 当日期过滤变更时，重新加载该范围内的 sessions
+                Task { await viewModel.refreshSessions() }
+            }
+            .toolbar {
+                ToolbarItem(placement: .automatic) {
+                    TextField("Search Sessions", text: $viewModel.searchText)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 260)
                 }
-                .controlSize(.large)
-                .help("Refresh session index")
-            }
-        }
-.alert(item: $alertState) { state in
-            Alert(
-                title: Text(state.title),
-                message: Text(state.message),
-                dismissButton: .default(Text("OK"))
-            )
-        }
-.alert("Delete selected sessions?", isPresented: $deleteConfirmationPresented, presenting: Array(selection)) { ids in
-            Button("Cancel", role: .cancel) {}
-            Button("Move to Trash", role: .destructive) {
-                deleteSelections(ids: ids)
-            }
-        } message: { _ in
-            Text("Session files will be moved to Trash and can be restored in Finder.")
-        }
-        .fileImporter(
-            isPresented: $selectingSessionsRoot,
-            allowedContentTypes: [.folder],
-            allowsMultipleSelection: false
-        ) { result in
-            handleFolderSelection(result: result, update: viewModel.updateSessionsRoot)
-        }
-        .fileImporter(
-            isPresented: $selectingExecutable,
-            allowedContentTypes: [.unixExecutable],
-            allowsMultipleSelection: false
-        ) { result in
-            handleExecutableSelection(result: result)
-        }
-        .overlay(alignment: .bottom) {
-            if let output = resumeOutput {
-                ToastView(text: output) {
-                    withAnimation {
-                        resumeOutput = nil
+                ToolbarItem(placement: .automatic) {
+                    Button {
+                        Task { await viewModel.refreshSessions() }
+                    } label: {
+                        Label("Refresh", systemImage: "arrow.clockwise.circle.fill")
                     }
+                    .controlSize(.large)
+                    .help("Refresh session index")
                 }
-                .padding(.bottom, 20)
             }
-        }
+            .alert(item: $alertState) { state in
+                Alert(
+                    title: Text(state.title),
+                    message: Text(state.message),
+                    dismissButton: .default(Text("OK"))
+                )
+            }
+            .alert(
+                "Delete selected sessions?", isPresented: $deleteConfirmationPresented,
+                presenting: Array(selection)
+            ) { ids in
+                Button("Cancel", role: .cancel) {}
+                Button("Move to Trash", role: .destructive) {
+                    deleteSelections(ids: ids)
+                }
+            } message: { _ in
+                Text("Session files will be moved to Trash and can be restored in Finder.")
+            }
+            .fileImporter(
+                isPresented: $selectingSessionsRoot,
+                allowedContentTypes: [.folder],
+                allowsMultipleSelection: false
+            ) { result in
+                handleFolderSelection(result: result, update: viewModel.updateSessionsRoot)
+            }
+            .fileImporter(
+                isPresented: $selectingExecutable,
+                allowedContentTypes: [.unixExecutable],
+                allowsMultipleSelection: false
+            ) { result in
+                handleExecutableSelection(result: result)
+            }
+            .overlay(alignment: .bottom) {
+                if let output = resumeOutput {
+                    ToastView(text: output) {
+                        withAnimation {
+                            resumeOutput = nil
+                        }
+                    }
+                    .padding(.bottom, 20)
+                }
+            }
         }
     }
 
@@ -153,7 +157,7 @@ struct ContentView: View {
                 Label("Resume", systemImage: "play.fill")
             }
             .disabled(isPerformingAction || focusedSummary == nil)
-            
+
             Button {
                 if let focused = focusedSummary { viewModel.reveal(session: focused) }
             } label: {
@@ -184,7 +188,8 @@ struct ContentView: View {
         }
 
         let allSummaries = summaryLookup
-        return selection
+        return
+            selection
             .compactMap { allSummaries[$0] }
             .sorted { lhs, rhs in
                 (lhs.lastUpdatedAt ?? lhs.startedAt) > (rhs.lastUpdatedAt ?? rhs.startedAt)
@@ -193,9 +198,10 @@ struct ContentView: View {
     }
 
     private var summaryLookup: [SessionSummary.ID: SessionSummary] {
-        Dictionary(uniqueKeysWithValues: viewModel.sections
-            .flatMap(\.sessions)
-            .map { ($0.id, $0) })
+        Dictionary(
+            uniqueKeysWithValues: viewModel.sections
+                .flatMap(\.sessions)
+                .map { ($0.id, $0) })
     }
 
     private func normalizeSelection() {
@@ -247,8 +253,9 @@ struct ContentView: View {
             await MainActor.run {
                 isPerformingAction = false
                 switch result {
-                case let .success(processResult):
-                    resumeOutput = processResult.output.isEmpty ? "Session resumed." : processResult.output
+                case .success(let processResult):
+                    resumeOutput =
+                        processResult.output.isEmpty ? "Session resumed." : processResult.output
                     Task {
                         try? await Task.sleep(nanoseconds: 4_000_000_000)
                         await MainActor.run {
@@ -257,8 +264,9 @@ struct ContentView: View {
                             }
                         }
                     }
-                case let .failure(error):
-                    alertState = AlertState(title: "Resume Failed", message: error.localizedDescription)
+                case .failure(let error):
+                    alertState = AlertState(
+                        title: "Resume Failed", message: error.localizedDescription)
                 }
             }
         }
@@ -269,31 +277,36 @@ struct ContentView: View {
         update: @escaping (URL) async -> Void
     ) {
         switch result {
-        case let .success(urls):
+        case .success(let urls):
             selectingSessionsRoot = false
             guard let url = urls.first else { return }
             Task { await update(url) }
-        case let .failure(error):
+        case .failure(let error):
             selectingSessionsRoot = false
-            alertState = AlertState(title: "Failed to choose directory", message: error.localizedDescription)
+            alertState = AlertState(
+                title: "Failed to choose directory", message: error.localizedDescription)
         }
     }
 
     private func handleExecutableSelection(result: Result<[URL], Error>) {
         switch result {
-        case let .success(urls):
+        case .success(let urls):
             selectingExecutable = false
             guard let url = urls.first else { return }
             viewModel.updateExecutablePath(to: url)
-        case let .failure(error):
+        case .failure(let error):
             selectingExecutable = false
-            alertState = AlertState(title: "Failed to choose CLI", message: error.localizedDescription)
+            alertState = AlertState(
+                title: "Failed to choose CLI", message: error.localizedDescription)
         }
     }
 
     private var placeholder: some View {
-        ContentUnavailableView("Select a session", systemImage: "rectangle.and.text.magnifyingglass", description: Text("Pick a session from the middle list to view details."))
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        ContentUnavailableView(
+            "Select a session", systemImage: "rectangle.and.text.magnifyingglass",
+            description: Text("Pick a session from the middle list to view details.")
+        )
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
@@ -319,11 +332,19 @@ extension ContentView {
         lines.append("")
         for e in events {
             let prefix: String
-            switch e.actor { case .user: prefix = "**User**"; case .assistant: prefix = "**Assistant**"; case .tool: prefix = "**Tool**"; case .info: prefix = "**Info**" }
+            switch e.actor {
+            case .user: prefix = "**User**"
+            case .assistant: prefix = "**Assistant**"
+            case .tool: prefix = "**Tool**"
+            case .info: prefix = "**Info**"
+            }
             lines.append("\(prefix) · \(e.timestamp)\n")
             if let title = e.title { lines.append("> \(title)") }
             if let text = e.text, !text.isEmpty { lines.append(text) }
-            if let meta = e.metadata, !meta.isEmpty { lines.append(""); for k in meta.keys.sorted() { lines.append("- \(k): \(meta[k] ?? "")") } }
+            if let meta = e.metadata, !meta.isEmpty {
+                lines.append("")
+                for k in meta.keys.sorted() { lines.append("- \(k): \(meta[k] ?? "")") }
+            }
             lines.append("")
         }
         let md = lines.joined(separator: "\n")
@@ -331,6 +352,8 @@ extension ContentView {
         panel.title = "Export Markdown"
         panel.allowedContentTypes = [.plainText]
         panel.nameFieldStringValue = focused.displayName + ".md"
-        if panel.runModal() == .OK, let url = panel.url { try? md.data(using: .utf8)?.write(to: url) }
+        if panel.runModal() == .OK, let url = panel.url {
+            try? md.data(using: .utf8)?.write(to: url)
+        }
     }
 }
