@@ -5,30 +5,50 @@ struct SessionListColumnView: View {
     @Binding var selection: Set<SessionSummary.ID>
     @Binding var sortOrder: SessionSortOrder
     let isLoading: Bool
+    let isEnriching: Bool
+    let enrichmentProgress: Int
+    let enrichmentTotal: Int
     let onResume: (SessionSummary) -> Void
     let onReveal: (SessionSummary) -> Void
     let onDeleteRequest: (SessionSummary) -> Void
+    let onExportMarkdown: (SessionSummary) -> Void
 
     var body: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 0) {
             header
+                .padding(.horizontal, 16)
+                .padding(.top, 0)
+                .padding(.bottom, 8)
 
             if isLoading {
                 ProgressView("Scanning…")
                     .padding(.vertical)
+            } else if isEnriching {
+                VStack(spacing: 8) {
+                    ProgressView(value: Double(enrichmentProgress), total: Double(enrichmentTotal))
+                        .progressViewStyle(.linear)
+                        .frame(maxWidth: 200)
+
+                    Text("Enriching session data… \(enrichmentProgress)/\(enrichmentTotal)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.vertical)
             }
 
             List(selection: $selection) {
                 if sections.isEmpty && !isLoading {
                     ContentUnavailableView(
                         "No Sessions", systemImage: "tray",
-                        description: Text("Adjust directories or launch Codex CLI to generate new session logs."))
+                        description: Text(
+                            "Adjust directories or launch Codex CLI to generate new session logs."))
                 } else {
                     ForEach(sections) { section in
                         Section {
                             ForEach(section.sessions, id: \.id) { session in
                                 SessionListRowView(summary: session)
                                     .tag(session.id)
+                                    .listRowInsets(EdgeInsets())
                                     .contextMenu {
                                         Button {
                                             onResume(session)
@@ -39,6 +59,13 @@ struct SessionListColumnView: View {
                                             onReveal(session)
                                         } label: {
                                             Label("Reveal in Finder", systemImage: "folder")
+                                        }
+                                        Button {
+                                            onExportMarkdown(session)
+                                        } label: {
+                                            Label(
+                                                "Export Markdown",
+                                                systemImage: "square.and.arrow.down")
                                         }
                                         Divider()
                                         Button(role: .destructive) {
@@ -63,24 +90,27 @@ struct SessionListColumnView: View {
                     }
                 }
             }
-            .listStyle(.inset)
+            .listStyle(.plain)
+            .padding(.horizontal, 16)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
+        .padding(.vertical, 16)
     }
 
     private var header: some View {
         HStack(alignment: .center, spacing: 12) {
-            Picker("Sort", selection: $sortOrder) {
+            Picker("", selection: $sortOrder) {
                 ForEach(SessionSortOrder.allCases) { order in
-                    Text(order.title).tag(order)
+                    Text(order.title)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .tag(order)
                 }
             }
             .pickerStyle(.segmented)
-            .frame(width: 320)
-            Spacer(minLength: 0)
+            .labelsHidden()
+            .frame(maxWidth: .infinity)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity)
     }
 }
 
@@ -194,9 +224,13 @@ extension TimeInterval {
         selection: .constant(Set<String>()),
         sortOrder: .constant(.mostRecent),
         isLoading: false,
+        isEnriching: false,
+        enrichmentProgress: 0,
+        enrichmentTotal: 0,
         onResume: { session in print("Resume: \(session.displayName)") },
         onReveal: { session in print("Reveal: \(session.displayName)") },
-        onDeleteRequest: { session in print("Delete: \(session.displayName)") }
+        onDeleteRequest: { session in print("Delete: \(session.displayName)") },
+        onExportMarkdown: { session in print("Export: \(session.displayName)") }
     )
     .frame(width: 500, height: 600)
 }
@@ -207,9 +241,13 @@ extension TimeInterval {
         selection: .constant(Set<String>()),
         sortOrder: .constant(.mostRecent),
         isLoading: true,
+        isEnriching: false,
+        enrichmentProgress: 0,
+        enrichmentTotal: 0,
         onResume: { _ in },
         onReveal: { _ in },
-        onDeleteRequest: { _ in }
+        onDeleteRequest: { _ in },
+        onExportMarkdown: { _ in }
     )
     .frame(width: 500, height: 600)
 }
@@ -220,9 +258,13 @@ extension TimeInterval {
         selection: .constant(Set<String>()),
         sortOrder: .constant(.mostRecent),
         isLoading: false,
+        isEnriching: false,
+        enrichmentProgress: 0,
+        enrichmentTotal: 0,
         onResume: { _ in },
         onReveal: { _ in },
-        onDeleteRequest: { _ in }
+        onDeleteRequest: { _ in },
+        onExportMarkdown: { _ in }
     )
     .frame(width: 500, height: 600)
 }

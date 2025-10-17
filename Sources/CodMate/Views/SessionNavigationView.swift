@@ -35,6 +35,8 @@ struct SessionNavigationView: View {
         .task {
             viewModel.ensurePathTree()
             _ = viewModel.calendarCounts(for: monthStart, dimension: dimension)
+            // Ensure dimension is synced on startup
+            viewModel.dateDimension = dimension
         }
         .onChange(of: monthStart) { _, m in
             _ = viewModel.calendarCounts(for: m, dimension: dimension)
@@ -45,7 +47,7 @@ struct SessionNavigationView: View {
     }
 
     private var allSessionsRow: some View {
-        let isSelected = viewModel.selectedPath == nil && viewModel.selectedDay == nil
+        let isSelected = viewModel.selectedPath == nil
 
         return HStack(spacing: 8) {
             Image(systemName: "tray.full")

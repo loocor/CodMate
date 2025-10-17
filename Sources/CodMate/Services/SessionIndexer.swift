@@ -7,23 +7,24 @@ fileprivate actor DiskCache {
         let modificationTime: TimeInterval?
         let summary: SessionSummary
     }
-    
+
     private var map: [String: Entry] = [:]
     private let url: URL
-    
+
     init(fileManager: FileManager = .default) {
         let dir = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first!
             .appendingPathComponent("CodMate", isDirectory: true)
         try? fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
         url = dir.appendingPathComponent("sessionIndex-v1.json")
-        
+
         // 加载缓存
         if let data = try? Data(contentsOf: url),
-           let entries = try? JSONDecoder().decode([Entry].self, from: data) {
+            let entries = try? JSONDecoder().decode([Entry].self, from: data)
+        {
             map = Dictionary(uniqueKeysWithValues: entries.map { ($0.path, $0) })
         }
     }
-    
+
     func get(path: String, modificationDate: Date?) -> SessionSummary? {
         guard let entry = map[path] else { return nil }
         let mt = modificationDate?.timeIntervalSince1970
@@ -32,7 +33,7 @@ fileprivate actor DiskCache {
         }
         return nil
     }
-    
+
     func set(path: String, modificationDate: Date?, summary: SessionSummary) {
         let mt = modificationDate?.timeIntervalSince1970
         map[path] = Entry(path: path, modificationTime: mt, summary: summary)
@@ -83,16 +84,24 @@ actor SessionIndexer {
                     guard let url = iterator.next() else { return }
                     group.addTask { [weak self] in
                         guard let self else { return nil }
-                        let values = try url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey, .isRegularFileKey])
+                        let values = try url.resourceValues(forKeys: [
+                            .contentModificationDateKey, .fileSizeKey, .isRegularFileKey,
+                        ])
                         guard values.isRegularFile == true else { return nil }
 
                         // In-memory cache
-                        if let cached = await self.cachedSummary(for: url as NSURL, modificationDate: values.contentModificationDate) {
+                        if let cached = await self.cachedSummary(
+                            for: url as NSURL, modificationDate: values.contentModificationDate)
+                        {
                             return cached
                         }
                         // Disk cache
-                        if let disk = await self.diskCache.get(path: url.path, modificationDate: values.contentModificationDate) {
-                            await self.store(summary: disk, for: url as NSURL, modificationDate: values.contentModificationDate)
+                        if let disk = await self.diskCache.get(
+                            path: url.path, modificationDate: values.contentModificationDate)
+                        {
+                            await self.store(
+                                summary: disk, for: url as NSURL,
+                                modificationDate: values.contentModificationDate)
                             return disk
                         }
 
@@ -100,9 +109,16 @@ actor SessionIndexer {
                         if let size = values.fileSize { builder.setFileSize(UInt64(size)) }
                         // Seed updatedAt by fs metadata to avoid full scan for recency
                         if let m = values.contentModificationDate { builder.seedLastUpdated(m) }
-                        guard let summary = try await self.buildSummaryFast(for: url, builder: &builder) else { return nil }
-                        await self.store(summary: summary, for: url as NSURL, modificationDate: values.contentModificationDate)
-                        await self.diskCache.set(path: url.path, modificationDate: values.contentModificationDate, summary: summary)
+                        guard
+                            let summary = try await self.buildSummaryFast(
+                                for: url, builder: &builder)
+                        else { return nil }
+                        await self.store(
+                            summary: summary, for: url as NSURL,
+                            modificationDate: values.contentModificationDate)
+                        await self.diskCache.set(
+                            path: url.path, modificationDate: values.contentModificationDate,
+                            summary: summary)
                         return summary
                     }
                 }
@@ -156,14 +172,14 @@ actor SessionIndexer {
                 u.appendPathComponent("\(comps.month!)", isDirectory: true)
                 u.appendPathComponent("\(comps.day!)", isDirectory: true)
                 return (u, 3)
-            case let .day(d):
+            case .day(let d):
                 let day = cal.startOfDay(for: d)
                 let comps = cal.dateComponents([.year, .month, .day], from: day)
                 var u = root.appendingPathComponent("\(comps.year!)", isDirectory: true)
                 u.appendPathComponent("\(comps.month!)", isDirectory: true)
                 u.appendPathComponent("\(comps.day!)", isDirectory: true)
                 return (u, 3)
-            case let .month(d):
+            case .month(let d):
                 let comps = cal.dateComponents([.year, .month], from: d)
                 var u = root.appendingPathComponent("\(comps.year!)", isDirectory: true)
                 u.appendPathComponent("\(comps.month!)", isDirectory: true)
@@ -175,15 +191,19 @@ actor SessionIndexer {
 
         let enumeratorURL = base
         var isDir: ObjCBool = false
-        if !fileManager.fileExists(atPath: enumeratorURL.path, isDirectory: &isDir) || !isDir.boolValue {
+        if !fileManager.fileExists(atPath: enumeratorURL.path, isDirectory: &isDir)
+            || !isDir.boolValue
+        {
             return []
         }
 
-        guard let enumerator = fileManager.enumerator(
-            at: enumeratorURL,
-            includingPropertiesForKeys: [.isRegularFileKey],
-            options: [.skipsHiddenFiles, .skipsPackageDescendants]
-        ) else { return [] }
+        guard
+            let enumerator = fileManager.enumerator(
+                at: enumeratorURL,
+                includingPropertiesForKeys: [.isRegularFileKey],
+                options: [.skipsHiddenFiles, .skipsPackageDescendants]
+            )
+        else { return [] }
 
         for case let fileURL as URL in enumerator {
             if fileURL.pathExtension.lowercased() == "jsonl" {
@@ -194,28 +214,48 @@ actor SessionIndexer {
     }
 
     // Sidebar: month daily counts without parsing content (fast)
-    func computeCalendarCounts(root: URL, monthStart: Date, dimension: DateDimension) async -> [Int: Int] {
+    func computeCalendarCounts(root: URL, monthStart: Date, dimension: DateDimension) async -> [Int:
+        Int]
+    {
         var counts: [Int: Int] = [:]
         let cal = Calendar.current
         let comps = cal.dateComponents([.year, .month], from: monthStart)
         guard let year = comps.year, let month = comps.month else { return [:] }
         var monthURL = root.appendingPathComponent("\(year)", isDirectory: true)
         monthURL.appendPathComponent("\(month)", isDirectory: true)
-        guard let enumerator = fileManager.enumerator(at: monthURL, includingPropertiesForKeys: [.isRegularFileKey, .contentModificationDateKey], options: [.skipsHiddenFiles, .skipsPackageDescendants]) else { return [:] }
-        
+        guard
+            let enumerator = fileManager.enumerator(
+                at: monthURL,
+                includingPropertiesForKeys: [.isRegularFileKey, .contentModificationDateKey],
+                options: [.skipsHiddenFiles, .skipsPackageDescendants])
+        else { return [:] }
+
         // Collect URLs synchronously first to avoid Swift 6 async/iterator issues
         let urls = enumerator.compactMap { $0 as? URL }
-        
+
         for url in urls {
             guard url.pathExtension.lowercased() == "jsonl" else { continue }
             switch dimension {
             case .created:
-                if let day = Int(url.deletingLastPathComponent().lastPathComponent) { counts[day, default: 0] += 1 }
-            case .updated:
-                let values = try? url.resourceValues(forKeys: [.contentModificationDateKey])
-                if let date = values?.contentModificationDate, cal.isDate(date, equalTo: monthStart, toGranularity: .month) {
-                    let day = cal.component(.day, from: date)
+                if let day = Int(url.deletingLastPathComponent().lastPathComponent) {
                     counts[day, default: 0] += 1
+                }
+            case .updated:
+                // For updated dimension, use actual lastUpdatedAt from session content or tail timestamp
+                if let tailDate = readTailTimestamp(url: url),
+                    cal.isDate(tailDate, equalTo: monthStart, toGranularity: .month)
+                {
+                    let day = cal.component(.day, from: tailDate)
+                    counts[day, default: 0] += 1
+                } else {
+                    // Fallback to file modification date if tail timestamp unavailable
+                    let values = try? url.resourceValues(forKeys: [.contentModificationDateKey])
+                    if let date = values?.contentModificationDate,
+                        cal.isDate(date, equalTo: monthStart, toGranularity: .month)
+                    {
+                        let day = cal.component(.day, from: date)
+                        counts[day, default: 0] += 1
+                    }
                 }
             }
         }
@@ -225,11 +265,16 @@ actor SessionIndexer {
     // Sidebar: collect cwd counts using disk cache or quick head-scan
     func collectCWDCounts(root: URL) async -> [String: Int] {
         var result: [String: Int] = [:]
-        guard let enumerator = fileManager.enumerator(at: root, includingPropertiesForKeys: [.isRegularFileKey, .contentModificationDateKey], options: [.skipsHiddenFiles, .skipsPackageDescendants]) else { return [:] }
-        
+        guard
+            let enumerator = fileManager.enumerator(
+                at: root,
+                includingPropertiesForKeys: [.isRegularFileKey, .contentModificationDateKey],
+                options: [.skipsHiddenFiles, .skipsPackageDescendants])
+        else { return [:] }
+
         // Collect URLs synchronously first to avoid Swift 6 async/iterator issues
         let urls = enumerator.compactMap { $0 as? URL }
-        
+
         await withTaskGroup(of: (String, Int)?.self) { group in
             for url in urls {
                 guard url.pathExtension.lowercased() == "jsonl" else { continue }
@@ -237,7 +282,9 @@ actor SessionIndexer {
                     guard let self else { return nil }
                     let values = try? url.resourceValues(forKeys: [.contentModificationDateKey])
                     let m = values?.contentModificationDate
-                    if let cached = await self.diskCache.get(path: url.path, modificationDate: m), !cached.cwd.isEmpty {
+                    if let cached = await self.diskCache.get(path: url.path, modificationDate: m),
+                        !cached.cwd.isEmpty
+                    {
                         return (cached.cwd, 1)
                     }
                     if let cwd = self.fastExtractCWD(url: url) { return (cwd, 1) }
@@ -252,15 +299,18 @@ actor SessionIndexer {
     }
 
     nonisolated private func fastExtractCWD(url: URL) -> String? {
-        guard let data = try? Data(contentsOf: url, options: [.mappedIfSafe]), !data.isEmpty else { return nil }
+        guard let data = try? Data(contentsOf: url, options: [.mappedIfSafe]), !data.isEmpty else {
+            return nil
+        }
         let newline: UInt8 = 0x0A
         let carriageReturn: UInt8 = 0x0D
-        for var slice in data.split(separator: newline, omittingEmptySubsequences: true).prefix(200) {
+        for var slice in data.split(separator: newline, omittingEmptySubsequences: true).prefix(200)
+        {
             if slice.last == carriageReturn { slice = slice.dropLast() }
             if let row = try? decoder.decode(SessionRow.self, from: Data(slice)) {
                 switch row.kind {
-                case let .sessionMeta(p): return p.cwd
-                case let .turnContext(p): if let c = p.cwd { return c }
+                case .sessionMeta(let p): return p.cwd
+                case .turnContext(let p): if let c = p.cwd { return c }
                 default: break
                 }
             }
@@ -268,7 +318,9 @@ actor SessionIndexer {
         return nil
     }
 
-    private func buildSummaryFast(for url: URL, builder: inout SessionSummaryBuilder) throws -> SessionSummary? {
+    private func buildSummaryFast(for url: URL, builder: inout SessionSummaryBuilder) throws
+        -> SessionSummary?
+    {
         // Memory-map file (fast and low memory overhead)
         let data = try Data(contentsOf: url, options: [.mappedIfSafe])
         guard !data.isEmpty else { return nil }
@@ -301,7 +353,9 @@ actor SessionIndexer {
         return try buildSummaryFull(for: url, builder: &builder)
     }
 
-    private func buildSummaryFull(for url: URL, builder: inout SessionSummaryBuilder) throws -> SessionSummary? {
+    private func buildSummaryFull(for url: URL, builder: inout SessionSummaryBuilder) throws
+        -> SessionSummary?
+    {
         let data = try Data(contentsOf: url, options: [.mappedIfSafe])
         guard !data.isEmpty else { return nil }
         let newline: UInt8 = 0x0A
@@ -342,7 +396,9 @@ actor SessionIndexer {
         while let chunk = try? handle.read(upToCount: chunkSize), !chunk.isEmpty {
             var combined = carry
             combined.append(chunk)
-            if let s = String(data: combined, encoding: .utf8), s.range(of: needle, options: .caseInsensitive) != nil {
+            if let s = String(data: combined, encoding: .utf8),
+                s.range(of: needle, options: .caseInsensitive) != nil
+            {
                 return true
             }
             // keep tail to catch matches across boundaries
@@ -350,7 +406,11 @@ actor SessionIndexer {
             carry = combined.suffix(keep)
             if Task.isCancelled { return false }
         }
-        if !carry.isEmpty, let s = String(data: carry, encoding: .utf8), s.range(of: needle, options: .caseInsensitive) != nil { return true }
+        if !carry.isEmpty, let s = String(data: carry, encoding: .utf8),
+            s.range(of: needle, options: .caseInsensitive) != nil
+        {
+            return true
+        }
         return false
     }
 
@@ -358,7 +418,9 @@ actor SessionIndexer {
     private func readTailTimestamp(url: URL) -> Date? {
         guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
         defer { try? handle.close() }
-        let fileSize = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.uint64Value ?? 0
+        let fileSize =
+            (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?
+            .uint64Value ?? 0
         let chunkSize: UInt64 = 64 * 1024
         let offset = fileSize > chunkSize ? fileSize - chunkSize : 0
         do { try handle.seek(toOffset: offset) } catch { return nil }
@@ -380,11 +442,15 @@ actor SessionIndexer {
     // Global count for sidebar label
     func countAllSessions(root: URL) async -> Int {
         var total = 0
-        guard let enumerator = fileManager.enumerator(at: root, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles, .skipsPackageDescendants]) else { return 0 }
-        
+        guard
+            let enumerator = fileManager.enumerator(
+                at: root, includingPropertiesForKeys: [.isRegularFileKey],
+                options: [.skipsHiddenFiles, .skipsPackageDescendants])
+        else { return 0 }
+
         // Collect URLs synchronously first to avoid Swift 6 async/iterator issues
         let urls = enumerator.compactMap { $0 as? URL }
-        
+
         for url in urls {
             if url.pathExtension.lowercased() == "jsonl" { total += 1 }
         }

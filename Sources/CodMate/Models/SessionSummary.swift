@@ -29,7 +29,16 @@ struct SessionSummary: Identifiable, Hashable, Sendable, Codable {
     }
 
     var displayName: String {
-        fileURL.deletingPathExtension().lastPathComponent
+        let filename = fileURL.deletingPathExtension().lastPathComponent
+        // Extract session ID from filename like "rollout-2025-10-17T14-11-18-0199f124-8c38-7140-969c-396260d0099c"
+        // Keep only the last 5 segments after removing rollout + timestamp (5 parts)
+        let components = filename.components(separatedBy: "-")
+        if components.count >= 7 {
+            // Skip first component (rollout) and next 5 components (timestamp), keep last 5
+            let sessionIdComponents = Array(components.dropFirst(6))
+            return sessionIdComponents.joined(separator: "-")
+        }
+        return filename
     }
 
     var instructionSnippet: String {
@@ -68,7 +77,7 @@ struct SessionSummary: Identifiable, Hashable, Sendable, Codable {
             originator,
             instructions ?? "",
             model ?? "",
-            approvalPolicy ?? ""
+            approvalPolicy ?? "",
         ].map { $0.lowercased() }
 
         let needle = term.lowercased()
@@ -98,13 +107,17 @@ enum SessionSortOrder: String, CaseIterable, Identifiable {
     func sort(_ sessions: [SessionSummary]) -> [SessionSummary] {
         switch self {
         case .mostRecent:
-            return sessions.sorted { ($0.lastUpdatedAt ?? $0.startedAt) > ($1.lastUpdatedAt ?? $1.startedAt) }
+            return sessions.sorted {
+                ($0.lastUpdatedAt ?? $0.startedAt) > ($1.lastUpdatedAt ?? $1.startedAt)
+            }
         case .longestDuration:
             return sessions.sorted { $0.duration > $1.duration }
         case .mostActivity:
             return sessions.sorted { $0.eventCount > $1.eventCount }
         case .alphabetical:
-            return sessions.sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
+            return sessions.sorted {
+                $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
+            }
         case .largestSize:
             return sessions.sorted { ($0.fileSizeBytes ?? 0) > ($1.fileSizeBytes ?? 0) }
         }
