@@ -1,19 +1,46 @@
 import Foundation
 
-// Simple disk cache for session summaries
-actor SessionCacheStore {
-    private var cache: [String: (modificationDate: Date?, summary: SessionSummary)] = [:]
+// 轻量级磁盘缓存
+fileprivate actor DiskCache {
+    private struct Entry: Codable {
+        let path: String
+        let modificationTime: TimeInterval?
+        let summary: SessionSummary
+    }
+    
+    private var map: [String: Entry] = [:]
+    private let url: URL
+    
+    init(fileManager: FileManager = .default) {
+        let dir = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first!
+            .appendingPathComponent("CodMate", isDirectory: true)
+        try? fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
+        url = dir.appendingPathComponent("sessionIndex-v1.json")
+        
+        // 加载缓存
+        if let data = try? Data(contentsOf: url),
+           let entries = try? JSONDecoder().decode([Entry].self, from: data) {
+            map = Dictionary(uniqueKeysWithValues: entries.map { ($0.path, $0) })
+        }
+    }
     
     func get(path: String, modificationDate: Date?) -> SessionSummary? {
-        guard let entry = cache[path] else { return nil }
-        if entry.modificationDate == modificationDate {
+        guard let entry = map[path] else { return nil }
+        let mt = modificationDate?.timeIntervalSince1970
+        if entry.modificationTime == mt {
             return entry.summary
         }
         return nil
     }
     
     func set(path: String, modificationDate: Date?, summary: SessionSummary) {
-        cache[path] = (modificationDate, summary)
+        let mt = modificationDate?.timeIntervalSince1970
+        map[path] = Entry(path: path, modificationTime: mt, summary: summary)
+        // 简单的保存逻辑
+        let entries = Array(map.values)
+        if let data = try? JSONEncoder().encode(entries) {
+            try? data.write(to: url, options: .atomic)
+        }
     }
 }
 
@@ -21,7 +48,7 @@ actor SessionIndexer {
     private let fileManager: FileManager
     private let decoder: JSONDecoder
     private let cache = NSCache<NSURL, CacheEntry>()
-    private let diskCache = SessionCacheStore()
+    private let diskCache: DiskCache
 
     private final class CacheEntry {
         let modificationDate: Date?
@@ -35,6 +62,7 @@ actor SessionIndexer {
 
     init(fileManager: FileManager = .default) {
         self.fileManager = fileManager
+        self.diskCache = DiskCache(fileManager: fileManager)
         decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
     }

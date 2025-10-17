@@ -16,12 +16,10 @@ actor SessionCacheStore {
             .appendingPathComponent("CodMate", isDirectory: true)
         try? fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
         url = dir.appendingPathComponent("sessionIndex-v1.json")
-        load()
-    }
-
-    private func load() {
-        guard let data = try? Data(contentsOf: url) else { return }
-        if let entries = try? JSONDecoder().decode([Entry].self, from: data) {
+        
+        // 在 init 中同步加载缓存（init 是 nonisolated 的）
+        if let data = try? Data(contentsOf: url),
+           let entries = try? JSONDecoder().decode([Entry].self, from: data) {
             map = Dictionary(uniqueKeysWithValues: entries.map { ($0.path, $0) })
         }
     }
