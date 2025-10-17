@@ -1,7 +1,6 @@
 import SwiftUI
 
 struct SessionNavigationView: View {
-    @Binding var selection: SessionNavigationItem
     let totalCount: Int
     let isLoading: Bool
     @EnvironmentObject private var viewModel: SessionListViewModel
@@ -9,13 +8,6 @@ struct SessionNavigationView: View {
     @State private var monthStart: Date = Calendar.current.date(
         from: Calendar.current.dateComponents([.year, .month], from: Date()))!
     @State private var dimension: DateDimension = .updated
-
-    private var selectionBinding: Binding<SessionNavigationItem?> {
-        Binding<SessionNavigationItem?>(
-            get: { selection },
-            set: { selection = $0 ?? .allSessions }
-        )
-    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -27,13 +19,10 @@ struct SessionNavigationView: View {
             Divider()
 
             // 中部可滚动：目录树
-            ScrollView(.vertical) {
-                PathTreeView(root: viewModel.pathTreeRoot) { prefix in
-                    selection = .pathPrefix(prefix)
-                }
-                .environment(\.defaultMinListRowHeight, 18)
-                .environment(\.controlSize, .small)
-            }
+            PathTreeView(
+                root: viewModel.pathTreeRoot,
+                selectedPath: $viewModel.selectedPath
+            )
             .frame(maxHeight: .infinity)
 
             // 底部固定：日历区域（与目录树间隔 8pt）
@@ -54,10 +43,12 @@ struct SessionNavigationView: View {
     }
 
     private var allSessionsRow: some View {
-        HStack(spacing: 8) {
-            Image(systemName: SessionNavigationItem.allSessions.systemImage)
-                .foregroundStyle(.tint)
-            Text(SessionNavigationItem.allSessions.title)
+        let isSelected = viewModel.selectedPath == nil && viewModel.selectedDay == nil
+        
+        return HStack(spacing: 8) {
+            Image(systemName: "tray.full")
+                .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
+            Text("All Sessions")
                 .font(.headline)
             Spacer(minLength: 8)
             if isLoading {
@@ -68,18 +59,17 @@ struct SessionNavigationView: View {
                     .foregroundStyle(.secondary)
             }
         }
+        .padding(.horizontal, 4)
+        .padding(.vertical, 2)
+        .background(isSelected ? Color.accentColor.opacity(0.1) : Color.clear)
+        .cornerRadius(6)
         .contentShape(Rectangle())
-        .onTapGesture { selection = .allSessions }
+        .onTapGesture {
+            viewModel.clearAllFilters()
+        }
     }
 
     private var calendarSection: some View {
-        let selectedDay: Date? = {
-            if case .calendarDay(let day) = selection {
-                return day
-            }
-            return nil
-        }()
-
         return VStack(spacing: 6) {
             calendarHeader
 
@@ -90,14 +80,16 @@ struct SessionNavigationView: View {
             }
             .labelsHidden()
             .pickerStyle(.segmented)
+            .onChange(of: dimension) { _, newDim in
+                viewModel.dateDimension = newDim
+            }
 
             CalendarMonthView(
                 monthStart: monthStart,
                 counts: viewModel.calendarCounts(for: monthStart, dimension: dimension),
-                selectedDay: selectedDay
+                selectedDay: viewModel.selectedDay
             ) { picked in
-                selection = .calendarDay(picked)
-                viewModel.dateDimension = dimension
+                viewModel.setSelectedDay(picked)
             }
         }
         .frame(height: 240)
@@ -154,7 +146,7 @@ struct SessionNavigationView: View {
         let today = Date()
         monthStart = cal.date(from: cal.dateComponents([.year, .month], from: today))!
         let start = cal.startOfDay(for: today)
-        selection = .calendarDay(start)
+        viewModel.setSelectedDay(start)
         viewModel.dateDimension = dimension
     }
 }
@@ -165,7 +157,6 @@ struct SessionNavigationView: View {
     let mockViewModel = SessionListViewModel(preferences: mockPreferences)
 
     return SessionNavigationView(
-        selection: .constant(.allSessions),
         totalCount: 15,
         isLoading: false
     )
@@ -178,7 +169,6 @@ struct SessionNavigationView: View {
     let mockViewModel = SessionListViewModel(preferences: mockPreferences)
 
     return SessionNavigationView(
-        selection: .constant(.allSessions),
         totalCount: 0,
         isLoading: true
     )
@@ -189,9 +179,9 @@ struct SessionNavigationView: View {
 #Preview("Calendar Day Selected") {
     let mockPreferences = SessionPreferencesStore()
     let mockViewModel = SessionListViewModel(preferences: mockPreferences)
+    mockViewModel.setSelectedDay(Date())
 
     return SessionNavigationView(
-        selection: .constant(.calendarDay(Date())),
         totalCount: 8,
         isLoading: false
     )
@@ -202,9 +192,9 @@ struct SessionNavigationView: View {
 #Preview("Path Selected") {
     let mockPreferences = SessionPreferencesStore()
     let mockViewModel = SessionListViewModel(preferences: mockPreferences)
+    mockViewModel.setSelectedPath("/Users/developer/projects")
 
     return SessionNavigationView(
-        selection: .constant(.pathPrefix("/Users/developer/projects")),
         totalCount: 5,
         isLoading: false
     )
