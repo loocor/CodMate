@@ -29,7 +29,7 @@ struct SessionTimelineLoader {
                 if let cwd = payload.cwd { parts.append("cwd: \(cwd)") }
                 if let s = payload.summary, !s.isEmpty { parts.append("summary: \(s)") }
                 let text = parts.joined(separator: "\n")
-                events.append(TimelineEvent(id: UUID().uuidString, timestamp: row.timestamp, actor: .info, title: "上下文更新", text: text, metadata: nil))
+                events.append(TimelineEvent(id: UUID().uuidString, timestamp: row.timestamp, actor: .info, title: "Context Updated", text: text, metadata: nil))
             case let .eventMessage(payload):
                 let message = payload.message ?? ""
                 if payload.type == "user_message" {

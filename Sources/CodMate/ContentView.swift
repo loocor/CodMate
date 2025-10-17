@@ -53,7 +53,7 @@ struct ContentView: View {
         }
         .onChange(of: viewModel.errorMessage) { _, message in
             guard let message else { return }
-            alertState = AlertState(title: "操作失败", message: message)
+            alertState = AlertState(title: "Operation Failed", message: message)
             viewModel.errorMessage = nil
         }
         .onChange(of: navigationSelection) { _, newValue in
@@ -65,12 +65,12 @@ struct ContentView: View {
             if navigationSelection != newValue {
                 navigationSelection = newValue
             }
-            // 切换日历或其他筛选后，按范围重新加载
+            // After changing filters (calendar/path), reload within scope
             Task { await viewModel.refreshSessions() }
         }
         .toolbar {
             ToolbarItem(placement: .automatic) {
-                TextField("搜索会话", text: $viewModel.searchText)
+                TextField("Search Sessions", text: $viewModel.searchText)
                     .textFieldStyle(.roundedBorder)
                     .frame(width: 260)
             }
@@ -78,26 +78,26 @@ struct ContentView: View {
                 Button {
                     Task { await viewModel.refreshSessions() }
                 } label: {
-                    Label("刷新", systemImage: "arrow.clockwise.circle.fill")
+                    Label("Refresh", systemImage: "arrow.clockwise.circle.fill")
                 }
                 .controlSize(.large)
-                .help("刷新会话索引")
+                .help("Refresh session index")
             }
         }
-        .alert(item: $alertState) { state in
+.alert(item: $alertState) { state in
             Alert(
                 title: Text(state.title),
                 message: Text(state.message),
-                dismissButton: .default(Text("好的"))
+                dismissButton: .default(Text("OK"))
             )
         }
-        .alert("确认删除所选会话？", isPresented: $deleteConfirmationPresented, presenting: Array(selection)) { ids in
-            Button("取消", role: .cancel) {}
-            Button("移至废纸篓", role: .destructive) {
+.alert("Delete selected sessions?", isPresented: $deleteConfirmationPresented, presenting: Array(selection)) { ids in
+            Button("Cancel", role: .cancel) {}
+            Button("Move to Trash", role: .destructive) {
                 deleteSelections(ids: ids)
             }
         } message: { _ in
-            Text("会话文件将被移至废纸篓，可在 Finder 中恢复。")
+            Text("Session files will be moved to Trash and can be restored in Finder.")
         }
         .fileImporter(
             isPresented: $selectingSessionsRoot,
@@ -168,28 +168,28 @@ struct ContentView: View {
             Button {
                 if let focused = focusedSummary { resume(session: focused) }
             } label: {
-                Label("恢复", systemImage: "play.fill")
+                Label("Resume", systemImage: "play.fill")
             }
             .disabled(isPerformingAction || focusedSummary == nil)
             
             Button {
                 if let focused = focusedSummary { viewModel.reveal(session: focused) }
             } label: {
-                Label("访达中查看", systemImage: "folder")
+                Label("Reveal in Finder", systemImage: "folder")
             }
             .disabled(focusedSummary == nil)
 
             Button(role: .destructive) {
                 presentDeleteConfirmation()
             } label: {
-                Label("删除会话", systemImage: "trash")
+                Label("Delete", systemImage: "trash")
             }
             .disabled(selection.isEmpty || isPerformingAction)
 
             Button {
                 exportMarkdownForFocused()
             } label: {
-                Label("导出 Markdown", systemImage: "square.and.arrow.down")
+                Label("Export Markdown", systemImage: "square.and.arrow.down")
             }
             .disabled(focusedSummary == nil)
         }
@@ -266,7 +266,7 @@ struct ContentView: View {
                 isPerformingAction = false
                 switch result {
                 case let .success(processResult):
-                    resumeOutput = processResult.output.isEmpty ? "会话已恢复。" : processResult.output
+                    resumeOutput = processResult.output.isEmpty ? "Session resumed." : processResult.output
                     Task {
                         try? await Task.sleep(nanoseconds: 4_000_000_000)
                         await MainActor.run {
@@ -276,7 +276,7 @@ struct ContentView: View {
                         }
                     }
                 case let .failure(error):
-                    alertState = AlertState(title: "恢复失败", message: error.localizedDescription)
+                    alertState = AlertState(title: "Resume Failed", message: error.localizedDescription)
                 }
             }
         }
@@ -293,7 +293,7 @@ struct ContentView: View {
             Task { await update(url) }
         case let .failure(error):
             selectingSessionsRoot = false
-            alertState = AlertState(title: "选择目录失败", message: error.localizedDescription)
+            alertState = AlertState(title: "Failed to choose directory", message: error.localizedDescription)
         }
     }
 
@@ -305,12 +305,12 @@ struct ContentView: View {
             viewModel.updateExecutablePath(to: url)
         case let .failure(error):
             selectingExecutable = false
-            alertState = AlertState(title: "选择 CLI 失败", message: error.localizedDescription)
+            alertState = AlertState(title: "Failed to choose CLI", message: error.localizedDescription)
         }
     }
 
     private var placeholder: some View {
-        ContentUnavailableView("选择一个会话", systemImage: "rectangle.and.text.magnifyingglass", description: Text("从中间列表中选择一个会话查看详细信息。"))
+        ContentUnavailableView("Select a session", systemImage: "rectangle.and.text.magnifyingglass", description: Text("Pick a session from the middle list to view details."))
             .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
@@ -330,14 +330,14 @@ extension ContentView {
         var lines: [String] = []
         lines.append("# \(focused.displayName)")
         lines.append("")
-        lines.append("- 开始时间：\(focused.startedAt)")
-        if let end = focused.lastUpdatedAt { lines.append("- 最后更新：\(end)") }
-        if let model = focused.model { lines.append("- 模型：\(model)") }
-        if let approval = focused.approvalPolicy { lines.append("- 审批策略：\(approval)") }
+        lines.append("- Started: \(focused.startedAt)")
+        if let end = focused.lastUpdatedAt { lines.append("- Last Updated: \(end)") }
+        if let model = focused.model { lines.append("- Model: \(model)") }
+        if let approval = focused.approvalPolicy { lines.append("- Approval Policy: \(approval)") }
         lines.append("")
         for e in events {
             let prefix: String
-            switch e.actor { case .user: prefix = "**用户**"; case .assistant: prefix = "**助手**"; case .tool: prefix = "**工具**"; case .info: prefix = "**信息**" }
+            switch e.actor { case .user: prefix = "**User**"; case .assistant: prefix = "**Assistant**"; case .tool: prefix = "**Tool**"; case .info: prefix = "**Info**" }
             lines.append("\(prefix) · \(e.timestamp)\n")
             if let title = e.title { lines.append("> \(title)") }
             if let text = e.text, !text.isEmpty { lines.append(text) }
@@ -346,7 +346,7 @@ extension ContentView {
         }
         let md = lines.joined(separator: "\n")
         let panel = NSSavePanel()
-        panel.title = "导出 Markdown"
+        panel.title = "Export Markdown"
         panel.allowedContentTypes = [.plainText]
         panel.nameFieldStringValue = focused.displayName + ".md"
         if panel.runModal() == .OK, let url = panel.url { try? md.data(using: .utf8)?.write(to: url) }

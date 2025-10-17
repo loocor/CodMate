@@ -14,15 +14,15 @@ struct SessionListColumnView: View {
             header
 
             if isLoading {
-                ProgressView("正在扫描…")
+                ProgressView("Scanning…")
                     .padding(.vertical)
             }
 
             List(selection: $selection) {
                 if sections.isEmpty && !isLoading {
                     ContentUnavailableView(
-                        "暂无会话", systemImage: "tray",
-                        description: Text("调整目录或启动 Codex CLI 以生成新的会话日志。"))
+                        "No Sessions", systemImage: "tray",
+                        description: Text("Adjust directories or launch Codex CLI to generate new session logs."))
                 } else {
                     ForEach(sections) { section in
                         Section {
@@ -33,18 +33,18 @@ struct SessionListColumnView: View {
                                         Button {
                                             onResume(session)
                                         } label: {
-                                            Label("恢复该会话", systemImage: "play.fill")
+                                            Label("Resume", systemImage: "play.fill")
                                         }
                                         Button {
                                             onReveal(session)
                                         } label: {
-                                            Label("在访达中显示", systemImage: "folder")
+                                            Label("Reveal in Finder", systemImage: "folder")
                                         }
                                         Divider()
                                         Button(role: .destructive) {
                                             onDeleteRequest(session)
                                         } label: {
-                                            Label("删除会话", systemImage: "trash")
+                                            Label("Delete Session", systemImage: "trash")
                                         }
                                     }
                             }
@@ -71,7 +71,7 @@ struct SessionListColumnView: View {
 
     private var header: some View {
         HStack(alignment: .center, spacing: 12) {
-            Picker("排序", selection: $sortOrder) {
+            Picker("Sort", selection: $sortOrder) {
                 ForEach(SessionSortOrder.allCases) { order in
                     Text(order.title).tag(order)
                 }
@@ -107,7 +107,7 @@ extension TimeInterval {
     let mockSections = [
         SessionDaySection(
             id: Date().addingTimeInterval(-86400),  // Yesterday
-            title: "昨天",
+            title: "Yesterday",
             totalDuration: 7200,  // 2 hours
             totalEvents: 15,
             sessions: [
@@ -121,7 +121,7 @@ extension TimeInterval {
                     cliVersion: "1.2.3",
                     cwd: "/Users/developer/projects/codmate",
                     originator: "developer",
-                    instructions: "优化 SwiftUI 列表性能",
+                    instructions: "Optimize SwiftUI list performance",
                     model: "gpt-4o-mini",
                     approvalPolicy: "auto",
                     userMessageCount: 3,
@@ -143,7 +143,7 @@ extension TimeInterval {
                     cliVersion: "1.2.3",
                     cwd: "/Users/developer/projects/test",
                     originator: "developer",
-                    instructions: "创建待办事项应用",
+                    instructions: "Create a to-do app",
                     model: "gpt-4o",
                     approvalPolicy: "manual",
                     userMessageCount: 4,
@@ -159,7 +159,7 @@ extension TimeInterval {
         ),
         SessionDaySection(
             id: Date().addingTimeInterval(-172800),  // Day before yesterday
-            title: "2024年12月15日",
+            title: "Dec 15, 2024",
             totalDuration: 5400,  // 1.5 hours
             totalEvents: 12,
             sessions: [
@@ -173,7 +173,7 @@ extension TimeInterval {
                     cliVersion: "1.2.2",
                     cwd: "/Users/developer/documents",
                     originator: "developer",
-                    instructions: "编写技术文档",
+                    instructions: "Write technical documentation",
                     model: "gpt-4o-mini",
                     approvalPolicy: "auto",
                     userMessageCount: 6,

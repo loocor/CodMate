@@ -6,7 +6,7 @@ struct SettingsView: View {
     var body: some View {
         TabView {
             generalTab
-                .tabItem { Label("通用", systemImage: "gear") }
+                .tabItem { Label("General", systemImage: "gear") }
             llmTab
                 .tabItem { Label("LLM", systemImage: "brain") }
         }
@@ -16,23 +16,23 @@ struct SettingsView: View {
 
     private var generalTab: some View {
         Form {
-            LabeledContent("Sessions 目录") {
+            LabeledContent("Sessions Directory") {
                 HStack {
                     Text(preferences.sessionsRoot.path)
                         .lineLimit(1)
                         .truncationMode(.middle)
                     Spacer()
-                    Button("更改…", action: { /* 留待实现 */  })
+                    Button("Change…", action: { /* to be implemented */  })
                         .disabled(true)
                 }
             }
-            LabeledContent("Codex CLI 路径") {
+            LabeledContent("Codex CLI Path") {
                 HStack {
                     Text(preferences.codexExecutableURL.path)
                         .lineLimit(1)
                         .truncationMode(.middle)
                     Spacer()
-                    Button("更改…", action: { /* 留待实现 */  })
+                    Button("Change…", action: { /* to be implemented */  })
                         .disabled(true)
                 }
             }
@@ -42,7 +42,7 @@ struct SettingsView: View {
     private var llmTab: some View {
         Form {
             LabeledContent("API Base URL") {
-                TextField("例如 https://api.openai.com", text: $preferences.llmBaseURL)
+                TextField("e.g. https://api.openai.com", text: $preferences.llmBaseURL)
                     .textFieldStyle(.roundedBorder)
                     .frame(maxWidth: 320)
             }
@@ -56,7 +56,7 @@ struct SettingsView: View {
                     .textFieldStyle(.roundedBorder)
                     .frame(maxWidth: 200)
             }
-            Toggle("自动生成标题与摘要", isOn: $preferences.llmAutoGenerate)
+            Toggle("Auto-generate title & summary", isOn: $preferences.llmAutoGenerate)
         }
     }
 }

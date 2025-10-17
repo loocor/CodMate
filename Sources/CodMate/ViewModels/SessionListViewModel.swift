@@ -156,7 +156,7 @@ final class SessionListViewModel: ObservableObject {
     private static func groupSessions(_ sessions: [SessionSummary]) -> [SessionDaySection] {
         let calendar = Calendar.current
         let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateStyle = .medium
         formatter.timeStyle = .none
 
@@ -173,9 +173,9 @@ final class SessionListViewModel: ObservableObject {
                 let totalEvents = sessions.reduce(0) { $0 + $1.eventCount }
                 let title: String
                 if calendar.isDateInToday(day) {
-                    title = "今天"
+                    title = "Today"
                 } else if calendar.isDateInYesterday(day) {
-                    title = "昨天"
+                    title = "Yesterday"
                 } else {
                     title = formatter.string(from: day)
                 }
