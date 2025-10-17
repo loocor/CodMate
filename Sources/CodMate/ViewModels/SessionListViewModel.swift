@@ -1,0 +1,209 @@
+import Foundation
+
+@MainActor
+final class SessionListViewModel: ObservableObject {
+    @Published var sections: [SessionDaySection] = []
+    @Published var searchText: String = "" {
+        didSet { scheduleFulltextSearchIfNeeded() }
+    }
+    @Published var sortOrder: SessionSortOrder = .mostRecent {
+        didSet { applyFilters() }
+    }
+    @Published var isLoading = false
+    @Published var errorMessage: String?
+    @Published var navigationSelection: SessionNavigationItem = .allSessions { didSet { applyFilters() } }
+    @Published var dateDimension: DateDimension = .updated { didSet { applyFilters() } }
+    let preferences: SessionPreferencesStore
+
+    private let indexer: SessionIndexer
+    private let actions: SessionActions
+    private var allSessions: [SessionSummary] = []
+    private var fulltextMatches: Set<String> = [] // SessionSummary.id set
+    private var fulltextTask: Task<Void, Never>?
+
+    init(
+        preferences: SessionPreferencesStore,
+        indexer: SessionIndexer = SessionIndexer(),
+        actions: SessionActions = SessionActions()
+    ) {
+        self.preferences = preferences
+        self.indexer = indexer
+        self.actions = actions
+    }
+
+    func refreshSessions() async {
+        isLoading = true
+        defer { isLoading = false }
+
+        do {
+            let sessions = try await indexer.refreshSessions(root: preferences.sessionsRoot)
+            allSessions = sessions
+            await computeCalendarCaches()
+            applyFilters()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func resume(session: SessionSummary) async -> Result<ProcessResult, Error> {
+        do {
+            let result = try await actions.resume(session: session, executableURL: preferences.codexExecutableURL)
+            return .success(result)
+        } catch {
+            return .failure(error)
+        }
+    }
+
+    func reveal(session: SessionSummary) {
+        actions.revealInFinder(session: session)
+    }
+
+    func delete(summaries: [SessionSummary]) async {
+        do {
+            try actions.delete(summaries: summaries)
+            for summary in summaries {
+                await indexer.invalidate(url: summary.fileURL)
+            }
+            await refreshSessions()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func updateSessionsRoot(to newURL: URL) async {
+        guard newURL != preferences.sessionsRoot else { return }
+        preferences.sessionsRoot = newURL
+        await indexer.invalidateAll()
+        await refreshSessions()
+    }
+
+    func updateExecutablePath(to newURL: URL) {
+        preferences.codexExecutableURL = newURL
+    }
+
+    var totalSessionCount: Int {
+        allSessions.count
+    }
+
+    // Expose data for navigation helpers
+    func calendarCounts(for monthStart: Date, dimension: DateDimension) -> [Int: Int] {
+        let cal = Calendar.current
+        guard let range = cal.range(of: .day, in: .month, for: monthStart) else { return [:] }
+        var counts: [Int: Int] = [:]
+        for s in allSessions {
+            let date: Date = (dimension == .created) ? s.startedAt : (s.lastUpdatedAt ?? s.startedAt)
+            if cal.isDate(date, equalTo: monthStart, toGranularity: .month) {
+                let day = cal.component(.day, from: date)
+                if range.contains(day) {
+                    counts[day, default: 0] += 1
+                }
+            }
+        }
+        return counts
+    }
+
+    var pathTreeRoot: PathTreeNode? {
+        allSessions.buildPathTree()
+    }
+
+    private func applyFilters() {
+        guard !allSessions.isEmpty else {
+            sections = []
+            return
+        }
+
+        var filtered = allSessions
+        switch navigationSelection {
+        case .allSessions:
+            break
+        case let .calendarDay(day):
+            filtered = filtered.filter { sess in
+                let cal = Calendar.current
+                switch dateDimension {
+                case .created:
+                    return cal.isDate(sess.startedAt, inSameDayAs: day)
+                case .updated:
+                    if let end = sess.lastUpdatedAt { return cal.isDate(end, inSameDayAs: day) }
+                    return cal.isDate(sess.startedAt, inSameDayAs: day)
+                }
+            }
+        case let .pathPrefix(prefix):
+            filtered = filtered.filter { $0.cwd.hasPrefix(prefix) }
+        }
+
+        let term = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !term.isEmpty {
+            filtered = filtered.filter { summary in
+                summary.matches(search: term) || fulltextMatches.contains(summary.id)
+            }
+        }
+        filtered = sortOrder.sort(filtered)
+
+        sections = Self.groupSessions(filtered)
+    }
+
+    private static func groupSessions(_ sessions: [SessionSummary]) -> [SessionDaySection] {
+        let calendar = Calendar.current
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .none
+
+        var grouped: [Date: [SessionSummary]] = [:]
+        for session in sessions {
+            let day = calendar.startOfDay(for: session.startedAt)
+            grouped[day, default: []].append(session)
+        }
+
+        return grouped
+            .sorted(by: { $0.key > $1.key })
+            .map { day, sessions in
+                let totalDuration = sessions.reduce(into: 0.0) { $0 += $1.duration }
+                let totalEvents = sessions.reduce(0) { $0 + $1.eventCount }
+                let title: String
+                if calendar.isDateInToday(day) {
+                    title = "今天"
+                } else if calendar.isDateInYesterday(day) {
+                    title = "昨天"
+                } else {
+                    title = formatter.string(from: day)
+                }
+                return SessionDaySection(
+                    id: day,
+                    title: title,
+                    totalDuration: totalDuration,
+                    totalEvents: totalEvents,
+                    sessions: sessions
+                )
+            }
+    }
+
+    // MARK: - Fulltext search
+
+    private func scheduleFulltextSearchIfNeeded() {
+        applyFilters() // still update with metadata-only matches quickly
+        fulltextTask?.cancel()
+        let term = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !term.isEmpty else {
+            fulltextMatches.removeAll()
+            return
+        }
+        fulltextTask = Task { [allSessions] in
+            // naive full-scan
+            var matched = Set<String>()
+            for s in allSessions {
+                if Task.isCancelled { return }
+                if await indexer.fileContains(url: s.fileURL, term: term) {
+                    matched.insert(s.id)
+                }
+            }
+            await MainActor.run {
+                self.fulltextMatches = matched
+                self.applyFilters()
+            }
+        }
+    }
+
+    // MARK: - Calendar caches (placeholder for future optimization)
+    private func computeCalendarCaches() async { }
+}

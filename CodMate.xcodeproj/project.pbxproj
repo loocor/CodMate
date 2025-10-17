@@ -1,0 +1,210 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		1A0001012A00000100000001 /* CodMateApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000812A00000100000001 /* CodMateApp.swift */; };
+		1A0001022A00000100000001 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000822A00000100000001 /* ContentView.swift */; };
+		1A0001032A00000100000001 /* SessionListViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000832A00000100000001 /* SessionListViewModel.swift */; };
+		1A0001042A00000100000001 /* SessionIndexer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000842A00000100000001 /* SessionIndexer.swift */; };
+		1A0001052A00000100000001 /* SessionActions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000852A00000100000001 /* SessionActions.swift */; };
+		1A0001062A00000100000001 /* SessionPreferencesStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000862A00000100000001 /* SessionPreferencesStore.swift */; };
+		1A0001072A00000100000001 /* SessionSummary.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000872A00000100000001 /* SessionSummary.swift */; };
+		1A0001082A00000100000001 /* SessionEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000882A00000100000001 /* SessionEvent.swift */; };
+		1A0001092A00000100000001 /* SessionNavigation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000892A00000100000001 /* SessionNavigation.swift */; };
+		1A00010A2A00000100000001 /* SessionNavigationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00008A2A00000100000001 /* SessionNavigationView.swift */; };
+		1A00010B2A00000100000001 /* SessionListColumnView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00008B2A00000100000001 /* SessionListColumnView.swift */; };
+		1A00010C2A00000100000001 /* SessionListRowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00008C2A00000100000001 /* SessionListRowView.swift */; };
+		1A00010D2A00000100000001 /* SessionDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00008D2A00000100000001 /* SessionDetailView.swift */; };
+		1A00010E2A00000100000001 /* ToastView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00008E2A00000100000001 /* ToastView.swift */; };
+		1A0001302A00000100000001 /* DateDimension.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0001202A00000100000001 /* DateDimension.swift */; };
+		1A0001312A00000100000001 /* PathTree.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0001212A00000100000001 /* PathTree.swift */; };
+		1A0001322A00000100000001 /* CalendarMonthView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0001222A00000100000001 /* CalendarMonthView.swift */; };
+		1A0001332A00000100000001 /* PathTreeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0001232A00000100000001 /* PathTreeView.swift */; };
+		1A0001342A00000100000001 /* TimelineEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0001242A00000100000001 /* TimelineEvent.swift */; };
+		1A0001352A00000100000001 /* SessionTimelineLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0001252A00000100000001 /* SessionTimelineLoader.swift */; };
+		1A0001362A00000100000001 /* TimelineViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0001262A00000100000001 /* TimelineViews.swift */; };
+		1A00010F2A00000100000001 /* Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 1A00007F2A00000100000001 /* Info.plist */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		1A00007F2A00000100000001 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; name = Info.plist; path = CodMate/Info.plist; sourceTree = SOURCE_ROOT; };
+		1A0000802A00000100000001 /* CodMate.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CodMate.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		1A0000812A00000100000001 /* CodMateApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CodMateApp.swift; path = Sources/CodMate/CodMateApp.swift; sourceTree = SOURCE_ROOT; };
+		1A0000822A00000100000001 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ContentView.swift; path = Sources/CodMate/ContentView.swift; sourceTree = SOURCE_ROOT; };
+		1A0000832A00000100000001 /* SessionListViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SessionListViewModel.swift; path = Sources/CodMate/ViewModels/SessionListViewModel.swift; sourceTree = SOURCE_ROOT; };
+		1A0000842A00000100000001 /* SessionIndexer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SessionIndexer.swift; path = Sources/CodMate/Services/SessionIndexer.swift; sourceTree = SOURCE_ROOT; };
+		1A0000852A00000100000001 /* SessionActions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SessionActions.swift; path = Sources/CodMate/Services/SessionActions.swift; sourceTree = SOURCE_ROOT; };
+		1A0000862A00000100000001 /* SessionPreferencesStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SessionPreferencesStore.swift; path = Sources/CodMate/Services/SessionPreferencesStore.swift; sourceTree = SOURCE_ROOT; };
+		1A0000872A00000100000001 /* SessionSummary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SessionSummary.swift; path = Sources/CodMate/Models/SessionSummary.swift; sourceTree = SOURCE_ROOT; };
+		1A0000882A00000100000001 /* SessionEvent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SessionEvent.swift; path = Sources/CodMate/Models/SessionEvent.swift; sourceTree = SOURCE_ROOT; };
+		1A0000892A00000100000001 /* SessionNavigation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SessionNavigation.swift; path = Sources/CodMate/Models/SessionNavigation.swift; sourceTree = SOURCE_ROOT; };
+		1A00008A2A00000100000001 /* SessionNavigationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SessionNavigationView.swift; path = Sources/CodMate/Views/SessionNavigationView.swift; sourceTree = SOURCE_ROOT; };
+		1A00008B2A00000100000001 /* SessionListColumnView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SessionListColumnView.swift; path = Sources/CodMate/Views/SessionListColumnView.swift; sourceTree = SOURCE_ROOT; };
+		1A00008C2A00000100000001 /* SessionListRowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SessionListRowView.swift; path = Sources/CodMate/Views/SessionListRowView.swift; sourceTree = SOURCE_ROOT; };
+		1A00008D2A00000100000001 /* SessionDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SessionDetailView.swift; path = Sources/CodMate/Views/SessionDetailView.swift; sourceTree = SOURCE_ROOT; };
+		1A00008E2A00000100000001 /* ToastView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ToastView.swift; path = Sources/CodMate/Views/ToastView.swift; sourceTree = SOURCE_ROOT; };
+		1A0001202A00000100000001 /* DateDimension.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = DateDimension.swift; path = Sources/CodMate/Models/DateDimension.swift; sourceTree = SOURCE_ROOT; };
+		1A0001212A00000100000001 /* PathTree.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = PathTree.swift; path = Sources/CodMate/Models/PathTree.swift; sourceTree = SOURCE_ROOT; };
+		1A0001222A00000100000001 /* CalendarMonthView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CalendarMonthView.swift; path = Sources/CodMate/Views/CalendarMonthView.swift; sourceTree = SOURCE_ROOT; };
+		1A0001232A00000100000001 /* PathTreeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = PathTreeView.swift; path = Sources/CodMate/Views/PathTreeView.swift; sourceTree = SOURCE_ROOT; };
+		1A0001242A00000100000001 /* TimelineEvent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = TimelineEvent.swift; path = Sources/CodMate/Models/TimelineEvent.swift; sourceTree = SOURCE_ROOT; };
+		1A0001252A00000100000001 /* SessionTimelineLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SessionTimelineLoader.swift; path = Sources/CodMate/Services/SessionTimelineLoader.swift; sourceTree = SOURCE_ROOT; };
+		1A0001262A00000100000001 /* TimelineViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = TimelineViews.swift; path = Sources/CodMate/Views/TimelineViews.swift; sourceTree = SOURCE_ROOT; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		1A0000032A00000100000001 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = ( ); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		1A0000002A00000100000001 = {isa = PBXGroup; children = (
+                1A00000B2A00000100000001 /* CodMate */,
+                1A00000C2A00000100000001 /* Sources */,
+                1A00000A2A00000100000001 /* Products */,
+            ); sourceTree = "<group>"; };
+		1A00000A2A00000100000001 /* Products */ = {isa = PBXGroup; children = (
+                1A0000802A00000100000001 /* CodMate.app */,
+            ); name = Products; sourceTree = "<group>"; };
+		1A00000B2A00000100000001 /* CodMate */ = {isa = PBXGroup; children = (
+                1A00007F2A00000100000001 /* Info.plist */,
+            ); name = CodMate; sourceTree = SOURCE_ROOT; };
+		1A00000C2A00000100000001 /* Sources */ = {isa = PBXGroup; children = (
+                1A0000812A00000100000001 /* CodMateApp.swift */,
+                1A0000822A00000100000001 /* ContentView.swift */,
+                1A0000832A00000100000001 /* SessionListViewModel.swift */,
+                1A0001202A00000100000001 /* DateDimension.swift */,
+                1A0000872A00000100000001 /* SessionSummary.swift */,
+                1A0000882A00000100000001 /* SessionEvent.swift */,
+                1A0001242A00000100000001 /* TimelineEvent.swift */,
+                1A0000892A00000100000001 /* SessionNavigation.swift */,
+                1A0001212A00000100000001 /* PathTree.swift */,
+                1A0000842A00000100000001 /* SessionIndexer.swift */,
+                1A0000852A00000100000001 /* SessionActions.swift */,
+                1A0000862A00000100000001 /* SessionPreferencesStore.swift */,
+                1A0001252A00000100000001 /* SessionTimelineLoader.swift */,
+                1A00008A2A00000100000001 /* SessionNavigationView.swift */,
+                1A0001222A00000100000001 /* CalendarMonthView.swift */,
+                1A0001232A00000100000001 /* PathTreeView.swift */,
+                1A00008B2A00000100000001 /* SessionListColumnView.swift */,
+                1A00008C2A00000100000001 /* SessionListRowView.swift */,
+                1A00008D2A00000100000001 /* SessionDetailView.swift */,
+                1A00008E2A00000100000001 /* ToastView.swift */,
+                1A0001262A00000100000001 /* TimelineViews.swift */,
+            ); name = Sources; sourceTree = SOURCE_ROOT; };
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		1A0000022A00000100000001 /* CodMate */ = {isa = PBXNativeTarget; buildConfigurationList = 1A00000F2A00000100000001 /* Build configuration list for PBXNativeTarget "CodMate" */; buildPhases = (
+                1A0000012A00000100000001 /* Sources */,
+                1A0000032A00000100000001 /* Frameworks */,
+                1A0000042A00000100000001 /* Resources */,
+            ); buildRules = ( ); dependencies = ( ); name = CodMate; productName = CodMate; productReference = 1A0000802A00000100000001 /* CodMate.app */; productType = "com.apple.product-type.application"; };
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		1A0000052A00000100000001 /* Project object */ = {isa = PBXProject; attributes = { LastSwiftUpdateCheck = 1530; LastUpgradeCheck = 1530; }; buildConfigurationList = 1A0000062A00000100000001 /* Build configuration list for PBXProject "CodMate" */; compatibilityVersion = "Xcode 15.0"; developmentRegion = en; hasScannedForEncodings = 0; knownRegions = ( en, Base, ); mainGroup = 1A0000002A00000100000001; productRefGroup = 1A00000A2A00000100000001 /* Products */; projectDirPath = ""; projectRoot = ""; targets = ( 1A0000022A00000100000001 /* CodMate */, ); };
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		1A0000042A00000100000001 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = ( 1A00010F2A00000100000001 /* Info.plist in Resources */, ); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		1A0000012A00000100000001 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (
+                1A0001012A00000100000001 /* CodMateApp.swift in Sources */,
+                1A0001022A00000100000001 /* ContentView.swift in Sources */,
+                1A0001032A00000100000001 /* SessionListViewModel.swift in Sources */,
+                1A0001042A00000100000001 /* SessionIndexer.swift in Sources */,
+                1A0001052A00000100000001 /* SessionActions.swift in Sources */,
+                1A0001062A00000100000001 /* SessionPreferencesStore.swift in Sources */,
+                1A0001072A00000100000001 /* SessionSummary.swift in Sources */,
+                1A0001082A00000100000001 /* SessionEvent.swift in Sources */,
+                1A0001092A00000100000001 /* SessionNavigation.swift in Sources */,
+                1A00010A2A00000100000001 /* SessionNavigationView.swift in Sources */,
+                1A00010B2A00000100000001 /* SessionListColumnView.swift in Sources */,
+                1A00010C2A00000100000001 /* SessionListRowView.swift in Sources */,
+                1A00010D2A00000100000001 /* SessionDetailView.swift in Sources */,
+                1A00010E2A00000100000001 /* ToastView.swift in Sources */,
+                1A0001302A00000100000001 /* DateDimension.swift in Sources */,
+                1A0001312A00000100000001 /* PathTree.swift in Sources */,
+                1A0001322A00000100000001 /* CalendarMonthView.swift in Sources */,
+                1A0001332A00000100000001 /* PathTreeView.swift in Sources */,
+                1A0001342A00000100000001 /* TimelineEvent.swift in Sources */,
+                1A0001352A00000100000001 /* SessionTimelineLoader.swift in Sources */,
+                1A0001362A00000100000001 /* TimelineViews.swift in Sources */,
+            ); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		1A0000072A00000100000001 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {
+                CLANG_ENABLE_MODULES = YES;
+                CODE_SIGNING_ALLOWED = NO;
+                CODE_SIGNING_REQUIRED = NO;
+                CURRENT_PROJECT_VERSION = 1;
+                GENERATE_INFOPLIST_FILE = YES;
+                IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+                MACOSX_DEPLOYMENT_TARGET = 14.0;
+                MARKETING_VERSION = 1.0;
+                PRODUCT_NAME = "$(TARGET_NAME)";
+                SDKROOT = macosx;
+                SWIFT_VERSION = 5.0;
+            }; name = Debug; };
+		1A0000082A00000100000001 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {
+                CLANG_ENABLE_MODULES = YES;
+                CODE_SIGNING_ALLOWED = NO;
+                CODE_SIGNING_REQUIRED = NO;
+                CURRENT_PROJECT_VERSION = 1;
+                GENERATE_INFOPLIST_FILE = YES;
+                IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+                MACOSX_DEPLOYMENT_TARGET = 14.0;
+                MARKETING_VERSION = 1.0;
+                PRODUCT_NAME = "$(TARGET_NAME)";
+                SDKROOT = macosx;
+                SWIFT_VERSION = 5.0;
+            }; name = Release; };
+		1A0000102A00000100000001 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {
+                ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+                CODE_SIGN_ENTITLEMENTS = "";
+                CODE_SIGN_STYLE = Automatic;
+                COMBINE_HIDPI_IMAGES = YES;
+                INFOPLIST_FILE = CodMate/Info.plist;
+                LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks";
+                MACOSX_DEPLOYMENT_TARGET = 14.0;
+                PRODUCT_BUNDLE_IDENTIFIER = com.loocor.CodMate;
+                PRODUCT_NAME = CodMate;
+                SDKROOT = macosx;
+                SWIFT_EMIT_LOC_STRINGS = YES;
+                SWIFT_VERSION = 5.0;
+                SUPPORTS_MACCATALYST = NO;
+                TARGETED_DEVICE_FAMILY = 1;
+            }; name = Debug; };
+		1A0000112A00000100000001 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {
+                ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+                CODE_SIGN_ENTITLEMENTS = "";
+                CODE_SIGN_STYLE = Automatic;
+                COMBINE_HIDPI_IMAGES = YES;
+                INFOPLIST_FILE = CodMate/Info.plist;
+                LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks";
+                MACOSX_DEPLOYMENT_TARGET = 14.0;
+                PRODUCT_BUNDLE_IDENTIFIER = com.loocor.CodMate;
+                PRODUCT_NAME = CodMate;
+                SDKROOT = macosx;
+                SWIFT_EMIT_LOC_STRINGS = YES;
+                SWIFT_VERSION = 5.0;
+                SUPPORTS_MACCATALYST = NO;
+                TARGETED_DEVICE_FAMILY = 1;
+            }; name = Release; };
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		1A0000062A00000100000001 /* Build configuration list for PBXProject "CodMate" */ = {isa = XCConfigurationList; buildConfigurations = ( 1A0000072A00000100000001 /* Debug */, 1A0000082A00000100000001 /* Release */, ); defaultConfigurationIsVisible = 0; defaultConfigurationName = Debug; };
+		1A00000F2A00000100000001 /* Build configuration list for PBXNativeTarget "CodMate" */ = {isa = XCConfigurationList; buildConfigurations = ( 1A0000102A00000100000001 /* Debug */, 1A0000112A00000100000001 /* Release */, ); defaultConfigurationIsVisible = 0; defaultConfigurationName = Debug; };
+/* End XCConfigurationList section */
+
+	};
+ 	rootObject = 1A0000052A00000100000001 /* Project object */;
+}
