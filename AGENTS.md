@@ -17,9 +17,11 @@ UI Rules (macOS specific)
 - Search: prefer a toolbar `SearchField` in macOS, not `.searchable` when exact placement (far right) matters.
 - Toolbars: place refresh as the last ToolbarItem to pin it at the far right. Keep destructive actions in the detail pane, not in the main toolbar.
 - Sidebar (left):
-  - Top: calendar month view with per‑day counts (created/last‑updated switch).
-  - Below: path tree built from `cwd` counts. Rows are compact: default min row height 18, small control size, reduced insets.
-  - Single‑click selects/expands; double‑click applies filter (enter the directory).
+  - Top (fixed): "All Sessions" row showing total count and selection state.
+  - Middle (scrollable): path tree built from `cwd` counts. Rows are compact: default min row height 18, small control size, reduced insets. Single‑click selects/expands; double‑click applies filter (enter the directory).
+  - Bottom (fixed): calendar month view (240pt height) with per‑day counts (created/last‑updated switch). Always pinned to the bottom with 8pt spacing above.
+  - Only the middle path tree scrolls; top "All Sessions" and bottom calendar remain fixed.
+  - Sidebar width: min 220pt, max 25% of window width, ideal 260pt.
 - Content (middle):
   - Default scope loads “today” only for speed.
   - Sorting picker is left‑aligned with list content.

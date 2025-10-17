@@ -3,6 +3,7 @@ import SwiftUI
 struct CalendarMonthView: View {
     let monthStart: Date
     let counts: [Int: Int]
+    let selectedDay: Date?
     let onSelectDay: (Date) -> Void
 
     var body: some View {
@@ -61,19 +62,21 @@ struct CalendarMonthView: View {
     }
     
     private func dayCell(day: Int, calendar: Calendar, columnWidth: CGFloat) -> some View {
-        Button {
+        let isSelected = isSelectedDay(day: day, calendar: calendar)
+        
+        return Button {
             if day > 0 {
                 let date = calendar.date(bySetting: .day, value: day, of: monthStart)!
                 onSelectDay(calendar.startOfDay(for: date))
             }
         } label: {
-            dayCellContent(day: day)
+            dayCellContent(day: day, isSelected: isSelected)
         }
         .buttonStyle(.plain)
-        .frame(width: columnWidth, height: 46)
+        .frame(width: columnWidth, height: 38)
     }
     
-    private func dayCellContent(day: Int) -> some View {
+    private func dayCellContent(day: Int, isSelected: Bool) -> some View {
         ZStack(alignment: .topLeading) {
             RoundedRectangle(cornerRadius: 6)
                 .fill(day > 0 ? Color.secondary.opacity(0.06) : Color.clear)
@@ -86,6 +89,10 @@ struct CalendarMonthView: View {
                 sessionCount(count: count)
             }
         }
+        .overlay(
+            RoundedRectangle(cornerRadius: 6)
+                .strokeBorder(Color.accentColor, lineWidth: isSelected ? 2 : 0)
+        )
     }
     
     private func dayNumber(day: Int) -> some View {
@@ -108,6 +115,12 @@ struct CalendarMonthView: View {
         }
     }
 
+    private func isSelectedDay(day: Int, calendar: Calendar) -> Bool {
+        guard day > 0, let selectedDay = selectedDay else { return false }
+        let cellDate = calendar.date(bySetting: .day, value: day, of: monthStart)!
+        return calendar.isDate(calendar.startOfDay(for: cellDate), inSameDayAs: selectedDay)
+    }
+    
     private func monthGrid() -> [[Int]] {
         let cal = Calendar.current
         let range = cal.range(of: .day, in: .month, for: monthStart) ?? 1..<29
@@ -137,7 +150,8 @@ struct CalendarMonthView: View {
 
     return CalendarMonthView(
         monthStart: monthStart,
-        counts: mockCounts
+        counts: mockCounts,
+        selectedDay: calendar.date(from: DateComponents(year: 2024, month: 12, day: 15))
     ) { selectedDay in
         print("Selected day: \(selectedDay)")
     }
