@@ -165,6 +165,73 @@ actor SessionIndexer {
         return urls
     }
 
+    // Sidebar: month daily counts without parsing content (fast)
+    func computeCalendarCounts(root: URL, monthStart: Date, dimension: DateDimension) async -> [Int: Int] {
+        var counts: [Int: Int] = [:]
+        let cal = Calendar.current
+        let comps = cal.dateComponents([.year, .month], from: monthStart)
+        guard let year = comps.year, let month = comps.month else { return [:] }
+        var monthURL = root.appendingPathComponent("\(year)", isDirectory: true)
+        monthURL.appendPathComponent("\(month)", isDirectory: true)
+        guard let enumerator = fileManager.enumerator(at: monthURL, includingPropertiesForKeys: [.isRegularFileKey, .contentModificationDateKey], options: [.skipsHiddenFiles, .skipsPackageDescendants]) else { return [:] }
+        for case let url as URL in enumerator {
+            guard url.pathExtension.lowercased() == "jsonl" else { continue }
+            switch dimension {
+            case .created:
+                if let day = Int(url.deletingLastPathComponent().lastPathComponent) { counts[day, default: 0] += 1 }
+            case .updated:
+                let values = try? url.resourceValues(forKeys: [.contentModificationDateKey])
+                if let date = values?.contentModificationDate, cal.isDate(date, equalTo: monthStart, toGranularity: .month) {
+                    let day = cal.component(.day, from: date)
+                    counts[day, default: 0] += 1
+                }
+            }
+        }
+        return counts
+    }
+
+    // Sidebar: collect cwd counts using disk cache or quick head-scan
+    func collectCWDCounts(root: URL) async -> [String: Int] {
+        var result: [String: Int] = [:]
+        guard let enumerator = fileManager.enumerator(at: root, includingPropertiesForKeys: [.isRegularFileKey, .contentModificationDateKey], options: [.skipsHiddenFiles, .skipsPackageDescendants]) else { return [:] }
+        await withTaskGroup(of: (String, Int)?.self) { group in
+            for case let url as URL in enumerator {
+                guard url.pathExtension.lowercased() == "jsonl" else { continue }
+                group.addTask { [weak self] in
+                    guard let self else { return nil }
+                    let values = try? url.resourceValues(forKeys: [.contentModificationDateKey])
+                    let m = values?.contentModificationDate
+                    if let cached = await self.diskCache.get(path: url.path, modificationDate: m), !cached.cwd.isEmpty {
+                        return (cached.cwd, 1)
+                    }
+                    if let cwd = self.fastExtractCWD(url: url) { return (cwd, 1) }
+                    return nil
+                }
+            }
+            for await item in group {
+                if let (cwd, inc) = item { result[cwd, default: 0] += inc }
+            }
+        }
+        return result
+    }
+
+    nonisolated private func fastExtractCWD(url: URL) -> String? {
+        guard let data = try? Data(contentsOf: url, options: [.mappedIfSafe]), !data.isEmpty else { return nil }
+        let newline: UInt8 = 0x0A
+        let carriageReturn: UInt8 = 0x0D
+        for var slice in data.split(separator: newline, omittingEmptySubsequences: true).prefix(200) {
+            if slice.last == carriageReturn { slice = slice.dropLast() }
+            if let row = try? decoder.decode(SessionRow.self, from: Data(slice)) {
+                switch row.kind {
+                case let .sessionMeta(p): return p.cwd
+                case let .turnContext(p): if let c = p.cwd { return c }
+                default: break
+                }
+            }
+        }
+        return nil
+    }
+
     private func buildSummaryFast(for url: URL, builder: inout SessionSummaryBuilder) throws -> SessionSummary? {
         // Memory-map file (fast and low memory overhead)
         let data = try Data(contentsOf: url, options: [.mappedIfSafe])
@@ -273,5 +340,15 @@ actor SessionIndexer {
             }
         }
         return nil
+    }
+
+    // Global count for sidebar label
+    func countAllSessions(root: URL) async -> Int {
+        var total = 0
+        guard let enumerator = fileManager.enumerator(at: root, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles, .skipsPackageDescendants]) else { return 0 }
+        for case let url as URL in enumerator {
+            if url.pathExtension.lowercased() == "jsonl" { total += 1 }
+        }
+        return total
     }
 }

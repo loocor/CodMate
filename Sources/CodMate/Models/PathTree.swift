@@ -79,3 +79,65 @@ extension Array where Element == SessionSummary {
         return rebuild(from: flat[0])
     }
 }
+
+extension Dictionary where Key == String, Value == Int {
+    // Build a tree from a map of cwd -> count
+    func buildPathTreeFromCounts() -> PathTreeNode? {
+        guard !isEmpty else { return nil }
+        let allPaths = self.keys.map { URL(fileURLWithPath: $0, isDirectory: true).pathComponents }
+        // common prefix
+        var prefix = allPaths.first ?? []
+        for comps in allPaths.dropFirst() {
+            let n = Swift.min(prefix.count, comps.count)
+            var i = 0
+            while i < n, prefix[i] == comps[i] { i += 1 }
+            prefix = Array(prefix.prefix(i))
+            if prefix.isEmpty { break }
+        }
+        let rootPath = prefix.isEmpty ? "/" : NSString.path(withComponents: prefix)
+        let rootName = prefix.last ?? "/"
+        var root = PathTreeNode(id: rootPath, name: rootName.isEmpty ? "/" : rootName, count: 0, children: [])
+
+        var nodeMap: [String: Int] = [root.id: 0]
+        var flat: [PathTreeNode] = [root]
+
+        func ensureNode(_ comps: [String]) -> Int {
+            let full = NSString.path(withComponents: comps)
+            if let idx = nodeMap[full] { return idx }
+            let name = comps.last ?? "/"
+            nodeMap[full] = flat.count
+            flat.append(PathTreeNode(id: full, name: name, count: 0, children: []))
+            return flat.count - 1
+        }
+
+        for (cwd, cnt) in self {
+            var comps = URL(fileURLWithPath: cwd, isDirectory: true).pathComponents
+            if comps.starts(with: prefix) { comps.removeFirst(prefix.count) }
+            var pathSoFar = prefix
+            var parentIdx = 0
+            for part in comps {
+                pathSoFar.append(part)
+                let idx = ensureNode(pathSoFar)
+                // Copy to local variable to avoid overlapping access
+                let childNode = flat[idx]
+                if flat[parentIdx].children == nil { flat[parentIdx].children = [] }
+                if !(flat[parentIdx].children?.contains(where: { $0.id == childNode.id }) ?? false) {
+                    flat[parentIdx].children?.append(childNode)
+                }
+                // accumulate counts up the chain
+                flat[idx].count += cnt
+                parentIdx = idx
+            }
+            flat[0].count += cnt
+        }
+
+        func rebuild(from node: PathTreeNode) -> PathTreeNode {
+            var newNode = flat[nodeMap[node.id]!]
+            let rebuilt = (node.children ?? []).map { rebuild(from: $0) }.sorted { $0.name.localizedCompare($1.name) == .orderedAscending }
+            newNode.children = rebuilt.isEmpty ? nil : rebuilt
+            return newNode
+        }
+
+        return rebuild(from: flat[0])
+    }
+}

@@ -49,6 +49,17 @@ struct SessionNavigationView: View {
         }
         .listStyle(.sidebar)
         .environment(\.defaultMinListRowHeight, 18)
+        .environment(\.controlSize, .small)
+        .task {
+            viewModel.ensurePathTree()
+            _ = viewModel.calendarCounts(for: monthStart, dimension: dimension)
+        }
+        .onChange(of: monthStart) { _, m in
+            _ = viewModel.calendarCounts(for: m, dimension: dimension)
+        }
+        .onChange(of: dimension) { _, d in
+            _ = viewModel.calendarCounts(for: monthStart, dimension: d)
+        }
     }
 
     private var headerForCalendar: some View {

@@ -9,7 +9,7 @@ struct PathTreeView: View {
             OutlineGroup([root], children: \.children) { node in
                 HStack(spacing: 8) {
                     Text(node.name.isEmpty ? "/" : node.name)
-                        .font(.callout)
+                        .font(.caption)
                         .lineLimit(1)
                     Spacer(minLength: 6)
                     if node.count > 0 {
@@ -18,9 +18,10 @@ struct PathTreeView: View {
                             .foregroundStyle(.secondary)
                     }
                 }
-                .padding(.vertical, 2)
+                .padding(.vertical, 1)
+                .listRowInsets(EdgeInsets(top: 0, leading: 6, bottom: 0, trailing: 8))
                 .contentShape(Rectangle())
-                .onTapGesture { onSelect(node.id) }
+                // 单击保留默认行为（选中/展开），双击才应用筛选
                 .onTapGesture(count: 2) { onSelect(node.id) }
             }
         } else {
