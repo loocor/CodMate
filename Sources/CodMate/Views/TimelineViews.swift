@@ -91,7 +91,7 @@ struct TimelineBubble: View {
             timestamp: Date().addingTimeInterval(-3600),
             actor: .user,
             title: nil,
-            text: "请帮我优化这个 SwiftUI 应用的性能，特别是列表滚动时的卡顿问题。",
+            text: "Please help optimize this SwiftUI app's performance, especially list scrolling stutter.",
             metadata: nil
         ),
         TimelineEvent(
@@ -100,23 +100,23 @@ struct TimelineBubble: View {
             actor: .assistant,
             title: nil,
             text:
-                "我来帮你优化 SwiftUI 列表的性能。主要可以从以下几个方面入手：\n\n1. 使用 LazyVStack 或 LazyVGrid 替代 VStack\n2. 实现视图的复用机制\n3. 优化数据源结构\n4. 使用 @State 和 @Binding 合理管理状态",
+                "I'll help optimize SwiftUI list performance. Focus on:\n\n1. Use LazyVStack/LazyVGrid instead of VStack\n2. Reuse views where possible\n3. Optimize data structures\n4. Manage state with @State/@Binding appropriately",
             metadata: nil
         ),
         TimelineEvent(
             id: "event-3",
             timestamp: Date().addingTimeInterval(-3400),
             actor: .tool,
-            title: "代码分析",
-            text: "正在分析当前代码结构...",
+            title: "Code Analysis",
+            text: "Analyzing current code structure...",
             metadata: ["lines": "156", "complexity": "medium"]
         ),
         TimelineEvent(
             id: "event-4",
             timestamp: Date().addingTimeInterval(-3300),
             actor: .info,
-            title: "性能建议",
-            text: "检测到可能的性能瓶颈：\n- 列表项过于复杂\n- 缺少视图复用\n- 状态更新过于频繁",
+            title: "Performance Suggestions",
+            text: "Potential bottlenecks detected:\n- Rows too heavy\n- Missing view reuse\n- State updates too frequent",
             metadata: ["severity": "high", "category": "performance"]
         ),
         TimelineEvent(
@@ -125,7 +125,7 @@ struct TimelineBubble: View {
             actor: .assistant,
             title: nil,
             text:
-                "基于分析结果，我建议你采用以下优化方案：\n\n```swift\nstruct OptimizedListView: View {\n    @State private var items: [Item] = []\n    \n    var body: some View {\n        LazyVStack {\n            ForEach(items) { item in\n                OptimizedRowView(item: item)\n            }\n        }\n    }\n}\n```",
+                "Based on the analysis, I recommend the following optimizations:\n\n```swift\nstruct OptimizedListView: View {\n    @State private var items: [Item] = []\n    \n    var body: some View {\n        LazyVStack {\n            ForEach(items) { item in\n                OptimizedRowView(item: item)\n            }\n        }\n    }\n}\n```",
             metadata: nil
         ),
     ]
@@ -147,7 +147,7 @@ struct TimelineBubble: View {
         timestamp: Date(),
         actor: .user,
         title: nil,
-        text: "这是一个简单的用户消息，用于测试单条时间线事件的显示效果。",
+            text: "This is a simple user message to test single timeline event rendering.",
         metadata: nil
     )
 

@@ -24,9 +24,9 @@ struct SessionDetailView: View {
 
                 Group {
                     if loadingTimeline {
-                        ProgressView("正在加载会话内容…")
+                        ProgressView("Loading session content…")
                     } else if events.isEmpty {
-                        ContentUnavailableView("暂无可显示的消息", systemImage: "text.bubble")
+                        ContentUnavailableView("No messages to display", systemImage: "text.bubble")
                     } else {
                         TimelineView(events: events)
                     }
@@ -68,12 +68,12 @@ struct SessionDetailView: View {
     // metrics moved to list row per request
 
     private var metaSection: some View {
-        GroupBox("会话信息") {
+        GroupBox("Session Info") {
             VStack(alignment: .leading, spacing: 8) {
-                infoRow(title: "CLI 版本", value: summary.cliVersion, icon: "terminal")
+                infoRow(title: "CLI VERSION", value: summary.cliVersion, icon: "terminal")
                 infoRow(title: "Originator", value: summary.originator, icon: "person.circle")
-                infoRow(title: "工作目录", value: summary.cwd, icon: "folder")
-                infoRow(title: "文件大小", value: summary.fileSizeDisplay, icon: "externaldrive")
+                infoRow(title: "WORKING DIRECTORY", value: summary.cwd, icon: "folder")
+                infoRow(title: "FILE SIZE", value: summary.fileSizeDisplay, icon: "externaldrive")
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -103,7 +103,7 @@ struct SessionDetailView: View {
             DisclosureGroup(isExpanded: $instructionsExpanded) {
                 Group {
                     if instructionsLoading {
-                        ProgressView("正在加载指令…")
+                        ProgressView("Loading instructions…")
                     } else if let text = instructionsText ?? summary.instructions, !text.isEmpty {
                         Text(text)
                             .font(.system(.body, design: .rounded))
@@ -111,7 +111,7 @@ struct SessionDetailView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.top, 2)
                     } else {
-                        Text("未找到指令。")
+                        Text("No instructions found.")
                             .foregroundStyle(.secondary)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
@@ -129,7 +129,7 @@ struct SessionDetailView: View {
                     }
                 }
             } label: {
-                Label("任务指令", systemImage: "list.bullet.rectangle")
+                Label("Task Instructions", systemImage: "list.bullet.rectangle")
             }
         }
     }
@@ -140,7 +140,7 @@ extension SessionDetailView {
     private func exportMarkdown() {
         let md = buildMarkdown()
         let panel = NSSavePanel()
-        panel.title = "导出 Markdown"
+        panel.title = "Export Markdown"
         panel.allowedContentTypes = [.plainText]
         panel.nameFieldStringValue = summary.displayName + ".md"
         if panel.runModal() == .OK, let url = panel.url {
@@ -152,18 +152,18 @@ extension SessionDetailView {
         var lines: [String] = []
         lines.append("# \(summary.displayName)")
         lines.append("")
-        lines.append("- 开始时间：\(summary.startedAt)")
-        if let end = summary.lastUpdatedAt { lines.append("- 最后更新：\(end)") }
-        if let model = summary.model { lines.append("- 模型：\(model)") }
-        if let approval = summary.approvalPolicy { lines.append("- 审批策略：\(approval)") }
+        lines.append("- Started: \(summary.startedAt)")
+        if let end = summary.lastUpdatedAt { lines.append("- Last Updated: \(end)") }
+        if let model = summary.model { lines.append("- Model: \(model)") }
+        if let approval = summary.approvalPolicy { lines.append("- Approval Policy: \(approval)") }
         lines.append("")
         for e in events {
             let prefix: String
             switch e.actor {
-            case .user: prefix = "**用户**"
-            case .assistant: prefix = "**助手**"
-            case .tool: prefix = "**工具**"
-            case .info: prefix = "**信息**"
+            case .user: prefix = "**User**"
+            case .assistant: prefix = "**Assistant**"
+            case .tool: prefix = "**Tool**"
+            case .info: prefix = "**Info**"
             }
             lines.append("\(prefix) · \(e.timestamp)\n")
             if let title = e.title { lines.append("> \(title)") }
@@ -191,7 +191,7 @@ extension SessionDetailView {
         cliVersion: "1.2.3",
         cwd: "/Users/developer/projects/codmate",
         originator: "developer",
-        instructions: "请帮我优化这个 SwiftUI 应用的性能，特别是列表滚动时的卡顿问题。",
+        instructions: "Please help optimize this SwiftUI app's performance, especially list scroll stutter.",
         model: "gpt-4o-mini",
         approvalPolicy: "auto",
         userMessageCount: 5,
@@ -224,7 +224,7 @@ extension SessionDetailView {
         cliVersion: "1.2.3",
         cwd: "/Users/developer/projects/test",
         originator: "developer",
-        instructions: "创建一个简单的待办事项应用",
+        instructions: "Create a simple to-do app",
         model: "gpt-4o",
         approvalPolicy: "manual",
         userMessageCount: 3,

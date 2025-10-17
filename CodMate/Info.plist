@@ -12,6 +12,6 @@
 	<key>NSSupportsAutomaticGraphicsSwitching</key>
 	<true/>
 	<key>NSUserNotificationUsageDescription</key>
-	<string>需要向您显示恢复结果。</string>
+	<string>The recovery results need to be displayed to you.</string>
 </dict>
 </plist>

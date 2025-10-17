@@ -22,13 +22,13 @@ struct OpenAIClient: LLMClient {
 
     func generateTitleAndSummary(for text: String, model: String) async throws -> (title: String, summary: String) {
         let prompt = """
-        请为下面的对话生成：
-        1）一个不超过 30 个中文字符的标题，简洁概括主题；
-        2）一段 2-3 句的要点摘要（中文）。
-        仅以 JSON 返回，例如：{"title":"...","summary":"..."}
-        对话：\n\n\(text.prefix(6000))
+        Please generate the following for the conversation below:
+        1) A concise title (<= 30 characters) summarizing the topic.
+        2) A 2–3 sentence summary of key points.
+        Return JSON only, e.g.: {"title":"...","summary":"..."}
+        Conversation:\n\n\(text.prefix(6000))
         """
-        let req = ChatRequest(model: model, messages: [ .init(role: "system", content: "你是一名资深代码助理，擅长概括"), .init(role: "user", content: prompt) ], temperature: 0.2, max_tokens: 400)
+        let req = ChatRequest(model: model, messages: [ .init(role: "system", content: "You are an experienced coding assistant who writes clear English titles and summaries."), .init(role: "user", content: prompt) ], temperature: 0.2, max_tokens: 400)
         let url = URL(string: baseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/")) + "/v1/chat/completions")!
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -44,7 +44,7 @@ struct OpenAIClient: LLMClient {
                 return (parsed["title"] ?? "", parsed["summary"] ?? "")
             }
         }
-        // fallback：简单分行解析
+        // fallback: simple line-based parse
         let lines = content.split(separator: "\n")
         let title = lines.first.map(String.init) ?? ""
         let summary = lines.dropFirst().joined(separator: " ")

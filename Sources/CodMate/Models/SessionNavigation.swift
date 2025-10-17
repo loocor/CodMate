@@ -19,7 +19,7 @@ enum SessionNavigationItem: Hashable, Identifiable {
     var title: String {
         switch self {
         case .allSessions:
-            return "全部会话"
+            return "All Sessions"
         case let .calendarDay(day):
             let df = DateFormatter()
             df.dateStyle = .medium

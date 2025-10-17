@@ -8,8 +8,8 @@ enum DateDimension: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .created: return "创建日期"
-        case .updated: return "最后更新"
+        case .created: return "Created"
+        case .updated: return "Last Updated"
         }
     }
 }

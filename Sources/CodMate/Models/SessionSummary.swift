@@ -87,11 +87,11 @@ enum SessionSortOrder: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .mostRecent: return "最近更新"
-        case .longestDuration: return "持续时间"
-        case .mostActivity: return "交互次数"
-        case .alphabetical: return "名称排序"
-        case .largestSize: return "文件大小"
+        case .mostRecent: return "Most Recent"
+        case .longestDuration: return "Duration"
+        case .mostActivity: return "Activity"
+        case .alphabetical: return "Alphabetical"
+        case .largestSize: return "File Size"
         }
     }
 

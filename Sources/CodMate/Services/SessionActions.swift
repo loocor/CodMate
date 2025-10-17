@@ -13,11 +13,11 @@ enum SessionActionError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case let .executableNotFound(url):
-            return "未找到可执行的 codex CLI：\(url.path)"
+            return "Executable codex CLI not found: \(url.path)"
         case let .resumeFailed(output):
-            return "恢复会话失败：\(output)"
+            return "Failed to resume session: \(output)"
         case let .deletionFailed(url):
-            return "无法将文件移至废纸篓：\(url.path)"
+            return "Failed to move file to Trash: \(url.path)"
         }
     }
 }
