@@ -60,5 +60,22 @@ struct SessionTimelineLoader {
         }
         return events
     }
-}
 
+    func loadInstructions(url: URL) throws -> String? {
+        let data = try Data(contentsOf: url, options: [.mappedIfSafe])
+        guard !data.isEmpty else { return nil }
+        let newline: UInt8 = 0x0A
+        let carriageReturn: UInt8 = 0x0D
+        for var slice in data.split(separator: newline, omittingEmptySubsequences: true) {
+            if slice.last == carriageReturn { slice = slice.dropLast() }
+            guard !slice.isEmpty else { continue }
+            if let row = try? decoder.decode(SessionRow.self, from: Data(slice)) {
+                if case let .sessionMeta(payload) = row.kind, let i = payload.instructions, !i.isEmpty {
+                    return i
+                }
+            }
+            // early stop once we pass some reasonable number of lines
+        }
+        return nil
+    }
+}

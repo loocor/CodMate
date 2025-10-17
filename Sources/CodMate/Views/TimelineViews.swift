@@ -4,7 +4,7 @@ struct TimelineView: View {
     let events: [TimelineEvent]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        LazyVStack(alignment: .leading, spacing: 12) {
             ForEach(events) { e in
                 TimelineBubble(event: e)
             }
@@ -83,4 +83,3 @@ struct TimelineBubble: View {
         }
     }
 }
-
