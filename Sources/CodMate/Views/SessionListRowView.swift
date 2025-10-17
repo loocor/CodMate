@@ -48,7 +48,9 @@ struct SessionListRowView: View {
 
             Spacer()
         }
-        .padding(.vertical, 6)
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .padding(.vertical, 8)
+        .buttonStyle(.plain)
     }
 }
 
@@ -69,7 +71,8 @@ private func metric(icon: String, value: Int) -> some View {
         cliVersion: "1.2.3",
         cwd: "/Users/developer/projects/codmate",
         originator: "developer",
-        instructions: "Please help optimize this SwiftUI app's performance, especially scroll stutter in lists. It should remain smooth with large datasets.",
+        instructions:
+            "Please help optimize this SwiftUI app's performance, especially scroll stutter in lists. It should remain smooth with large datasets.",
         model: "gpt-4o-mini",
         approvalPolicy: "auto",
         userMessageCount: 5,

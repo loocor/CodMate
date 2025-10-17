@@ -36,11 +36,15 @@ struct ContentView: View {
                     selection: $selection,
                     sortOrder: $viewModel.sortOrder,
                     isLoading: viewModel.isLoading,
+                    isEnriching: viewModel.isEnriching,
+                    enrichmentProgress: viewModel.enrichmentProgress,
+                    enrichmentTotal: viewModel.enrichmentTotal,
                     onResume: resumeFromList,
                     onReveal: { viewModel.reveal(session: $0) },
-                    onDeleteRequest: handleDeleteRequest
+                    onDeleteRequest: handleDeleteRequest,
+                    onExportMarkdown: exportMarkdownForSession
                 )
-                .frame(minWidth: 320)
+                .navigationSplitViewColumnWidth(min: 420, ideal: 480, max: 600)
             } detail: {
                 detailColumn
             }
@@ -55,10 +59,6 @@ struct ContentView: View {
                 guard let message else { return }
                 alertState = AlertState(title: "Operation Failed", message: message)
                 viewModel.errorMessage = nil
-            }
-            .onChange(of: viewModel.selectedDay) { _, _ in
-                // 当日期过滤变更时，重新加载该范围内的 sessions
-                Task { await viewModel.refreshSessions() }
             }
             .toolbar {
                 ToolbarItem(placement: .automatic) {
@@ -320,15 +320,19 @@ private struct AlertState: Identifiable {
 extension ContentView {
     private func exportMarkdownForFocused() {
         guard let focused = focusedSummary else { return }
+        exportMarkdownForSession(focused)
+    }
+
+    private func exportMarkdownForSession(_ session: SessionSummary) {
         let loader = SessionTimelineLoader()
-        let events = (try? loader.load(url: focused.fileURL)) ?? []
+        let events = (try? loader.load(url: session.fileURL)) ?? []
         var lines: [String] = []
-        lines.append("# \(focused.displayName)")
+        lines.append("# \(session.displayName)")
         lines.append("")
-        lines.append("- Started: \(focused.startedAt)")
-        if let end = focused.lastUpdatedAt { lines.append("- Last Updated: \(end)") }
-        if let model = focused.model { lines.append("- Model: \(model)") }
-        if let approval = focused.approvalPolicy { lines.append("- Approval Policy: \(approval)") }
+        lines.append("- Started: \(session.startedAt)")
+        if let end = session.lastUpdatedAt { lines.append("- Last Updated: \(end)") }
+        if let model = session.model { lines.append("- Model: \(model)") }
+        if let approval = session.approvalPolicy { lines.append("- Approval Policy: \(approval)") }
         lines.append("")
         for e in events {
             let prefix: String
@@ -351,7 +355,7 @@ extension ContentView {
         let panel = NSSavePanel()
         panel.title = "Export Markdown"
         panel.allowedContentTypes = [.plainText]
-        panel.nameFieldStringValue = focused.displayName + ".md"
+        panel.nameFieldStringValue = session.displayName + ".md"
         if panel.runModal() == .OK, let url = panel.url {
             try? md.data(using: .utf8)?.write(to: url)
         }

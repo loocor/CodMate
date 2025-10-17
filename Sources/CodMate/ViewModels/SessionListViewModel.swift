@@ -10,24 +10,41 @@ final class SessionListViewModel: ObservableObject {
         didSet { applyFilters() }
     }
     @Published var isLoading = false
+    @Published var isEnriching = false
+    @Published var enrichmentProgress: Int = 0
+    @Published var enrichmentTotal: Int = 0
     @Published var errorMessage: String?
-    
+
     // 新的过滤状态：支持组合过滤
     @Published var selectedPath: String? = nil { didSet { applyFilters() } }
-    @Published var selectedDay: Date? = nil { didSet { applyFilters() } }
-    @Published var dateDimension: DateDimension = .updated { didSet { applyFilters() } }
-    
+    @Published var selectedDay: Date? = nil {
+        didSet {
+            // 日期改变可能影响 scope，需要重新加载
+            if oldValue != selectedDay {
+                Task { await refreshSessions() }
+            }
+        }
+    }
+    @Published var dateDimension: DateDimension = .updated {
+        didSet {
+            // 维度改变会影响 scope（created vs updated），需要重新加载
+            if oldValue != dateDimension {
+                Task { await refreshSessions() }
+            }
+        }
+    }
+
     let preferences: SessionPreferencesStore
 
     private let indexer: SessionIndexer
     private let actions: SessionActions
     private var allSessions: [SessionSummary] = []
-    private var fulltextMatches: Set<String> = [] // SessionSummary.id set
+    private var fulltextMatches: Set<String> = []  // SessionSummary.id set
     private var fulltextTask: Task<Void, Never>?
     private var enrichmentTask: Task<Void, Never>?
     @Published var globalSessionCount: Int = 0
     @Published private(set) var pathTreeRootPublished: PathTreeNode?
-    private var monthCountsCache: [String: [Int: Int]] = [:] // key: "dim|yyyy-MM"
+    private var monthCountsCache: [String: [Int: Int]] = [:]  // key: "dim|yyyy-MM"
 
     init(
         preferences: SessionPreferencesStore,
@@ -37,7 +54,10 @@ final class SessionListViewModel: ObservableObject {
         self.preferences = preferences
         self.indexer = indexer
         self.actions = actions
-        // 默认不选中任何过滤条件，显示所有会话
+        // 启动时默认状态：All Sessions（无目录过滤）+ 当天日期
+        let today = Date()
+        let cal = Calendar.current
+        self.selectedDay = cal.startOfDay(for: today)
     }
 
     func refreshSessions() async {
@@ -46,7 +66,8 @@ final class SessionListViewModel: ObservableObject {
 
         do {
             let scope = currentScope()
-            let sessions = try await indexer.refreshSessions(root: preferences.sessionsRoot, scope: scope)
+            let sessions = try await indexer.refreshSessions(
+                root: preferences.sessionsRoot, scope: scope)
             allSessions = sessions
             await computeCalendarCaches()
             applyFilters()
@@ -59,7 +80,8 @@ final class SessionListViewModel: ObservableObject {
 
     func resume(session: SessionSummary) async -> Result<ProcessResult, Error> {
         do {
-            let result = try await actions.resume(session: session, executableURL: preferences.codexExecutableURL)
+            let result = try await actions.resume(
+                session: session, executableURL: preferences.codexExecutableURL)
             return .success(result)
         } catch {
             return .failure(error)
@@ -102,7 +124,8 @@ final class SessionListViewModel: ObservableObject {
         let key = cacheKey(monthStart, dimension)
         if let cached = monthCountsCache[key] { return cached }
         Task { [monthStart, dimension] in
-            let counts = await indexer.computeCalendarCounts(root: preferences.sessionsRoot, monthStart: monthStart, dimension: dimension)
+            let counts = await indexer.computeCalendarCounts(
+                root: preferences.sessionsRoot, monthStart: monthStart, dimension: dimension)
             await MainActor.run {
                 self.monthCountsCache[self.cacheKey(monthStart, dimension)] = counts
                 self.objectWillChange.send()
@@ -121,17 +144,17 @@ final class SessionListViewModel: ObservableObject {
             await MainActor.run { self.pathTreeRootPublished = tree }
         }
     }
-    
+
     // MARK: - 过滤状态管理
-    
+
     func setSelectedPath(_ path: String?) {
         selectedPath = path
     }
-    
+
     func setSelectedDay(_ day: Date?) {
         selectedDay = day
     }
-    
+
     func clearAllFilters() {
         selectedPath = nil
         selectedDay = nil
@@ -145,12 +168,12 @@ final class SessionListViewModel: ObservableObject {
         }
 
         var filtered = allSessions
-        
+
         // 1. 目录过滤
         if let path = selectedPath {
             filtered = filtered.filter { $0.cwd.hasPrefix(path) }
         }
-        
+
         // 2. 日期过滤
         if let day = selectedDay {
             filtered = filtered.filter { sess in
@@ -166,7 +189,7 @@ final class SessionListViewModel: ObservableObject {
                 }
             }
         }
-        
+
         // 3. 搜索过滤
         let term = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         if !term.isEmpty {
@@ -174,10 +197,10 @@ final class SessionListViewModel: ObservableObject {
                 summary.matches(search: term) || fulltextMatches.contains(summary.id)
             }
         }
-        
+
         // 4. 排序
         filtered = sortOrder.sort(filtered)
-        
+
         // 5. 分组
         sections = Self.groupSessions(filtered)
     }
@@ -195,7 +218,8 @@ final class SessionListViewModel: ObservableObject {
             grouped[day, default: []].append(session)
         }
 
-        return grouped
+        return
+            grouped
             .sorted(by: { $0.key > $1.key })
             .map { day, sessions in
                 let totalDuration = sessions.reduce(into: 0.0) { $0 += $1.duration }
@@ -221,7 +245,7 @@ final class SessionListViewModel: ObservableObject {
     // MARK: - Fulltext search
 
     private func scheduleFulltextSearchIfNeeded() {
-        applyFilters() // still update with metadata-only matches quickly
+        applyFilters()  // still update with metadata-only matches quickly
         fulltextTask?.cancel()
         let term = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !term.isEmpty else {
@@ -245,17 +269,26 @@ final class SessionListViewModel: ObservableObject {
     }
 
     // MARK: - Calendar caches (placeholder for future optimization)
-    private func computeCalendarCaches() async { }
+    private func computeCalendarCaches() async {}
 
     // MARK: - Background enrichment
     private func startBackgroundEnrichment() {
         enrichmentTask?.cancel()
-        let sessions = allSessions // snapshot
+        let sessions = allSessions  // snapshot
         enrichmentTask = Task { [weak self] in
             guard let self else { return }
+
+            await MainActor.run {
+                self.isEnriching = true
+                self.enrichmentProgress = 0
+                self.enrichmentTotal = sessions.count
+            }
+
             let concurrency = max(2, ProcessInfo.processInfo.processorCount / 2)
             try? await withThrowingTaskGroup(of: (String, SessionSummary)?.self) { group in
                 var iterator = sessions.makeIterator()
+                var processedCount = 0
+
                 func addNext(_ n: Int) {
                     for _ in 0..<n {
                         guard let s = iterator.next() else { return }
@@ -270,35 +303,63 @@ final class SessionListViewModel: ObservableObject {
                 }
                 addNext(concurrency)
                 var updatesBuffer: [(String, SessionSummary)] = []
+                var lastFlushTime = ContinuousClock.now
                 func flush() async {
                     guard !updatesBuffer.isEmpty else { return }
                     await MainActor.run {
-                        var map = Dictionary(uniqueKeysWithValues: self.allSessions.map { ($0.id, $0) })
+                        var map = Dictionary(
+                            uniqueKeysWithValues: self.allSessions.map { ($0.id, $0) })
                         for (id, item) in updatesBuffer { map[id] = item }
                         self.allSessions = Array(map.values)
                         self.applyFilters()
                     }
                     updatesBuffer.removeAll(keepingCapacity: true)
+                    lastFlushTime = ContinuousClock.now
                 }
                 while let result = try await group.next() {
                     if let (id, enriched) = result {
                         updatesBuffer.append((id, enriched))
-                        if updatesBuffer.count >= 10 { await flush() }
+                        processedCount += 1
+
+                        await MainActor.run {
+                            self.enrichmentProgress = processedCount
+                        }
+
+                        let now = ContinuousClock.now
+                        let elapsed = lastFlushTime.duration(to: now)
+                        // Flush if buffer is large (50 items) OR enough time passed (1 second)
+                        if updatesBuffer.count >= 50 || elapsed.components.seconds >= 1 {
+                            await flush()
+                        }
                     }
                     addNext(1)
                 }
                 await flush()
+
+                await MainActor.run {
+                    self.isEnriching = false
+                    self.enrichmentProgress = 0
+                    self.enrichmentTotal = 0
+                }
             }
         }
     }
 
     private func currentScope() -> SessionLoadScope {
-        // 如果选中了具体日期，只加载该日的数据
+        // 如果选中了具体日期，根据维度决定加载范围
         if let day = selectedDay {
-            return .day(day)
+            switch dateDimension {
+            case .created:
+                // Created 维度：只加载该日目录下的文件
+                return .day(day)
+            case .updated:
+                // Updated 维度：需要加载整个月的数据，因为文件可能在其他日期目录
+                // 然后在 applyFilters 中根据 lastUpdatedAt 过滤
+                return .month(day)
+            }
         }
-        // 否则默认加载今天的数据（快速启动）
-        return .today
+        // 无日期过滤时：加载所有数据
+        return .all
     }
 }
 
@@ -309,8 +370,10 @@ extension SessionListViewModel {
     }
 }
 
-private extension SessionListViewModel {
-    func cacheKey(_ monthStart: Date, _ dimension: DateDimension) -> String {
-        let df = DateFormatter(); df.dateFormat = "yyyy-MM"; return dimension.rawValue + "|" + df.string(from: monthStart)
+extension SessionListViewModel {
+    fileprivate func cacheKey(_ monthStart: Date, _ dimension: DateDimension) -> String {
+        let df = DateFormatter()
+        df.dateFormat = "yyyy-MM"
+        return dimension.rawValue + "|" + df.string(from: monthStart)
     }
 }
