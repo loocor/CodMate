@@ -34,15 +34,14 @@ struct SessionListRowView: View {
                     .lineLimit(2)
 
                 // Compact metrics moved from detail view
-                HStack(spacing: 10) {
-                    Label("\(summary.userMessageCount)", systemImage: "person")
-                    Label("\(summary.assistantMessageCount)", systemImage: "sparkles")
-                    Label("\(summary.toolInvocationCount)", systemImage: "hammer")
+                HStack(spacing: 12) {
+                    metric(icon: "person", value: summary.userMessageCount)
+                    metric(icon: "sparkles", value: summary.assistantMessageCount)
+                    metric(icon: "hammer", value: summary.toolInvocationCount)
                     if let reasoning = summary.responseCounts["reasoning"], reasoning > 0 {
-                        Label("\(reasoning)", systemImage: "brain")
+                        metric(icon: "brain", value: reasoning)
                     }
                 }
-                .labelStyle(.iconOnly)
                 .font(.caption2.monospacedDigit())
                 .foregroundStyle(.secondary)
             }
@@ -50,5 +49,12 @@ struct SessionListRowView: View {
             Spacer()
         }
         .padding(.vertical, 6)
+    }
+}
+
+private func metric(icon: String, value: Int) -> some View {
+    HStack(spacing: 4) {
+        Image(systemName: icon)
+        Text("\(value)")
     }
 }

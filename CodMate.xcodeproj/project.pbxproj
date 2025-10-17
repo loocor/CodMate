@@ -28,6 +28,7 @@
 		1A0001342A00000100000001 /* TimelineEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0001242A00000100000001 /* TimelineEvent.swift */; };
 		1A0001352A00000100000001 /* SessionTimelineLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0001252A00000100000001 /* SessionTimelineLoader.swift */; };
 		1A0001362A00000100000001 /* TimelineViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0001262A00000100000001 /* TimelineViews.swift */; };
+		31B6266A2EA244D9008CA40F /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31B626692EA244D9008CA40F /* SettingsView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -54,6 +55,7 @@
 		1A0001242A00000100000001 /* TimelineEvent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = TimelineEvent.swift; path = Sources/CodMate/Models/TimelineEvent.swift; sourceTree = SOURCE_ROOT; };
 		1A0001252A00000100000001 /* SessionTimelineLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SessionTimelineLoader.swift; path = Sources/CodMate/Services/SessionTimelineLoader.swift; sourceTree = SOURCE_ROOT; };
 		1A0001262A00000100000001 /* TimelineViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = TimelineViews.swift; path = Sources/CodMate/Views/TimelineViews.swift; sourceTree = SOURCE_ROOT; };
+		31B626692EA244D9008CA40F /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -92,33 +94,6 @@
 			name = CodMate;
 			sourceTree = SOURCE_ROOT;
 		};
-		1A00020A2A00000100000001 /* ViewModels */ = {isa = PBXGroup; children = (
-				1A0000832A00000100000001 /* SessionListViewModel.swift */,
-			); name = ViewModels; sourceTree = SOURCE_ROOT; };
-		1A00020B2A00000100000001 /* Models */ = {isa = PBXGroup; children = (
-				1A0001202A00000100000001 /* DateDimension.swift */,
-				1A0000872A00000100000001 /* SessionSummary.swift */,
-				1A0000882A00000100000001 /* SessionEvent.swift */,
-				1A0001242A00000100000001 /* TimelineEvent.swift */,
-				1A0000892A00000100000001 /* SessionNavigation.swift */,
-				1A0001212A00000100000001 /* PathTree.swift */,
-			); name = Models; sourceTree = SOURCE_ROOT; };
-		1A00020C2A00000100000001 /* Services */ = {isa = PBXGroup; children = (
-				1A0000842A00000100000001 /* SessionIndexer.swift */,
-				1A0000852A00000100000001 /* SessionActions.swift */,
-				1A0000862A00000100000001 /* SessionPreferencesStore.swift */,
-				1A0001252A00000100000001 /* SessionTimelineLoader.swift */,
-			); name = Services; sourceTree = SOURCE_ROOT; };
-		1A00020D2A00000100000001 /* Views */ = {isa = PBXGroup; children = (
-				1A00008A2A00000100000001 /* SessionNavigationView.swift */,
-				1A0001222A00000100000001 /* CalendarMonthView.swift */,
-				1A0001232A00000100000001 /* PathTreeView.swift */,
-				1A00008B2A00000100000001 /* SessionListColumnView.swift */,
-				1A00008C2A00000100000001 /* SessionListRowView.swift */,
-				1A00008D2A00000100000001 /* SessionDetailView.swift */,
-				1A0001262A00000100000001 /* TimelineViews.swift */,
-				1A00008E2A00000100000001 /* ToastView.swift */,
-			); name = Views; sourceTree = SOURCE_ROOT; };
 		1A00000C2A00000100000001 /* Sources */ = {
 			isa = PBXGroup;
 			children = (
@@ -128,8 +103,56 @@
 				1A00020A2A00000100000001 /* ViewModels */,
 				1A00020C2A00000100000001 /* Services */,
 				1A00020D2A00000100000001 /* Views */,
+				31B626692EA244D9008CA40F /* SettingsView.swift */,
 			);
 			name = Sources;
+			sourceTree = SOURCE_ROOT;
+		};
+		1A00020A2A00000100000001 /* ViewModels */ = {
+			isa = PBXGroup;
+			children = (
+				1A0000832A00000100000001 /* SessionListViewModel.swift */,
+			);
+			name = ViewModels;
+			sourceTree = SOURCE_ROOT;
+		};
+		1A00020B2A00000100000001 /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				1A0001202A00000100000001 /* DateDimension.swift */,
+				1A0000872A00000100000001 /* SessionSummary.swift */,
+				1A0000882A00000100000001 /* SessionEvent.swift */,
+				1A0001242A00000100000001 /* TimelineEvent.swift */,
+				1A0000892A00000100000001 /* SessionNavigation.swift */,
+				1A0001212A00000100000001 /* PathTree.swift */,
+			);
+			name = Models;
+			sourceTree = SOURCE_ROOT;
+		};
+		1A00020C2A00000100000001 /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				1A0000842A00000100000001 /* SessionIndexer.swift */,
+				1A0000852A00000100000001 /* SessionActions.swift */,
+				1A0000862A00000100000001 /* SessionPreferencesStore.swift */,
+				1A0001252A00000100000001 /* SessionTimelineLoader.swift */,
+			);
+			name = Services;
+			sourceTree = SOURCE_ROOT;
+		};
+		1A00020D2A00000100000001 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				1A00008A2A00000100000001 /* SessionNavigationView.swift */,
+				1A0001222A00000100000001 /* CalendarMonthView.swift */,
+				1A0001232A00000100000001 /* PathTreeView.swift */,
+				1A00008B2A00000100000001 /* SessionListColumnView.swift */,
+				1A00008C2A00000100000001 /* SessionListRowView.swift */,
+				1A00008D2A00000100000001 /* SessionDetailView.swift */,
+				1A0001262A00000100000001 /* TimelineViews.swift */,
+				1A00008E2A00000100000001 /* ToastView.swift */,
+			);
+			name = Views;
 			sourceTree = SOURCE_ROOT;
 		};
 /* End PBXGroup section */
@@ -216,6 +239,7 @@
 				1A0001342A00000100000001 /* TimelineEvent.swift in Sources */,
 				1A0001352A00000100000001 /* SessionTimelineLoader.swift in Sources */,
 				1A0001362A00000100000001 /* TimelineViews.swift in Sources */,
+				31B6266A2EA244D9008CA40F /* SettingsView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
