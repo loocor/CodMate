@@ -37,7 +37,8 @@ final class SessionListViewModel: ObservableObject {
         defer { isLoading = false }
 
         do {
-            let sessions = try await indexer.refreshSessions(root: preferences.sessionsRoot)
+            let scope = currentScope()
+            let sessions = try await indexer.refreshSessions(root: preferences.sessionsRoot, scope: scope)
             allSessions = sessions
             await computeCalendarCaches()
             applyFilters()
@@ -251,6 +252,17 @@ final class SessionListViewModel: ObservableObject {
                 }
                 await flush()
             }
+        }
+    }
+
+    private func currentScope() -> SessionLoadScope {
+        switch navigationSelection {
+        case .allSessions:
+            return .today
+        case let .calendarDay(day):
+            return .day(day)
+        case .pathPrefix:
+            return .today
         }
     }
 }

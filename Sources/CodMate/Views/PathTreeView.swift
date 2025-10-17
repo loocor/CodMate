@@ -21,6 +21,7 @@ struct PathTreeView: View {
                 .padding(.vertical, 2)
                 .contentShape(Rectangle())
                 .onTapGesture { onSelect(node.id) }
+                .onTapGesture(count: 2) { onSelect(node.id) }
             }
         } else {
             ContentUnavailableView("暂无目录", systemImage: "folder")

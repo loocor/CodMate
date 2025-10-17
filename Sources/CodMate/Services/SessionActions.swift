@@ -25,22 +25,54 @@ enum SessionActionError: LocalizedError {
 struct SessionActions {
     private let fileManager: FileManager = .default
 
-    func resume(session: SessionSummary, executableURL: URL) async throws -> ProcessResult {
-        guard fileManager.isExecutableFile(atPath: executableURL.path) else {
-            throw SessionActionError.executableNotFound(executableURL)
+    func resolveExecutableURL(preferred: URL?) -> URL? {
+        if let preferred, fileManager.isExecutableFile(atPath: preferred.path) { return preferred }
+        // Try /opt/homebrew/bin, /usr/local/bin, PATH via /usr/bin/which
+        let candidates = ["/opt/homebrew/bin/codex", "/usr/local/bin/codex", "/usr/bin/codex", "/bin/codex"]
+        for path in candidates { if fileManager.isExecutableFile(atPath: path) { return URL(fileURLWithPath: path) } }
+        // which codex
+        let which = Process()
+        which.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        which.arguments = ["which", "codex"]
+        let pipe = Pipe()
+        which.standardOutput = pipe
+        which.standardError = Pipe()
+        try? which.run()
+        which.waitUntilExit()
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        if which.terminationStatus == 0, let str = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines), !str.isEmpty {
+            if fileManager.isExecutableFile(atPath: str) { return URL(fileURLWithPath: str) }
         }
+        return nil
+    }
+
+    func resume(session: SessionSummary, executableURL: URL) async throws -> ProcessResult {
+        guard let exec = resolveExecutableURL(preferred: executableURL) else { throw SessionActionError.executableNotFound(executableURL) }
 
         return try await withCheckedThrowingContinuation { continuation in
             Task.detached {
                 do {
                     let process = Process()
-                    process.executableURL = executableURL
+                    process.executableURL = exec
                     process.arguments = ["resume", session.id]
-                    process.currentDirectoryURL = session.fileURL.deletingLastPathComponent()
+                    // Prefer original session cwd if exists
+                    if FileManager.default.fileExists(atPath: session.cwd) {
+                        process.currentDirectoryURL = URL(fileURLWithPath: session.cwd, isDirectory: true)
+                    } else {
+                        process.currentDirectoryURL = session.fileURL.deletingLastPathComponent()
+                    }
 
                     let pipe = Pipe()
                     process.standardOutput = pipe
                     process.standardError = pipe
+                    var env = ProcessInfo.processInfo.environment
+                    let injectedPATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+                    if let current = env["PATH"], !current.isEmpty {
+                        env["PATH"] = injectedPATH + ":" + current
+                    } else {
+                        env["PATH"] = injectedPATH
+                    }
+                    process.environment = env
 
                     try process.run()
                     process.waitUntilExit()
