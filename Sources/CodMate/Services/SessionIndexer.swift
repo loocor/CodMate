@@ -118,7 +118,7 @@ actor SessionIndexer {
 
     private func sessionFileURLs(at root: URL, scope: SessionLoadScope) throws -> [URL] {
         var urls: [URL] = []
-        let (base, depth): (URL, Int) = {
+        let (base, _): (URL, Int) = {
             let cal = Calendar.current
             switch scope {
             case .today:
@@ -145,7 +145,7 @@ actor SessionIndexer {
             }
         }()
 
-        var enumeratorURL = base
+        let enumeratorURL = base
         var isDir: ObjCBool = false
         if !fileManager.fileExists(atPath: enumeratorURL.path, isDirectory: &isDir) || !isDir.boolValue {
             return []
@@ -174,7 +174,11 @@ actor SessionIndexer {
         var monthURL = root.appendingPathComponent("\(year)", isDirectory: true)
         monthURL.appendPathComponent("\(month)", isDirectory: true)
         guard let enumerator = fileManager.enumerator(at: monthURL, includingPropertiesForKeys: [.isRegularFileKey, .contentModificationDateKey], options: [.skipsHiddenFiles, .skipsPackageDescendants]) else { return [:] }
-        for case let url as URL in enumerator {
+        
+        // Collect URLs synchronously first to avoid Swift 6 async/iterator issues
+        let urls = enumerator.compactMap { $0 as? URL }
+        
+        for url in urls {
             guard url.pathExtension.lowercased() == "jsonl" else { continue }
             switch dimension {
             case .created:
@@ -194,8 +198,12 @@ actor SessionIndexer {
     func collectCWDCounts(root: URL) async -> [String: Int] {
         var result: [String: Int] = [:]
         guard let enumerator = fileManager.enumerator(at: root, includingPropertiesForKeys: [.isRegularFileKey, .contentModificationDateKey], options: [.skipsHiddenFiles, .skipsPackageDescendants]) else { return [:] }
+        
+        // Collect URLs synchronously first to avoid Swift 6 async/iterator issues
+        let urls = enumerator.compactMap { $0 as? URL }
+        
         await withTaskGroup(of: (String, Int)?.self) { group in
-            for case let url as URL in enumerator {
+            for url in urls {
                 guard url.pathExtension.lowercased() == "jsonl" else { continue }
                 group.addTask { [weak self] in
                     guard let self else { return nil }
@@ -240,7 +248,6 @@ actor SessionIndexer {
         let newline: UInt8 = 0x0A
         let carriageReturn: UInt8 = 0x0D
         var lineCount = 0
-        var lastError: Error?
         for var slice in data.split(separator: newline, omittingEmptySubsequences: true) {
             if slice.last == carriageReturn { slice = slice.dropLast() }
             guard !slice.isEmpty else { continue }
@@ -250,7 +257,7 @@ actor SessionIndexer {
                 let row = try decoder.decode(SessionRow.self, from: Data(slice))
                 builder.observe(row)
             } catch {
-                lastError = error
+                // Silently ignore parse errors for individual lines
             }
             lineCount += 1
         }
@@ -346,7 +353,11 @@ actor SessionIndexer {
     func countAllSessions(root: URL) async -> Int {
         var total = 0
         guard let enumerator = fileManager.enumerator(at: root, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles, .skipsPackageDescendants]) else { return 0 }
-        for case let url as URL in enumerator {
+        
+        // Collect URLs synchronously first to avoid Swift 6 async/iterator issues
+        let urls = enumerator.compactMap { $0 as? URL }
+        
+        for url in urls {
             if url.pathExtension.lowercased() == "jsonl" { total += 1 }
         }
         return total

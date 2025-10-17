@@ -8,58 +8,102 @@ struct CalendarMonthView: View {
     var body: some View {
         let cal = Calendar.current
         let weekdaySymbols = cal.shortStandaloneWeekdaySymbols
+        let grid = monthGrid()
+        let spacing: CGFloat = 2
 
-        VStack(spacing: 8) {
-            HStack(spacing: 0) {
-                ForEach(weekdaySymbols, id: \.self) { w in
-                    Text(w)
-                        .frame(maxWidth: .infinity)
-                        .foregroundStyle(.secondary)
-                        .font(.caption)
-                }
+        GeometryReader { geometry in
+            let totalWidth = geometry.size.width
+            let columnWidth = (totalWidth - spacing * 6) / 7
+            
+            VStack(spacing: 8) {
+                weekdayHeader(weekdaySymbols: weekdaySymbols, columnWidth: columnWidth, spacing: spacing)
+                
+                calendarGrid(
+                    grid: grid,
+                    calendar: cal,
+                    columnWidth: columnWidth,
+                    spacing: spacing
+                )
             }
-
-            let grid = monthGrid()
-            VStack(spacing: 2) {
-                ForEach(0..<grid.count, id: \.self) { row in
-                    HStack(spacing: 0) {
-                        ForEach(grid[row], id: \.self) { day in
-                            Button {
-                                if day > 0 {
-                                    let date = cal.date(bySetting: .day, value: day, of: monthStart)!
-                                    onSelectDay(cal.startOfDay(for: date))
-                                }
-                            } label: {
-                                ZStack {
-                                    RoundedRectangle(cornerRadius: 6)
-                                        .fill(day > 0 ? Color.secondary.opacity(0.06) : Color.clear)
-                                    VStack(spacing: 2) {
-                                        Text(day > 0 ? "\(day)" : "")
-                                            .font(.caption)
-                                            .frame(maxWidth: .infinity, alignment: .leading)
-                                        Group {
-                                            if day > 0, let c = counts[day], c > 0 {
-                                                Text("\(c)")
-                                                    .font(.caption2.bold())
-                                                    .foregroundStyle(.white)
-                                                    .padding(.horizontal, 6)
-                                                    .padding(.vertical, 2)
-                                                    .background(
-                                                        Capsule().fill(Color.accentColor.opacity(0.85)))
-                                            } else {
-                                                EmptyView()
-                                            }
-                                        }
-                                    }
-                                    .padding(.horizontal, 4)
-                                    .padding(.vertical, 6)
-                                }
-                            }
-                            .buttonStyle(.plain)
-                            .frame(maxWidth: .infinity, minHeight: 34)
-                        }
-                    }
-                }
+        }
+    }
+    
+    private func weekdayHeader(weekdaySymbols: [String], columnWidth: CGFloat, spacing: CGFloat) -> some View {
+        HStack(spacing: spacing) {
+            ForEach(weekdaySymbols, id: \.self) { w in
+                Text(w)
+                    .frame(width: columnWidth)
+                    .foregroundStyle(.secondary)
+                    .font(.caption)
+            }
+        }
+    }
+    
+    private func calendarGrid(grid: [[Int]], calendar: Calendar, columnWidth: CGFloat, spacing: CGFloat) -> some View {
+        VStack(spacing: spacing) {
+            ForEach(0..<grid.count, id: \.self) { row in
+                calendarRow(
+                    days: grid[row],
+                    calendar: calendar,
+                    columnWidth: columnWidth,
+                    spacing: spacing
+                )
+            }
+        }
+    }
+    
+    private func calendarRow(days: [Int], calendar: Calendar, columnWidth: CGFloat, spacing: CGFloat) -> some View {
+        HStack(spacing: spacing) {
+            ForEach(Array(days.enumerated()), id: \.offset) { _, day in
+                dayCell(day: day, calendar: calendar, columnWidth: columnWidth)
+            }
+        }
+    }
+    
+    private func dayCell(day: Int, calendar: Calendar, columnWidth: CGFloat) -> some View {
+        Button {
+            if day > 0 {
+                let date = calendar.date(bySetting: .day, value: day, of: monthStart)!
+                onSelectDay(calendar.startOfDay(for: date))
+            }
+        } label: {
+            dayCellContent(day: day)
+        }
+        .buttonStyle(.plain)
+        .frame(width: columnWidth, height: 46)
+    }
+    
+    private func dayCellContent(day: Int) -> some View {
+        ZStack(alignment: .topLeading) {
+            RoundedRectangle(cornerRadius: 6)
+                .fill(day > 0 ? Color.secondary.opacity(0.06) : Color.clear)
+            
+            if day > 0 {
+                dayNumber(day: day)
+            }
+            
+            if day > 0, let count = counts[day], count > 0 {
+                sessionCount(count: count)
+            }
+        }
+    }
+    
+    private func dayNumber(day: Int) -> some View {
+        Text("\(day)")
+            .font(.caption)
+            .foregroundStyle(.secondary.opacity(0.5))
+            .padding(4)
+    }
+    
+    private func sessionCount(count: Int) -> some View {
+        VStack {
+            Spacer()
+            HStack {
+                Spacer()
+                Text("\(count)")
+                    .font(.body.bold())
+                    .foregroundStyle(.primary)
+                    .padding(4)
             }
         }
     }
