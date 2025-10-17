@@ -61,19 +61,22 @@ struct ContentView: View {
                 viewModel.errorMessage = nil
             }
             .toolbar {
-                ToolbarItem(placement: .automatic) {
-                    TextField("Search Sessions", text: $viewModel.searchText)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(width: 260)
-                }
-                ToolbarItem(placement: .automatic) {
-                    Button {
-                        Task { await viewModel.refreshSessions() }
-                    } label: {
-                        Label("Refresh", systemImage: "arrow.clockwise.circle.fill")
-                    }
-                    .controlSize(.large)
-                    .help("Refresh session index")
+                ToolbarItem(placement: .primaryAction) {
+                    HStack(spacing: 12) {
+                        TextField("Search Sessions", text: $viewModel.searchText)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(width: 360)
+
+                        Button {
+                            Task { await viewModel.refreshSessions() }
+                        } label: {
+                            Image(systemName: "arrow.clockwise")
+                                .font(.system(size: 16, weight: .medium))
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .help("Refresh session index")
+                    }.padding(.horizontal, 4)
                 }
             }
             .alert(item: $alertState) { state in
@@ -149,37 +152,49 @@ struct ContentView: View {
 
     private var detailActionBar: some View {
         HStack(spacing: 12) {
+            if let focused = focusedSummary {
+                Text(focused.displayName)
+                    .font(.headline)
+                    .foregroundStyle(.primary)
+            }
+
             Spacer()
 
-            Button {
-                if let focused = focusedSummary { resume(session: focused) }
-            } label: {
-                Label("Resume", systemImage: "play.fill")
-            }
-            .disabled(isPerformingAction || focusedSummary == nil)
+            HStack(spacing: 8) {
+                Button {
+                    if let focused = focusedSummary { resume(session: focused) }
+                } label: {
+                    Image(systemName: "play.fill")
+                }
+                .disabled(isPerformingAction || focusedSummary == nil)
+                .help("Resume")
 
-            Button {
-                if let focused = focusedSummary { viewModel.reveal(session: focused) }
-            } label: {
-                Label("Reveal in Finder", systemImage: "folder")
-            }
-            .disabled(focusedSummary == nil)
+                Button {
+                    if let focused = focusedSummary { viewModel.reveal(session: focused) }
+                } label: {
+                    Image(systemName: "folder")
+                }
+                .disabled(focusedSummary == nil)
+                .help("Reveal in Finder")
 
-            Button(role: .destructive) {
-                presentDeleteConfirmation()
-            } label: {
-                Label("Delete", systemImage: "trash")
-            }
-            .disabled(selection.isEmpty || isPerformingAction)
+                Button {
+                    exportMarkdownForFocused()
+                } label: {
+                    Image(systemName: "square.and.arrow.down")
+                }
+                .disabled(focusedSummary == nil)
+                .help("Export Markdown")
 
-            Button {
-                exportMarkdownForFocused()
-            } label: {
-                Label("Export Markdown", systemImage: "square.and.arrow.down")
+                Button(role: .destructive) {
+                    presentDeleteConfirmation()
+                } label: {
+                    Image(systemName: "trash")
+                }
+                .disabled(selection.isEmpty || isPerformingAction)
+                .help("Delete")
             }
-            .disabled(focusedSummary == nil)
+            .buttonStyle(.bordered)
         }
-        .buttonStyle(.bordered)
     }
 
     private var focusedSummary: SessionSummary? {
