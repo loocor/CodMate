@@ -5,27 +5,24 @@ struct CalendarMonthView: View {
     let counts: [Int: Int]
     let onSelectDay: (Date) -> Void
 
-    private var title: String {
-        let df = DateFormatter()
-        df.dateFormat = "yyyy年MM月"
-        return df.string(from: monthStart)
-    }
-
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(title).font(.headline)
-            let cal = Calendar.current
-            let weekdaySymbols = cal.shortStandaloneWeekdaySymbols
-            HStack {
+        let cal = Calendar.current
+        let weekdaySymbols = cal.shortStandaloneWeekdaySymbols
+
+        VStack(spacing: 8) {
+            HStack(spacing: 0) {
                 ForEach(weekdaySymbols, id: \.self) { w in
-                    Text(w).frame(maxWidth: .infinity).foregroundStyle(.secondary).font(.caption)
+                    Text(w)
+                        .frame(maxWidth: .infinity)
+                        .foregroundStyle(.secondary)
+                        .font(.caption)
                 }
             }
 
             let grid = monthGrid()
-            VStack(spacing: 4) {
+            VStack(spacing: 2) {
                 ForEach(0..<grid.count, id: \.self) { row in
-                    HStack(spacing: 4) {
+                    HStack(spacing: 0) {
                         ForEach(grid[row], id: \.self) { day in
                             Button {
                                 if day > 0 {
@@ -47,11 +44,15 @@ struct CalendarMonthView: View {
                                                     .foregroundStyle(.white)
                                                     .padding(.horizontal, 6)
                                                     .padding(.vertical, 2)
-                                                    .background(Capsule().fill(Color.accentColor.opacity(0.85)))
-                                            } else { EmptyView() }
+                                                    .background(
+                                                        Capsule().fill(Color.accentColor.opacity(0.85)))
+                                            } else {
+                                                EmptyView()
+                                            }
                                         }
                                     }
-                                    .padding(6)
+                                    .padding(.horizontal, 4)
+                                    .padding(.vertical, 6)
                                 }
                             }
                             .buttonStyle(.plain)
@@ -70,6 +71,32 @@ struct CalendarMonthView: View {
         let leading = (firstWeekdayIndex + 7) % 7
         var days = Array(repeating: 0, count: leading) + Array(range)
         while days.count % 7 != 0 { days.append(0) }
-        return stride(from: 0, to: days.count, by: 7).map { Array(days[$0..<$0+7]) }
+        return stride(from: 0, to: days.count, by: 7).map { Array(days[$0..<$0 + 7]) }
     }
+}
+
+#Preview {
+    let calendar = Calendar.current
+    let monthStart = calendar.date(from: DateComponents(year: 2024, month: 12, day: 1))!
+
+    // Mock data with some days having session counts
+    let mockCounts: [Int: Int] = [
+        3: 2,
+        7: 1,
+        12: 4,
+        15: 1,
+        18: 3,
+        22: 2,
+        25: 1,
+        28: 5,
+    ]
+
+    return CalendarMonthView(
+        monthStart: monthStart,
+        counts: mockCounts
+    ) { selectedDay in
+        print("Selected day: \(selectedDay)")
+    }
+    .padding()
+    .frame(width: 300)
 }

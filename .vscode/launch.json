@@ -1,0 +1,22 @@
+{
+  "configurations": [
+    {
+      "type": "lldb",
+      "request": "launch",
+      "args": [],
+      "cwd": "${workspaceFolder:CodMate}",
+      "name": "Debug CodMate",
+      "program": "${workspaceFolder:CodMate}/.build/debug/CodMate",
+      "preLaunchTask": "swift: Build Debug CodMate"
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "args": [],
+      "cwd": "${workspaceFolder:CodMate}",
+      "name": "Release CodMate",
+      "program": "${workspaceFolder:CodMate}/.build/release/CodMate",
+      "preLaunchTask": "swift: Build Release CodMate"
+    }
+  ]
+}

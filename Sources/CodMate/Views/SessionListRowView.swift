@@ -58,3 +58,88 @@ private func metric(icon: String, value: Int) -> some View {
         Text("\(value)")
     }
 }
+
+#Preview {
+    let mockSummary = SessionSummary(
+        id: "session-preview",
+        fileURL: URL(fileURLWithPath: "/Users/developer/.codex/sessions/session-preview.json"),
+        fileSizeBytes: 12340,
+        startedAt: Date().addingTimeInterval(-3600),
+        endedAt: Date().addingTimeInterval(-1800),
+        cliVersion: "1.2.3",
+        cwd: "/Users/developer/projects/codmate",
+        originator: "developer",
+        instructions: "请帮我优化这个 SwiftUI 应用的性能，特别是列表滚动时的卡顿问题。我们需要确保在大量数据的情况下仍能保持流畅的用户体验。",
+        model: "gpt-4o-mini",
+        approvalPolicy: "auto",
+        userMessageCount: 5,
+        assistantMessageCount: 4,
+        toolInvocationCount: 3,
+        responseCounts: ["reasoning": 2],
+        turnContextCount: 8,
+        eventCount: 12,
+        lineCount: 156,
+        lastUpdatedAt: Date().addingTimeInterval(-1800)
+    )
+
+    return SessionListRowView(summary: mockSummary)
+        .frame(width: 400, height: 120)
+        .padding()
+}
+
+#Preview("Short Instructions") {
+    let mockSummary = SessionSummary(
+        id: "session-short",
+        fileURL: URL(fileURLWithPath: "/Users/developer/.codex/sessions/session-short.json"),
+        fileSizeBytes: 5600,
+        startedAt: Date().addingTimeInterval(-7200),
+        endedAt: Date().addingTimeInterval(-6900),
+        cliVersion: "1.2.3",
+        cwd: "/Users/developer/projects/test",
+        originator: "developer",
+        instructions: "创建待办事项应用",
+        model: "gpt-4o",
+        approvalPolicy: "manual",
+        userMessageCount: 2,
+        assistantMessageCount: 1,
+        toolInvocationCount: 0,
+        responseCounts: [:],
+        turnContextCount: 3,
+        eventCount: 3,
+        lineCount: 45,
+        lastUpdatedAt: Date().addingTimeInterval(-6900)
+    )
+
+    return SessionListRowView(summary: mockSummary)
+        .frame(width: 400, height: 100)
+        .padding()
+}
+
+#Preview("No Instructions") {
+    let mockSummary = SessionSummary(
+        id: "session-no-instructions",
+        fileURL: URL(
+            fileURLWithPath: "/Users/developer/.codex/sessions/session-no-instructions.json"),
+        fileSizeBytes: 3200,
+        startedAt: Date().addingTimeInterval(-10800),
+        endedAt: Date().addingTimeInterval(-10500),
+        cliVersion: "1.2.2",
+        cwd: "/Users/developer/documents",
+        originator: "developer",
+        instructions: nil,
+        model: "gpt-4o-mini",
+        approvalPolicy: "auto",
+        userMessageCount: 1,
+        assistantMessageCount: 1,
+        toolInvocationCount: 0,
+        responseCounts: [:],
+        turnContextCount: 2,
+        eventCount: 2,
+        lineCount: 20,
+        lastUpdatedAt: Date().addingTimeInterval(-10500)
+    )
+
+    return SessionListRowView(summary: mockSummary)
+        .frame(width: 400, height: 100)
+        .padding()
+}

@@ -20,7 +20,9 @@ struct SessionListColumnView: View {
 
             List(selection: $selection) {
                 if sections.isEmpty && !isLoading {
-                    ContentUnavailableView("暂无会话", systemImage: "tray", description: Text("调整目录或启动 Codex CLI 以生成新的会话日志。"))
+                    ContentUnavailableView(
+                        "暂无会话", systemImage: "tray",
+                        description: Text("调整目录或启动 Codex CLI 以生成新的会话日志。"))
                 } else {
                     ForEach(sections) { section in
                         Section {
@@ -50,7 +52,9 @@ struct SessionListColumnView: View {
                             HStack {
                                 Text(section.title)
                                 Spacer()
-                                Label(section.totalDuration.readableFormattedDuration, systemImage: "clock")
+                                Label(
+                                    section.totalDuration.readableFormattedDuration,
+                                    systemImage: "clock")
                                 Label("\(section.totalEvents)", systemImage: "chart.bar")
                             }
                             .font(.subheadline)
@@ -80,8 +84,8 @@ struct SessionListColumnView: View {
     }
 }
 
-private extension TimeInterval {
-    var readableFormattedDuration: String {
+extension TimeInterval {
+    fileprivate var readableFormattedDuration: String {
         let formatter = DateComponentsFormatter()
         formatter.allowedUnits = durationUnits
         formatter.unitsStyle = .abbreviated
@@ -96,4 +100,129 @@ private extension TimeInterval {
         }
         return [.second]
     }
+}
+
+#Preview {
+    // Mock SessionDaySection data
+    let mockSections = [
+        SessionDaySection(
+            id: Date().addingTimeInterval(-86400),  // Yesterday
+            title: "昨天",
+            totalDuration: 7200,  // 2 hours
+            totalEvents: 15,
+            sessions: [
+                SessionSummary(
+                    id: "session-1",
+                    fileURL: URL(
+                        fileURLWithPath: "/Users/developer/.codex/sessions/session-1.json"),
+                    fileSizeBytes: 12340,
+                    startedAt: Date().addingTimeInterval(-7200),
+                    endedAt: Date().addingTimeInterval(-3600),
+                    cliVersion: "1.2.3",
+                    cwd: "/Users/developer/projects/codmate",
+                    originator: "developer",
+                    instructions: "优化 SwiftUI 列表性能",
+                    model: "gpt-4o-mini",
+                    approvalPolicy: "auto",
+                    userMessageCount: 3,
+                    assistantMessageCount: 2,
+                    toolInvocationCount: 1,
+                    responseCounts: [:],
+                    turnContextCount: 5,
+                    eventCount: 6,
+                    lineCount: 89,
+                    lastUpdatedAt: Date().addingTimeInterval(-3600)
+                ),
+                SessionSummary(
+                    id: "session-2",
+                    fileURL: URL(
+                        fileURLWithPath: "/Users/developer/.codex/sessions/session-2.json"),
+                    fileSizeBytes: 8900,
+                    startedAt: Date().addingTimeInterval(-10800),
+                    endedAt: Date().addingTimeInterval(-9000),
+                    cliVersion: "1.2.3",
+                    cwd: "/Users/developer/projects/test",
+                    originator: "developer",
+                    instructions: "创建待办事项应用",
+                    model: "gpt-4o",
+                    approvalPolicy: "manual",
+                    userMessageCount: 4,
+                    assistantMessageCount: 3,
+                    toolInvocationCount: 2,
+                    responseCounts: ["reasoning": 1],
+                    turnContextCount: 7,
+                    eventCount: 9,
+                    lineCount: 120,
+                    lastUpdatedAt: Date().addingTimeInterval(-9000)
+                ),
+            ]
+        ),
+        SessionDaySection(
+            id: Date().addingTimeInterval(-172800),  // Day before yesterday
+            title: "2024年12月15日",
+            totalDuration: 5400,  // 1.5 hours
+            totalEvents: 12,
+            sessions: [
+                SessionSummary(
+                    id: "session-3",
+                    fileURL: URL(
+                        fileURLWithPath: "/Users/developer/.codex/sessions/session-3.json"),
+                    fileSizeBytes: 15600,
+                    startedAt: Date().addingTimeInterval(-172800),
+                    endedAt: Date().addingTimeInterval(-158400),
+                    cliVersion: "1.2.2",
+                    cwd: "/Users/developer/documents",
+                    originator: "developer",
+                    instructions: "编写技术文档",
+                    model: "gpt-4o-mini",
+                    approvalPolicy: "auto",
+                    userMessageCount: 6,
+                    assistantMessageCount: 5,
+                    toolInvocationCount: 3,
+                    responseCounts: ["reasoning": 2],
+                    turnContextCount: 11,
+                    eventCount: 14,
+                    lineCount: 200,
+                    lastUpdatedAt: Date().addingTimeInterval(-158400)
+                )
+            ]
+        ),
+    ]
+
+    return SessionListColumnView(
+        sections: mockSections,
+        selection: .constant(Set<String>()),
+        sortOrder: .constant(.mostRecent),
+        isLoading: false,
+        onResume: { session in print("Resume: \(session.displayName)") },
+        onReveal: { session in print("Reveal: \(session.displayName)") },
+        onDeleteRequest: { session in print("Delete: \(session.displayName)") }
+    )
+    .frame(width: 500, height: 600)
+}
+
+#Preview("Loading State") {
+    SessionListColumnView(
+        sections: [],
+        selection: .constant(Set<String>()),
+        sortOrder: .constant(.mostRecent),
+        isLoading: true,
+        onResume: { _ in },
+        onReveal: { _ in },
+        onDeleteRequest: { _ in }
+    )
+    .frame(width: 500, height: 600)
+}
+
+#Preview("Empty State") {
+    SessionListColumnView(
+        sections: [],
+        selection: .constant(Set<String>()),
+        sortOrder: .constant(.mostRecent),
+        isLoading: false,
+        onResume: { _ in },
+        onReveal: { _ in },
+        onDeleteRequest: { _ in }
+    )
+    .frame(width: 500, height: 600)
 }

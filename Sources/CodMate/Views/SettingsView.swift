@@ -22,7 +22,7 @@ struct SettingsView: View {
                         .lineLimit(1)
                         .truncationMode(.middle)
                     Spacer()
-                    Button("更改…", action: { /* 留待实现 */ })
+                    Button("更改…", action: { /* 留待实现 */  })
                         .disabled(true)
                 }
             }
@@ -32,7 +32,7 @@ struct SettingsView: View {
                         .lineLimit(1)
                         .truncationMode(.middle)
                     Spacer()
-                    Button("更改…", action: { /* 留待实现 */ })
+                    Button("更改…", action: { /* 留待实现 */  })
                         .disabled(true)
                 }
             }
@@ -59,4 +59,21 @@ struct SettingsView: View {
             Toggle("自动生成标题与摘要", isOn: $preferences.llmAutoGenerate)
         }
     }
+}
+
+#Preview {
+    let mockPreferences = SessionPreferencesStore()
+    return SettingsView(preferences: mockPreferences)
+}
+
+#Preview("With Custom Paths") {
+    let mockPreferences = SessionPreferencesStore()
+    mockPreferences.sessionsRoot = URL(fileURLWithPath: "/Users/developer/.codex/sessions")
+    mockPreferences.codexExecutableURL = URL(fileURLWithPath: "/opt/homebrew/bin/codex")
+    mockPreferences.llmBaseURL = "https://api.openai.com"
+    mockPreferences.llmAPIKey = "sk-1234567890abcdef"
+    mockPreferences.llmModel = "gpt-4o"
+    mockPreferences.llmAutoGenerate = true
+
+    return SettingsView(preferences: mockPreferences)
 }

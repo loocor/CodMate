@@ -1,5 +1,5 @@
-import SwiftUI
 import AppKit
+import SwiftUI
 import UniformTypeIdentifiers
 
 struct SessionDetailView: View {
@@ -49,7 +49,9 @@ struct SessionDetailView: View {
             Text(summary.displayName)
                 .font(.largeTitle.weight(.semibold))
             HStack(spacing: 12) {
-                Label(summary.startedAt.formatted(date: .numeric, time: .shortened), systemImage: "calendar")
+                Label(
+                    summary.startedAt.formatted(date: .numeric, time: .shortened),
+                    systemImage: "calendar")
                 Label(summary.readableDuration, systemImage: "clock")
                 if let model = summary.model {
                     Label(model, systemImage: "cpu")
@@ -116,7 +118,9 @@ struct SessionDetailView: View {
                 }
                 .task(id: instructionsExpanded) {
                     guard instructionsExpanded else { return }
-                    if instructionsText == nil && (summary.instructions == nil || summary.instructions?.isEmpty == true) {
+                    if instructionsText == nil
+                        && (summary.instructions == nil || summary.instructions?.isEmpty == true)
+                    {
                         instructionsLoading = true
                         defer { instructionsLoading = false }
                         if let loaded = try? loader.loadInstructions(url: summary.fileURL) {
@@ -174,4 +178,71 @@ extension SessionDetailView {
         }
         return lines.joined(separator: "\n")
     }
+}
+
+#Preview {
+    // Mock SessionSummary data
+    let mockSummary = SessionSummary(
+        id: "session-123",
+        fileURL: URL(fileURLWithPath: "/Users/developer/.codex/sessions/session-123.json"),
+        fileSizeBytes: 15420,
+        startedAt: Date().addingTimeInterval(-3600),  // 1 hour ago
+        endedAt: Date().addingTimeInterval(-1800),  // 30 minutes ago
+        cliVersion: "1.2.3",
+        cwd: "/Users/developer/projects/codmate",
+        originator: "developer",
+        instructions: "请帮我优化这个 SwiftUI 应用的性能，特别是列表滚动时的卡顿问题。",
+        model: "gpt-4o-mini",
+        approvalPolicy: "auto",
+        userMessageCount: 5,
+        assistantMessageCount: 4,
+        toolInvocationCount: 3,
+        responseCounts: ["reasoning": 2],
+        turnContextCount: 8,
+        eventCount: 12,
+        lineCount: 156,
+        lastUpdatedAt: Date().addingTimeInterval(-1800)
+    )
+
+    return SessionDetailView(
+        summary: mockSummary,
+        isProcessing: false,
+        onResume: { print("Resume session") },
+        onReveal: { print("Reveal in Finder") },
+        onDelete: { print("Delete session") }
+    )
+    .frame(width: 600, height: 800)
+}
+
+#Preview("Processing State") {
+    let mockSummary = SessionSummary(
+        id: "session-456",
+        fileURL: URL(fileURLWithPath: "/Users/developer/.codex/sessions/session-456.json"),
+        fileSizeBytes: 8200,
+        startedAt: Date().addingTimeInterval(-7200),
+        endedAt: nil,
+        cliVersion: "1.2.3",
+        cwd: "/Users/developer/projects/test",
+        originator: "developer",
+        instructions: "创建一个简单的待办事项应用",
+        model: "gpt-4o",
+        approvalPolicy: "manual",
+        userMessageCount: 3,
+        assistantMessageCount: 2,
+        toolInvocationCount: 1,
+        responseCounts: [:],
+        turnContextCount: 5,
+        eventCount: 6,
+        lineCount: 89,
+        lastUpdatedAt: Date().addingTimeInterval(-300)
+    )
+
+    return SessionDetailView(
+        summary: mockSummary,
+        isProcessing: true,
+        onResume: { print("Resume session") },
+        onReveal: { print("Reveal in Finder") },
+        onDelete: { print("Delete session") }
+    )
+    .frame(width: 600, height: 800)
 }

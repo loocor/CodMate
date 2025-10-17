@@ -89,7 +89,7 @@ final class SessionListViewModel: ObservableObject {
     }
 
     var totalSessionCount: Int {
-        allSessions.count
+        globalSessionCount
     }
 
     // Expose data for navigation helpers
