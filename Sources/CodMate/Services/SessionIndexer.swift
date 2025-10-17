@@ -39,8 +39,8 @@ actor SessionIndexer {
         decoder.dateDecodingStrategy = .iso8601
     }
 
-    func refreshSessions(root: URL) async throws -> [SessionSummary] {
-        let sessionFiles = try sessionFileURLs(at: root)
+    func refreshSessions(root: URL, scope: SessionLoadScope) async throws -> [SessionSummary] {
+        let sessionFiles = try sessionFileURLs(at: root, scope: scope)
         guard !sessionFiles.isEmpty else { return [] }
 
         let cpuCount = max(2, ProcessInfo.processInfo.processorCount)
@@ -116,15 +116,46 @@ actor SessionIndexer {
         cache.setObject(entry, forKey: key)
     }
 
-    private func sessionFileURLs(at root: URL) throws -> [URL] {
+    private func sessionFileURLs(at root: URL, scope: SessionLoadScope) throws -> [URL] {
         var urls: [URL] = []
-        guard let enumerator = fileManager.enumerator(
-            at: root,
-            includingPropertiesForKeys: [.isRegularFileKey],
-            options: [.skipsHiddenFiles, .skipsPackageDescendants]
-        ) else {
+        let (base, depth): (URL, Int) = {
+            let cal = Calendar.current
+            switch scope {
+            case .today:
+                let d = cal.startOfDay(for: Date())
+                let comps = cal.dateComponents([.year, .month, .day], from: d)
+                var u = root.appendingPathComponent("\(comps.year!)", isDirectory: true)
+                u.appendPathComponent("\(comps.month!)", isDirectory: true)
+                u.appendPathComponent("\(comps.day!)", isDirectory: true)
+                return (u, 3)
+            case let .day(d):
+                let day = cal.startOfDay(for: d)
+                let comps = cal.dateComponents([.year, .month, .day], from: day)
+                var u = root.appendingPathComponent("\(comps.year!)", isDirectory: true)
+                u.appendPathComponent("\(comps.month!)", isDirectory: true)
+                u.appendPathComponent("\(comps.day!)", isDirectory: true)
+                return (u, 3)
+            case let .month(d):
+                let comps = cal.dateComponents([.year, .month], from: d)
+                var u = root.appendingPathComponent("\(comps.year!)", isDirectory: true)
+                u.appendPathComponent("\(comps.month!)", isDirectory: true)
+                return (u, 2)
+            case .all:
+                return (root, 0)
+            }
+        }()
+
+        var enumeratorURL = base
+        var isDir: ObjCBool = false
+        if !fileManager.fileExists(atPath: enumeratorURL.path, isDirectory: &isDir) || !isDir.boolValue {
             return []
         }
+
+        guard let enumerator = fileManager.enumerator(
+            at: enumeratorURL,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles, .skipsPackageDescendants]
+        ) else { return [] }
 
         for case let fileURL as URL in enumerator {
             if fileURL.pathExtension.lowercased() == "jsonl" {

@@ -29,6 +29,7 @@
 		1A0001352A00000100000001 /* SessionTimelineLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0001252A00000100000001 /* SessionTimelineLoader.swift */; };
 		1A0001362A00000100000001 /* TimelineViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0001262A00000100000001 /* TimelineViews.swift */; };
 		31B6266A2EA244D9008CA40F /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31B626692EA244D9008CA40F /* SettingsView.swift */; };
+		31B6266C2EA248A2008CA40F /* SessionLoadScope.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31B6266B2EA248A2008CA40F /* SessionLoadScope.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -56,6 +57,7 @@
 		1A0001252A00000100000001 /* SessionTimelineLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SessionTimelineLoader.swift; path = Sources/CodMate/Services/SessionTimelineLoader.swift; sourceTree = SOURCE_ROOT; };
 		1A0001262A00000100000001 /* TimelineViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = TimelineViews.swift; path = Sources/CodMate/Views/TimelineViews.swift; sourceTree = SOURCE_ROOT; };
 		31B626692EA244D9008CA40F /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		31B6266B2EA248A2008CA40F /* SessionLoadScope.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionLoadScope.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -112,6 +114,7 @@
 			isa = PBXGroup;
 			children = (
 				1A0000832A00000100000001 /* SessionListViewModel.swift */,
+				31B6266B2EA248A2008CA40F /* SessionLoadScope.swift */,
 			);
 			name = ViewModels;
 			sourceTree = SOURCE_ROOT;
@@ -219,6 +222,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				1A0001012A00000100000001 /* CodMateApp.swift in Sources */,
+				31B6266C2EA248A2008CA40F /* SessionLoadScope.swift in Sources */,
 				1A0001022A00000100000001 /* ContentView.swift in Sources */,
 				1A0001032A00000100000001 /* SessionListViewModel.swift in Sources */,
 				1A0001042A00000100000001 /* SessionIndexer.swift in Sources */,

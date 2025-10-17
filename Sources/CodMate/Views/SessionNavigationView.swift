@@ -48,7 +48,7 @@ struct SessionNavigationView: View {
             }
         }
         .listStyle(.sidebar)
-        .environment(\.defaultMinListRowHeight, 22)
+        .environment(\.defaultMinListRowHeight, 18)
     }
 
     private var headerForCalendar: some View {

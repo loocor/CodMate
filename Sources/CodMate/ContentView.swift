@@ -67,7 +67,7 @@ struct ContentView: View {
         }
         .searchable(text: $viewModel.searchText, placement: .toolbar, prompt: Text("搜索会话"))
         .toolbar {
-            ToolbarItem(placement: .automatic) {
+            ToolbarItem(placement: .primaryAction) {
                 Button {
                     Task { await viewModel.refreshSessions() }
                 } label: {
