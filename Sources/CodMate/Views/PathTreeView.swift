@@ -3,17 +3,18 @@ import SwiftUI
 struct PathTreeView: View {
     let root: PathTreeNode?
     @Binding var selectedPath: String?
-    
+
     var body: some View {
         if let root, let children = root.children, !children.isEmpty {
             List(selection: $selectedPath) {
                 OutlineGroup(children, children: \.children) { node in
                     PathTreeRowView(node: node)
                         .tag(node.id)
+                        .listRowInsets(EdgeInsets())  // Let internal padding manage spacing
                 }
             }
             .listStyle(.sidebar)
-            .environment(\.defaultMinListRowHeight, 18)
+            .environment(\.defaultMinListRowHeight, 16)
             .environment(\.controlSize, .small)
         } else {
             ContentUnavailableView("No Directories", systemImage: "folder")
@@ -23,25 +24,28 @@ struct PathTreeView: View {
 
 private struct PathTreeRowView: View {
     let node: PathTreeNode
-    
+
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 8) {
             Image(systemName: "folder")
                 .foregroundStyle(.secondary)
                 .font(.caption)
-            
+
             Text(node.name.isEmpty ? "/" : node.name)
                 .font(.caption)
                 .lineLimit(1)
-            
+
             Spacer(minLength: 4)
-            
+
             if node.count > 0 {
                 Text("\(node.count)")
                     .font(.caption2.monospacedDigit())
                     .foregroundStyle(.tertiary)
             }
         }
+        .frame(height: 16)
+        .padding(.vertical, 8)  // Match All Sessions row vertical padding
+        .padding(.trailing, 8)  // Ensure right padding consistent; no extra leading padding
         .contentShape(Rectangle())
     }
 }
