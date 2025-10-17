@@ -32,18 +32,22 @@ struct SessionListRowView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
+
+                // Compact metrics moved from detail view
+                HStack(spacing: 10) {
+                    Label("\(summary.userMessageCount)", systemImage: "person")
+                    Label("\(summary.assistantMessageCount)", systemImage: "sparkles")
+                    Label("\(summary.toolInvocationCount)", systemImage: "hammer")
+                    if let reasoning = summary.responseCounts["reasoning"], reasoning > 0 {
+                        Label("\(reasoning)", systemImage: "brain")
+                    }
+                }
+                .labelStyle(.iconOnly)
+                .font(.caption2.monospacedDigit())
+                .foregroundStyle(.secondary)
             }
 
             Spacer()
-
-            VStack(alignment: .trailing, spacing: 4) {
-                Label("\(summary.userMessageCount)", systemImage: "person")
-                Label("\(summary.assistantMessageCount)", systemImage: "sparkles")
-                Label("\(summary.toolInvocationCount)", systemImage: "hammer")
-            }
-            .labelStyle(.iconOnly)
-            .font(.footnote.monospacedDigit())
-            .foregroundStyle(.secondary)
         }
         .padding(.vertical, 6)
     }

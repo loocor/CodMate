@@ -18,7 +18,6 @@ struct SessionDetailView: View {
             VStack(alignment: .leading, spacing: 24) {
                 sessionActionBar
                 header
-                metrics
                 metaSection
                 instructionsSection
 
@@ -104,39 +103,7 @@ struct SessionDetailView: View {
         }
     }
 
-    private var metrics: some View {
-        GroupBox("会话统计") {
-            Grid(horizontalSpacing: 24, verticalSpacing: 12) {
-                GridRow {
-                    metricCell(value: summary.userMessageCount, label: "用户消息", icon: "person")
-                    metricCell(value: summary.assistantMessageCount, label: "助手输出", icon: "sparkles")
-                    metricCell(value: summary.toolInvocationCount, label: "工具调用", icon: "hammer")
-                }
-                GridRow {
-                    metricCell(value: summary.eventCount, label: "事件总数", icon: "chart.bar")
-                    metricCell(value: summary.lineCount, label: "记录行数", icon: "text.alignleft")
-                    metricCell(value: summary.responseCounts["reasoning"] ?? 0, label: "推理片段", icon: "brain")
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-    }
-
-    private func metricCell(value: Int, label: String, icon: String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Label {
-                Text(label)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            } icon: {
-                Image(systemName: icon)
-                    .symbolRenderingMode(.hierarchical)
-            }
-            Text("\(value)")
-                .font(.title2.monospacedDigit())
-                .fontWeight(.semibold)
-        }
-    }
+    // metrics moved to list row per request
 
     private var metaSection: some View {
         GroupBox("会话信息") {
@@ -165,18 +132,40 @@ struct SessionDetailView: View {
         }
     }
 
+    @State private var instructionsExpanded = false
+    @State private var instructionsLoading = false
+    @State private var instructionsText: String?
+
     private var instructionsSection: some View {
-        GroupBox("任务指令") {
-            if let instructions = summary.instructions, !instructions.isEmpty {
-                Text(instructions)
-                    .font(.system(.body, design: .rounded))
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.top, 2)
-            } else {
-                Text("该会话未设置额外指令。")
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+        GroupBox {
+            DisclosureGroup(isExpanded: $instructionsExpanded) {
+                Group {
+                    if instructionsLoading {
+                        ProgressView("正在加载指令…")
+                    } else if let text = instructionsText ?? summary.instructions, !text.isEmpty {
+                        Text(text)
+                            .font(.system(.body, design: .rounded))
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.top, 2)
+                    } else {
+                        Text("未找到指令。")
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+                .task(id: instructionsExpanded) {
+                    guard instructionsExpanded else { return }
+                    if instructionsText == nil && (summary.instructions == nil || summary.instructions?.isEmpty == true) {
+                        instructionsLoading = true
+                        defer { instructionsLoading = false }
+                        if let loaded = try? loader.loadInstructions(url: summary.fileURL) {
+                            instructionsText = loaded
+                        }
+                    }
+                }
+            } label: {
+                Label("任务指令", systemImage: "list.bullet.rectangle")
             }
         }
     }

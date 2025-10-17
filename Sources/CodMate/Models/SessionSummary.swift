@@ -1,6 +1,6 @@
 import Foundation
 
-struct SessionSummary: Identifiable, Hashable, Sendable {
+struct SessionSummary: Identifiable, Hashable, Sendable, Codable {
     let id: String
     let fileURL: URL
     let fileSizeBytes: UInt64?

@@ -198,6 +198,10 @@ struct SessionSummaryBuilder {
         fileSizeBytes = size
     }
 
+    mutating func seedLastUpdated(_ date: Date) {
+        if lastUpdatedAt == nil { lastUpdatedAt = date }
+    }
+
     mutating func observe(_ row: SessionRow) {
         lineCount += 1
         lastUpdatedAt = row.timestamp
