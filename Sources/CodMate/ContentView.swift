@@ -22,14 +22,17 @@ struct ContentView: View {
     }
 
     var body: some View {
-        NavigationSplitView(columnVisibility: $columnVisibility) {
-            SessionNavigationView(
-                selection: navSelectionBinding,
-                totalCount: viewModel.totalSessionCount,
-                isLoading: viewModel.isLoading
-            )
-            .environmentObject(viewModel)
-            .frame(minWidth: 220)
+        GeometryReader { geometry in
+            let sidebarMaxWidth = geometry.size.width * 0.25
+            
+            NavigationSplitView(columnVisibility: $columnVisibility) {
+                SessionNavigationView(
+                    selection: navSelectionBinding,
+                    totalCount: viewModel.totalSessionCount,
+                    isLoading: viewModel.isLoading
+                )
+                .environmentObject(viewModel)
+                .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: max(220, sidebarMaxWidth))
         } content: {
             SessionListColumnView(
                 sections: viewModel.sections,
@@ -122,6 +125,7 @@ struct ContentView: View {
                 }
                 .padding(.bottom, 20)
             }
+        }
         }
     }
 

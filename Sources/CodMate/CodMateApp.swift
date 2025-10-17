@@ -14,7 +14,7 @@ struct CodMateApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView(viewModel: listViewModel)
-                .frame(minWidth: 1100, minHeight: 720)
+                .frame(minWidth: 880, minHeight: 600)
         }
         .defaultSize(width: 1200, height: 780)
 

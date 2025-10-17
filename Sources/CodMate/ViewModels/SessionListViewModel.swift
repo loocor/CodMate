@@ -11,7 +11,7 @@ final class SessionListViewModel: ObservableObject {
     }
     @Published var isLoading = false
     @Published var errorMessage: String?
-    @Published var navigationSelection: SessionNavigationItem = .allSessions { didSet { applyFilters() } }
+    @Published var navigationSelection: SessionNavigationItem { didSet { applyFilters() } }
     @Published var dateDimension: DateDimension = .updated { didSet { applyFilters() } }
     let preferences: SessionPreferencesStore
 
@@ -33,6 +33,10 @@ final class SessionListViewModel: ObservableObject {
         self.preferences = preferences
         self.indexer = indexer
         self.actions = actions
+        
+        // 默认选中今天的日期
+        let today = Calendar.current.startOfDay(for: Date())
+        self.navigationSelection = .calendarDay(today)
     }
 
     func refreshSessions() async {

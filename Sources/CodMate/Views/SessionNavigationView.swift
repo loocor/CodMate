@@ -18,26 +18,29 @@ struct SessionNavigationView: View {
     }
 
     var body: some View {
-        List(selection: selectionBinding) {
+        VStack(spacing: 0) {
+            // 顶部固定：All Sessions
             allSessionsRow
-                .tag(SessionNavigationItem.allSessions)
-                .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 6, trailing: 0))
                 .padding(.horizontal, 6)
+                .padding(.vertical, 6)
 
-            calendarSection
+            Divider()
 
-            Section() {
+            // 中部可滚动：目录树
+            ScrollView(.vertical) {
                 PathTreeView(root: viewModel.pathTreeRoot) { prefix in
                     selection = .pathPrefix(prefix)
                 }
-                .frame(minHeight: 200)
-                .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
+                .environment(\.defaultMinListRowHeight, 18)
+                .environment(\.controlSize, .small)
             }
+            .frame(maxHeight: .infinity)
+
+            // 底部固定：日历区域（与目录树间隔 8pt）
+            calendarSection
+                .padding(.top, 8)
         }
-        .listStyle(.sidebar)
         .frame(idealWidth: 260)
-        .environment(\.defaultMinListRowHeight, 8)
-        .environment(\.controlSize, .small)
         .task {
             viewModel.ensurePathTree()
             _ = viewModel.calendarCounts(for: monthStart, dimension: dimension)
@@ -70,35 +73,36 @@ struct SessionNavigationView: View {
     }
 
     private var calendarSection: some View {
-        Section {
-            VStack(spacing: 12) {
-                calendarHeader
-
-                HStack {
-                    Spacer()
-                    Picker("", selection: $dimension) {
-                        ForEach(DateDimension.allCases) { dim in
-                            Text(dim.title).tag(dim)
-                        }
-                    }
-                    .labelsHidden()
-                    .pickerStyle(.segmented)
-                    .frame(width: 220)
-                    Spacer()
-                }
-
-                CalendarMonthView(
-                    monthStart: monthStart,
-                    counts: viewModel.calendarCounts(for: monthStart, dimension: dimension)
-                ) { picked in
-                    selection = .calendarDay(picked)
-                    viewModel.dateDimension = dimension
-                }
-                .frame(height: 280)
+        let selectedDay: Date? = {
+            if case .calendarDay(let day) = selection {
+                return day
             }
-            .padding(.vertical, 6)
-            .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 6, trailing: 0))
+            return nil
+        }()
+
+        return VStack(spacing: 6) {
+            calendarHeader
+
+            Picker("", selection: $dimension) {
+                ForEach(DateDimension.allCases) { dim in
+                    Text(dim.title).tag(dim)
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.segmented)
+
+            CalendarMonthView(
+                monthStart: monthStart,
+                counts: viewModel.calendarCounts(for: monthStart, dimension: dimension),
+                selectedDay: selectedDay
+            ) { picked in
+                selection = .calendarDay(picked)
+                viewModel.dateDimension = dimension
+            }
         }
+        .frame(height: 240)
+        .padding(.horizontal, 6)
+        .padding(.bottom, 6)
     }
 
     private var calendarHeader: some View {
