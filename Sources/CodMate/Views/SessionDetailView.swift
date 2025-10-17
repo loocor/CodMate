@@ -1,0 +1,228 @@
+import SwiftUI
+import AppKit
+import UniformTypeIdentifiers
+
+struct SessionDetailView: View {
+    let summary: SessionSummary
+    let isProcessing: Bool
+    let onResume: () -> Void
+    let onReveal: () -> Void
+    let onDelete: () -> Void
+
+    @State private var events: [TimelineEvent] = []
+    @State private var loadingTimeline = false
+    private let loader = SessionTimelineLoader()
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
+                sessionActionBar
+                header
+                metrics
+                metaSection
+                instructionsSection
+
+                Divider()
+
+                Group {
+                    if loadingTimeline {
+                        ProgressView("正在加载会话内容…")
+                    } else if events.isEmpty {
+                        ContentUnavailableView("暂无可显示的消息", systemImage: "text.bubble")
+                    } else {
+                        TimelineView(events: events)
+                    }
+                }
+            }
+            .padding(28)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .task(id: summary.id) {
+            loadingTimeline = true
+            defer { loadingTimeline = false }
+            do { events = try loader.load(url: summary.fileURL) } catch { events = [] }
+        }
+    }
+
+    private var sessionActionBar: some View {
+        HStack(spacing: 12) {
+            Button {
+                onResume()
+            } label: {
+                Label("恢复", systemImage: "play.fill")
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(isProcessing)
+            .help("使用 codex CLI 快速恢复该会话")
+
+            Button {
+                onReveal()
+            } label: {
+                Label("访达中查看", systemImage: "folder")
+            }
+            .buttonStyle(.bordered)
+            .help("在访达中打开会话所在文件夹")
+
+            Spacer()
+
+            Button(role: .destructive) {
+                onDelete()
+            } label: {
+                Label("删除会话", systemImage: "trash")
+            }
+            .buttonStyle(.bordered)
+            .disabled(isProcessing)
+            .help("将会话日志移至废纸篓")
+
+            Button {
+                exportMarkdown()
+            } label: {
+                Label("导出 Markdown", systemImage: "square.and.arrow.down")
+            }
+            .buttonStyle(.bordered)
+            .disabled(loadingTimeline || events.isEmpty)
+            .help("导出整个会话为 Markdown 文件")
+        }
+    }
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(summary.displayName)
+                .font(.largeTitle.weight(.semibold))
+            HStack(spacing: 12) {
+                Label(summary.startedAt.formatted(date: .numeric, time: .shortened), systemImage: "calendar")
+                Label(summary.readableDuration, systemImage: "clock")
+                if let model = summary.model {
+                    Label(model, systemImage: "cpu")
+                }
+                if let approval = summary.approvalPolicy {
+                    Label(approval, systemImage: "checkmark.shield")
+                }
+            }
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+        }
+    }
+
+    private var metrics: some View {
+        GroupBox("会话统计") {
+            Grid(horizontalSpacing: 24, verticalSpacing: 12) {
+                GridRow {
+                    metricCell(value: summary.userMessageCount, label: "用户消息", icon: "person")
+                    metricCell(value: summary.assistantMessageCount, label: "助手输出", icon: "sparkles")
+                    metricCell(value: summary.toolInvocationCount, label: "工具调用", icon: "hammer")
+                }
+                GridRow {
+                    metricCell(value: summary.eventCount, label: "事件总数", icon: "chart.bar")
+                    metricCell(value: summary.lineCount, label: "记录行数", icon: "text.alignleft")
+                    metricCell(value: summary.responseCounts["reasoning"] ?? 0, label: "推理片段", icon: "brain")
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private func metricCell(value: Int, label: String, icon: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Label {
+                Text(label)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            } icon: {
+                Image(systemName: icon)
+                    .symbolRenderingMode(.hierarchical)
+            }
+            Text("\(value)")
+                .font(.title2.monospacedDigit())
+                .fontWeight(.semibold)
+        }
+    }
+
+    private var metaSection: some View {
+        GroupBox("会话信息") {
+            VStack(alignment: .leading, spacing: 8) {
+                infoRow(title: "CLI 版本", value: summary.cliVersion, icon: "terminal")
+                infoRow(title: "Originator", value: summary.originator, icon: "person.circle")
+                infoRow(title: "工作目录", value: summary.cwd, icon: "folder")
+                infoRow(title: "文件大小", value: summary.fileSizeDisplay, icon: "externaldrive")
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private func infoRow(title: String, value: String, icon: String) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: icon)
+                .frame(width: 20)
+                .foregroundStyle(.tertiary)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title.uppercased())
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(value)
+                    .font(.body)
+            }
+        }
+    }
+
+    private var instructionsSection: some View {
+        GroupBox("任务指令") {
+            if let instructions = summary.instructions, !instructions.isEmpty {
+                Text(instructions)
+                    .font(.system(.body, design: .rounded))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.top, 2)
+            } else {
+                Text("该会话未设置额外指令。")
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
+}
+
+// MARK: - Export
+extension SessionDetailView {
+    private func exportMarkdown() {
+        let md = buildMarkdown()
+        let panel = NSSavePanel()
+        panel.title = "导出 Markdown"
+        panel.allowedContentTypes = [.plainText]
+        panel.nameFieldStringValue = summary.displayName + ".md"
+        if panel.runModal() == .OK, let url = panel.url {
+            try? md.data(using: .utf8)?.write(to: url)
+        }
+    }
+
+    private func buildMarkdown() -> String {
+        var lines: [String] = []
+        lines.append("# \(summary.displayName)")
+        lines.append("")
+        lines.append("- 开始时间：\(summary.startedAt)")
+        if let end = summary.lastUpdatedAt { lines.append("- 最后更新：\(end)") }
+        if let model = summary.model { lines.append("- 模型：\(model)") }
+        if let approval = summary.approvalPolicy { lines.append("- 审批策略：\(approval)") }
+        lines.append("")
+        for e in events {
+            let prefix: String
+            switch e.actor {
+            case .user: prefix = "**用户**"
+            case .assistant: prefix = "**助手**"
+            case .tool: prefix = "**工具**"
+            case .info: prefix = "**信息**"
+            }
+            lines.append("\(prefix) · \(e.timestamp)\n")
+            if let title = e.title { lines.append("> \(title)") }
+            if let text = e.text, !text.isEmpty { lines.append(text) }
+            if let meta = e.metadata, !meta.isEmpty {
+                lines.append("")
+                for k in meta.keys.sorted() {
+                    lines.append("- \(k): \(meta[k] ?? "")")
+                }
+            }
+            lines.append("")
+        }
+        return lines.joined(separator: "\n")
+    }
+}
