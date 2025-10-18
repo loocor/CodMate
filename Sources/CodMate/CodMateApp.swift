@@ -1,9 +1,14 @@
 import SwiftUI
+#if os(macOS)
+import AppKit
+#endif
 
 @main
 struct CodMateApp: App {
     @StateObject private var listViewModel: SessionListViewModel
     @StateObject private var preferences: SessionPreferencesStore
+    @State private var settingsSelection: SettingCategory = .general
+    @Environment(\.openSettings) private var openSettings
 
     init() {
         let prefs = SessionPreferencesStore()
@@ -13,18 +18,48 @@ struct CodMateApp: App {
         SystemNotifier.shared.bootstrap()
     }
 
+    var bodyCommands: some Commands {
+        Group {
+            CommandGroup(replacing: .appInfo) {
+                Button("About CodMate") {
+                    presentSettings(for: .about)
+                }
+                Divider()
+                Button("Settings…") {
+                    presentSettings(for: .general)
+                }
+                .keyboardShortcut(",")
+            }
+            CommandMenu("CodMate") {
+                Button("Refresh Sessions") {
+                    Task { await listViewModel.refreshSessions() }
+                }
+                .keyboardShortcut("r", modifiers: [.command])
+            }
+        }
+    }
+
     var body: some Scene {
         WindowGroup {
             ContentView(viewModel: listViewModel)
                 .frame(minWidth: 880, minHeight: 600)
         }
         .defaultSize(width: 1200, height: 780)
+        .commands { bodyCommands }
 
         Settings {
-            SettingsView(preferences: preferences)
+            SettingsView(preferences: preferences, selection: $settingsSelection)
         }
         .windowResizability(.contentMinSize)
         .windowStyle(.hiddenTitleBar)
         .windowToolbarStyle(.unified)
+    }
+
+    private func presentSettings(for category: SettingCategory) {
+        settingsSelection = category
+#if os(macOS)
+        NSApplication.shared.activate(ignoringOtherApps: true)
+        openSettings()
+#endif
     }
 }

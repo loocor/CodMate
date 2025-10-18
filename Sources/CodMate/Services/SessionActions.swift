@@ -117,6 +117,24 @@ struct SessionActions {
         return f.isEmpty ? base : base + " " + f
     }
 
+    private func buildNewSessionArguments(session: SessionSummary, options: ResumeOptions) -> [String] {
+        var args: [String] = []
+        if let model = session.model, !model.isEmpty { args += ["--model", model] }
+        args += flags(from: options)
+        return args
+    }
+
+    func buildNewSessionCLIInvocation(session: SessionSummary, options: ResumeOptions) -> String {
+        let exe = "codex"
+        let args = buildNewSessionArguments(session: session, options: options).map { arg -> String in
+            if arg.contains(where: { $0.isWhitespace || $0 == "'" }) {
+                return shellEscapedPath(arg)
+            }
+            return arg
+        }
+        return ([exe] + args).joined(separator: " ")
+    }
+
     func buildResumeArguments(session: SessionSummary, options: ResumeOptions) -> [String] {
         ["resume", session.id] + flags(from: options)
     }
@@ -133,6 +151,27 @@ struct SessionActions {
         let invocation = buildResumeCLIInvocation(session: session, executablePath: execPath, options: options)
         let resume = "PATH=\(injectedPATH) \(invocation)"
         return cd + "\n" + exports + "\n" + resume + "\n"
+    }
+
+    func buildNewSessionCommandLines(session: SessionSummary, executableURL: URL, options: ResumeOptions) -> String {
+        _ = executableURL // retained for API symmetry; PATH handles resolution
+        let cwd = FileManager.default.fileExists(atPath: session.cwd)
+            ? session.cwd : session.fileURL.deletingLastPathComponent().path
+        let cd = "cd " + shellEscapedPath(cwd)
+        let injectedPATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:${PATH}"
+        let exports = "export LANG=zh_CN.UTF-8; export LC_ALL=zh_CN.UTF-8; export LC_CTYPE=zh_CN.UTF-8; export TERM=xterm-256color"
+        let invocation = buildNewSessionCLIInvocation(session: session, options: options)
+        let command = "PATH=\(injectedPATH) \(invocation)"
+        return cd + "\n" + exports + "\n" + command + "\n"
+    }
+
+    func buildExternalNewSessionCommands(session: SessionSummary, executableURL: URL, options: ResumeOptions) -> String {
+        _ = executableURL
+        let cwd = FileManager.default.fileExists(atPath: session.cwd)
+            ? session.cwd : session.fileURL.deletingLastPathComponent().path
+        let cd = "cd " + shellEscapedPath(cwd)
+        let newCommand = buildNewSessionCLIInvocation(session: session, options: options)
+        return cd + "\n" + newCommand + "\n"
     }
 
     // Simplified two-line command for external terminals
@@ -154,6 +193,16 @@ struct SessionActions {
         pb.setString(commands, forType: .string)
     }
 
+    func copyNewSessionCommands(session: SessionSummary, executableURL: URL, options: ResumeOptions, simplifiedForExternal: Bool = true) {
+        _ = executableURL
+        let commands = simplifiedForExternal
+            ? buildExternalNewSessionCommands(session: session, executableURL: executableURL, options: options)
+            : buildNewSessionCommandLines(session: session, executableURL: executableURL, options: options)
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.setString(commands, forType: .string)
+    }
+
     func copyRealResumeInvocation(session: SessionSummary, executableURL: URL, options: ResumeOptions) {
         let execPath = resolveExecutableURL(preferred: executableURL)?.path ?? executableURL.path
         let cmd = buildResumeCLIInvocation(session: session, executablePath: execPath, options: options)
@@ -166,6 +215,27 @@ struct SessionActions {
     func openInTerminal(session: SessionSummary, executableURL: URL, options: ResumeOptions) -> Bool {
         let scriptText = {
             let lines = buildResumeCommandLines(session: session, executableURL: executableURL, options: options)
+                .replacingOccurrences(of: "\n", with: "; ")
+            return """
+            tell application "Terminal"
+              activate
+              do script "\(lines)"
+            end tell
+            """
+        }()
+
+        if let script = NSAppleScript(source: scriptText) {
+            var errorDict: NSDictionary?
+            script.executeAndReturnError(&errorDict)
+            return errorDict == nil
+        }
+        return false
+    }
+
+    @discardableResult
+    func openNewSession(session: SessionSummary, executableURL: URL, options: ResumeOptions) -> Bool {
+        let scriptText = {
+            let lines = buildNewSessionCommandLines(session: session, executableURL: executableURL, options: options)
                 .replacingOccurrences(of: "\n", with: "; ")
             return """
             tell application "Terminal"

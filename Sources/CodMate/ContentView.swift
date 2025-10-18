@@ -227,19 +227,34 @@ struct ContentView: View {
         HStack(spacing: 12) {
             if let focused = focusedSummary {
                 Button(action: { Task { await viewModel.beginEditing(session: focused) } }) {
-                    Text(focused.effectiveTitle)
-                        .font(.headline)
-                        .foregroundStyle(.primary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .contentShape(Rectangle())
+                    HStack(spacing: 6) {
+                        Text(focused.effectiveTitle)
+                        Image(systemName: "pencil")
+                            .font(.subheadline)
+                            .foregroundStyle(.tertiary)
+                    }
+                    .font(.headline)
+                    .foregroundStyle(.primary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .help("Rename / Add Comment")
             }
 
-            Spacer()
+           Spacer()
 
-            HStack(spacing: 8) {
+           HStack(spacing: 8) {
+                if let focused = focusedSummary {
+                    Button {
+                        startNewSession(for: focused)
+                    } label: {
+                        Label("New", systemImage: "plus")
+                    }
+                    .disabled(isPerformingAction)
+                    .help("Start a new Codex session with the same directory and model")
+                }
+
                 Menu {
                     // 1) Terminal (copy + open at path)
                     Button {
@@ -420,10 +435,39 @@ struct ContentView: View {
             viewModel.openPreferredTerminalViaScheme(app: .warp, directory: dir)
         case .terminal:
             _ = viewModel.openAppleTerminal(at: dir)
+        case .none:
+            break
         default:
             viewModel.openPreferredTerminal(app: app)
         }
         Task { await SystemNotifier.shared.notify(title: "CodMate", body: "命令已拷贝，请粘贴到打开的终端") }
+    }
+
+    private func openPreferredExternalForNew(session: SessionSummary) {
+        let app = viewModel.preferences.defaultResumeExternalApp
+        let dir = FileManager.default.fileExists(atPath: session.cwd)
+            ? session.cwd
+            : session.fileURL.deletingLastPathComponent().path
+        switch app {
+        case .iterm2:
+            let cmd = viewModel.buildNewSessionCLIInvocation(session: session)
+            viewModel.openPreferredTerminalViaScheme(app: .iterm2, directory: dir, command: cmd)
+        case .warp:
+            viewModel.openPreferredTerminalViaScheme(app: .warp, directory: dir)
+        case .terminal:
+            viewModel.openNewSession(session: session)
+        case .none:
+            break
+        default:
+            viewModel.openPreferredTerminal(app: app)
+        }
+        Task { await SystemNotifier.shared.notify(title: "CodMate", body: "命令已拷贝，请粘贴到打开的终端") }
+    }
+
+    private func startNewSession(for session: SessionSummary) {
+        viewModel.copyNewSessionCommands(session: session)
+        openPreferredExternalForNew(session: session)
+        resumeOutput = "New session command copied to clipboard"
     }
 
     private func toggleDetailMaximized() {

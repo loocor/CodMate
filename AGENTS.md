@@ -28,6 +28,7 @@ UI Rules (macOS specific)
   - Each row shows: title, timestamps/duration, snippet, and compact metrics (user/assistant/tool/reasoning).
 - Detail (right):
   - Sticky action bar at top: Resume, Reveal in Finder, Delete, Export Markdown.
+  - Add “New” button next to Resume to start a fresh Codex session using the current session’s working directory and model.
   - “Task Instructions” uses a DisclosureGroup; load lazily when expanded.
   - Conversation timeline uses LazyVStack; differentiate user/assistant/tool/info bubbles.
   - Context menu in list rows adds: “Generate Title & 100-char Summary” to run LLM on-demand for the selected session.
@@ -55,7 +56,8 @@ CLI Integration (codex)
    - Approval policy (`-a/--ask-for-approval`): `untrusted`, `on-failure`, `on-request`, `never`.
    - `--full-auto` convenience alias (maps to `-a on-failure` + `--sandbox workspace-write`).
    - `--dangerously-bypass-approvals-and-sandbox` (overrides other flags; only for externally sandboxed envs).
- - UI adds a "Copy real command" button in the detail action bar when the embedded terminal is active; this copies the exact `codex resume <id>` invocation including flags.
+- UI adds a "Copy real command" button in the detail action bar when the embedded terminal is active; this copies the exact `codex resume <id>` invocation including flags.
+- Provide a “New” command (detail toolbar) that launches `codex` in the session’s working directory while preserving the configured sandbox/approval defaults and `SessionSummary.model`.
 
 Session Metadata (Rename/Comment)
 - Users can rename any session and attach a short comment.
@@ -63,10 +65,14 @@ Session Metadata (Rename/Comment)
 - Persistence: stored in `~/Library/Application Support/CodMate/sessionNotes-v1.json`, keyed by session id.
 - Display: the name replaces the ID in the detail header and list; the comment is used as the row snippet when present.
 
+About Surface
+- Settings › About shows app version, build timestamp (derived from the app executable’s modification date), and project URL.
+- “About CodMate” menu item should open Settings pre-selecting the About tab.
+
 File/Folder Layout
 - Sources/CodMate/
   - Models/  – data types
-  - Services/ – IO, indexing, cache, codex actions, LLM
+- Services/ – IO, indexing, cache, codex actions
   - ViewModels/ – observable state
   - Views/ – SwiftUI views only
 - CodMate/Info.plist – bundled via build settings; do NOT add to Copy Bundle Resources.
