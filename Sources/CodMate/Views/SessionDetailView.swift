@@ -9,35 +9,41 @@ struct SessionDetailView: View {
     let onReveal: () -> Void
     let onDelete: () -> Void
 
-    @State private var events: [TimelineEvent] = []
+    @State private var turns: [ConversationTurn] = []
     @State private var loadingTimeline = false
+    @State private var isConversationExpanded = false
+    @State private var expandedTurnIDs: Set<String> = []
     private let loader = SessionTimelineLoader()
 
     var body: some View {
-        ScrollView {
+        GeometryReader { proxy in
             VStack(alignment: .leading, spacing: 16) {
-                sessionInfoCard
-                instructionsSection
-
-                Divider()
-
-                Group {
-                    if loadingTimeline {
-                        ProgressView("Loading session content…")
-                    } else if events.isEmpty {
-                        ContentUnavailableView("No messages to display", systemImage: "text.bubble")
-                    } else {
-                        TimelineView(events: events)
-                    }
+                if !isConversationExpanded {
+                    sessionInfoCard
+                    instructionsSection
+                    Divider()
                 }
+
+                conversationHeader
+                conversationScrollView
             }
             .padding(16)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(
+                width: proxy.size.width,
+                height: proxy.size.height,
+                alignment: .topLeading
+            )
         }
         .task(id: summary.id) {
             loadingTimeline = true
             defer { loadingTimeline = false }
-            do { events = try loader.load(url: summary.fileURL) } catch { events = [] }
+            do {
+                turns = try loader.load(url: summary.fileURL)
+                expandedTurnIDs = []
+            } catch {
+                turns = []
+                expandedTurnIDs = []
+            }
         }
     }
 
@@ -132,6 +138,64 @@ struct SessionDetailView: View {
             }
         }
     }
+
+    private var conversationHeader: some View {
+        HStack(spacing: 12) {
+            Label("Conversation", systemImage: "bubble.left.and.text.bubble.right")
+                .font(.headline)
+
+            Spacer()
+
+            let allExpanded = !turns.isEmpty && expandedTurnIDs.count == turns.count
+            Button {
+                if allExpanded {
+                    expandedTurnIDs.removeAll()
+                } else {
+                    expandedTurnIDs = Set(turns.map(\.id))
+                }
+            } label: {
+                Label(allExpanded ? "Collapse All" : "Expand All", systemImage: allExpanded ? "chevron.up" : "chevron.down")
+                    .font(.callout)
+            }
+            .buttonStyle(.borderless)
+            .disabled(turns.isEmpty)
+            .help(allExpanded ? "Collapse all turns" : "Expand all turns")
+
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    isConversationExpanded.toggle()
+                }
+            } label: {
+                Image(
+                    systemName: isConversationExpanded
+                        ? "arrow.down.left.and.arrow.up.right"
+                        : "arrow.up.right.and.arrow.down.left"
+                )
+                .font(.body)
+            }
+            .buttonStyle(.plain)
+            .help(isConversationExpanded ? "Restore layout" : "Expand conversation")
+        }
+    }
+
+    private var conversationScrollView: some View {
+        ScrollView {
+            Group {
+                if loadingTimeline {
+                    ProgressView("Loading session content…")
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(.top, 32)
+                } else if turns.isEmpty {
+                    ContentUnavailableView("No messages to display", systemImage: "text.bubble")
+                        .frame(maxWidth: .infinity, alignment: .center)
+                } else {
+                    ConversationTimelineView(turns: turns, expandedTurnIDs: $expandedTurnIDs)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+    }
 }
 
 // MARK: - Export
@@ -156,21 +220,32 @@ extension SessionDetailView {
         if let model = summary.model { lines.append("- Model: \(model)") }
         if let approval = summary.approvalPolicy { lines.append("- Approval Policy: \(approval)") }
         lines.append("")
-        for e in events {
-            let prefix: String
-            switch e.actor {
-            case .user: prefix = "**User**"
-            case .assistant: prefix = "**Assistant**"
-            case .tool: prefix = "**Tool**"
-            case .info: prefix = "**Info**"
+        for turn in turns {
+            if let user = turn.userMessage {
+                lines.append("**User** · \(user.timestamp)")
+                if let text = user.text, !text.isEmpty {
+                    lines.append(text)
+                }
             }
-            lines.append("\(prefix) · \(e.timestamp)\n")
-            if let title = e.title { lines.append("> \(title)") }
-            if let text = e.text, !text.isEmpty { lines.append(text) }
-            if let meta = e.metadata, !meta.isEmpty {
+            for event in turn.outputs {
+                let prefix: String
+                switch event.actor {
+                case .assistant: prefix = "**Codex**"
+                case .tool: prefix = "**Tool**"
+                case .info: prefix = "**Info**"
+                case .user: prefix = "**User**"
+                }
                 lines.append("")
-                for k in meta.keys.sorted() {
-                    lines.append("- \(k): \(meta[k] ?? "")")
+                lines.append("\(prefix) · \(event.timestamp)")
+                if let title = event.title { lines.append("> \(title)") }
+                if let text = event.text, !text.isEmpty { lines.append(text) }
+                if let meta = event.metadata, !meta.isEmpty {
+                    for key in meta.keys.sorted() {
+                        lines.append("- \(key): \(meta[key] ?? "")")
+                    }
+                }
+                if event.repeatCount > 1 {
+                    lines.append("- repeated: ×\(event.repeatCount)")
                 }
             }
             lines.append("")

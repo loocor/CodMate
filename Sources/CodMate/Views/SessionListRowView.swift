@@ -3,16 +3,17 @@ import SwiftUI
 struct SessionListRowView: View {
     let summary: SessionSummary
     var isRunning: Bool = false
+    var isSelected: Bool = false
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
             Circle()
-                .fill(Color.accentColor.opacity(0.12))
+                .fill(isSelected ? Color.accentColor : Color.accentColor.opacity(0.12))
                 .frame(width: 28, height: 28)
                 .overlay(
                     Image(systemName: "rectangle.and.text.magnifyingglass")
-                        .foregroundStyle(Color.accentColor)
                         .font(.subheadline)
+                        .foregroundStyle(iconForeground)
                 )
 
             VStack(alignment: .leading, spacing: 4) {
@@ -60,6 +61,12 @@ struct SessionListRowView: View {
                     .padding(.trailing, 8)
             }
         }
+    }
+}
+
+private extension SessionListRowView {
+    var iconForeground: some ShapeStyle {
+        isSelected ? AnyShapeStyle(Color.white) : AnyShapeStyle(Color.accentColor)
     }
 }
 

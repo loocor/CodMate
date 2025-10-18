@@ -60,7 +60,11 @@ struct SessionListColumnView: View {
                     ForEach(sections) { section in
                         Section {
                             ForEach(section.sessions, id: \.id) { session in
-                                SessionListRowView(summary: session, isRunning: isRunning?(session) ?? false)
+                                SessionListRowView(
+                                    summary: session,
+                                    isRunning: isRunning?(session) ?? false,
+                                    isSelected: selectionContains(session.id)
+                                )
                                     .tag(session.id)
                                     .listRowInsets(EdgeInsets())
                                     .contextMenu {
@@ -133,6 +137,12 @@ struct SessionListColumnView: View {
             .frame(maxWidth: .infinity)
         }
         .frame(maxWidth: .infinity)
+    }
+}
+
+extension SessionListColumnView {
+    func selectionContains(_ id: SessionSummary.ID) -> Bool {
+        selection.contains(id)
     }
 }
 

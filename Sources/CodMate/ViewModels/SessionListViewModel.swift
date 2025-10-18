@@ -16,16 +16,22 @@ final class SessionListViewModel: ObservableObject {
     @Published var errorMessage: String?
 
     // 新的过滤状态：支持组合过滤
-    @Published var selectedPath: String? = nil { didSet { applyFilters() } }
+    @Published var selectedPath: String? = nil {
+        didSet {
+            guard oldValue != selectedPath else { return }
+            applyFilters()
+        }
+    }
     @Published var selectedDay: Date? = nil {
         didSet {
             // 日期改变：仅当跨月且使用 updated 维度时才触发重载，减少频繁解析
             if oldValue != selectedDay {
                 let cal = Calendar.current
                 if dateDimension == .updated,
-                   let oldDay = oldValue,
-                   let newDay = selectedDay,
-                   cal.isDate(oldDay, equalTo: newDay, toGranularity: .month) {
+                    let oldDay = oldValue,
+                    let newDay = selectedDay,
+                    cal.isDate(oldDay, equalTo: newDay, toGranularity: .month)
+                {
                     // 同一月份内切换（updated 维度）无需重载，直接过滤
                     applyFilters()
                 } else {
@@ -53,6 +59,7 @@ final class SessionListViewModel: ObservableObject {
     private var enrichmentTask: Task<Void, Never>?
     private let notesStore = SessionNotesStore()
     private var notesSnapshot: [String: SessionNotesStore.SessionNote] = [:]
+    private var canonicalCwdCache: [String: String] = [:]
     @Published var editingSession: SessionSummary? = nil
     @Published var editTitle: String = ""
     @Published var editComment: String = ""
@@ -86,6 +93,7 @@ final class SessionListViewModel: ObservableObject {
             notesSnapshot = notes
             apply(notes: notes, to: &sessions)
             allSessions = sessions
+            rebuildCanonicalCwdCache()
             await computeCalendarCaches()
             applyFilters()
             startBackgroundEnrichment()
@@ -123,7 +131,9 @@ final class SessionListViewModel: ObservableObject {
     }
 
     func openInTerminal(session: SessionSummary) -> Bool {
-        actions.openInTerminal(session: session, executableURL: preferences.codexExecutableURL, options: preferences.resumeOptions)
+        actions.openInTerminal(
+            session: session, executableURL: preferences.codexExecutableURL,
+            options: preferences.resumeOptions)
     }
 
     func buildResumeCommands(session: SessionSummary) -> String {
@@ -143,7 +153,8 @@ final class SessionListViewModel: ObservableObject {
     }
 
     func buildResumeCLIInvocation(session: SessionSummary) -> String {
-        let execPath = actions.resolveExecutableURL(preferred: preferences.codexExecutableURL)?.path
+        let execPath =
+            actions.resolveExecutableURL(preferred: preferences.codexExecutableURL)?.path
             ?? preferences.codexExecutableURL.path
         return actions.buildResumeCLIInvocation(
             session: session,
@@ -191,7 +202,8 @@ final class SessionListViewModel: ObservableObject {
         actions.openTerminalApp(app)
     }
 
-    func openPreferredTerminalViaScheme(app: TerminalApp, directory: String, command: String? = nil) {
+    func openPreferredTerminalViaScheme(app: TerminalApp, directory: String, command: String? = nil)
+    {
         actions.openTerminalViaScheme(app, directory: directory, command: command)
     }
 
@@ -216,7 +228,8 @@ final class SessionListViewModel: ObservableObject {
         let titleValue = editTitle.isEmpty ? nil : editTitle
         let commentValue = editComment.isEmpty ? nil : editComment
         await notesStore.upsert(id: session.id, title: titleValue, comment: commentValue)
-        notesSnapshot[session.id] = SessionNotesStore.SessionNote(id: session.id, title: titleValue, comment: commentValue, updatedAt: Date())
+        notesSnapshot[session.id] = SessionNotesStore.SessionNote(
+            id: session.id, title: titleValue, comment: commentValue, updatedAt: Date())
         var map = Dictionary(uniqueKeysWithValues: allSessions.map { ($0.id, $0) })
         if var s = map[session.id] {
             s.userTitle = titleValue
@@ -317,7 +330,20 @@ final class SessionListViewModel: ObservableObject {
 
         // 1. 目录过滤
         if let path = selectedPath {
-            filtered = filtered.filter { $0.cwd.hasPrefix(path) }
+            let canonicalSelected = Self.canonicalPath(path)
+            let prefix = canonicalSelected == "/" ? "/" : canonicalSelected + "/"
+            filtered = filtered.filter { summary in
+                let canonical: String
+                if let cached = canonicalCwdCache[summary.id] {
+                    canonical = cached
+                } else {
+                    let value = Self.canonicalPath(summary.cwd)
+                    canonicalCwdCache[summary.id] = value
+                    canonical = value
+                }
+                if canonical == canonicalSelected { return true }
+                return canonical.hasPrefix(prefix)
+            }
         }
 
         // 2. 日期过滤
@@ -464,6 +490,7 @@ final class SessionListViewModel: ObservableObject {
                             map[id] = enriched
                         }
                         self.allSessions = Array(map.values)
+                        self.rebuildCanonicalCwdCache()
                         self.applyFilters()
                     }
                     updatesBuffer.removeAll(keepingCapacity: true)
@@ -498,6 +525,22 @@ final class SessionListViewModel: ObservableObject {
         }
     }
 
+    private func rebuildCanonicalCwdCache() {
+        canonicalCwdCache = Dictionary(
+            uniqueKeysWithValues: allSessions.map {
+                ($0.id, Self.canonicalPath($0.cwd))
+            })
+    }
+
+    private static func canonicalPath(_ path: String) -> String {
+        let expanded = (path as NSString).expandingTildeInPath
+        var standardized = URL(fileURLWithPath: expanded).standardizedFileURL.path
+        if standardized.count > 1 && standardized.hasSuffix("/") {
+            standardized.removeLast()
+        }
+        return standardized
+    }
+
     private func currentScope() -> SessionLoadScope {
         // 如果选中了具体日期，根据维度决定加载范围
         if let day = selectedDay {
@@ -517,7 +560,9 @@ final class SessionListViewModel: ObservableObject {
 }
 
 extension SessionListViewModel {
-    private func apply(notes: [String: SessionNotesStore.SessionNote], to sessions: inout [SessionSummary]) {
+    private func apply(
+        notes: [String: SessionNotesStore.SessionNote], to sessions: inout [SessionSummary]
+    ) {
         for index in sessions.indices {
             if let note = notes[sessions[index].id] {
                 sessions[index].userTitle = note.title

@@ -81,6 +81,18 @@ struct EventMessagePayload: Decodable {
     let type: String
     let message: String?
     let kind: String?
+    let text: String?
+    let info: JSONValue?
+    let rateLimits: JSONValue?
+
+    enum CodingKeys: String, CodingKey {
+        case type
+        case message
+        case kind
+        case text
+        case info
+        case rateLimits = "rate_limits"
+    }
 }
 
 struct ResponseItemPayload: Decodable {
@@ -91,6 +103,7 @@ struct ResponseItemPayload: Decodable {
     let content: [ResponseContentBlock]?
     let summary: [ResponseSummaryItem]?
     let encryptedContent: String?
+    let role: String?
 
     enum CodingKeys: String, CodingKey {
         case type
@@ -100,6 +113,7 @@ struct ResponseItemPayload: Decodable {
         case content
         case summary
         case encryptedContent = "encrypted_content"
+        case role
     }
 }
 
