@@ -88,6 +88,7 @@ struct SessionListColumnView: View {
                                                 "Export Markdown",
                                                 systemImage: "square.and.arrow.down")
                                         }
+                                        // Rename/Comment is initiated from detail title (click)
                                         Divider()
                                         Button(role: .destructive) {
                                             onDeleteRequest(session)

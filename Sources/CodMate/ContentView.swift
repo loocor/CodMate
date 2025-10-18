@@ -135,6 +135,9 @@ struct ContentView: View {
         )
         .environmentObject(viewModel)
         .navigationSplitViewColumnWidth(min: 420, ideal: 480, max: 600)
+        .sheet(item: $viewModel.editingSession, onDismiss: { viewModel.cancelEdits() }) { _ in
+            EditSessionMetaView(viewModel: viewModel)
+        }
     }
     
     private var toolbarContent: some View {
@@ -223,9 +226,15 @@ struct ContentView: View {
     private var detailActionBar: some View {
         HStack(spacing: 12) {
             if let focused = focusedSummary {
-                Text(focused.displayName)
-                    .font(.headline)
-                    .foregroundStyle(.primary)
+                Button(action: { Task { await viewModel.beginEditing(session: focused) } }) {
+                    Text(focused.effectiveTitle)
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Rename / Add Comment")
             }
 
             Spacer()
@@ -246,7 +255,7 @@ struct ContentView: View {
                     Button {
                         if let f = focusedSummary {
                             let dir = FileManager.default.fileExists(atPath: f.cwd) ? f.cwd : f.fileURL.deletingLastPathComponent().path
-                            let cmd = "codex resume \(f.id)"
+                            let cmd = viewModel.buildResumeCLIInvocation(session: f)
                             viewModel.openPreferredTerminalViaScheme(app: .iterm2, directory: dir, command: cmd)
                         }
                     } label: { Label("Open in iTerm2 (Direct)", systemImage: "app.fill") }
@@ -293,6 +302,14 @@ struct ContentView: View {
                         Image(systemName: "arrow.uturn.backward")
                     }
                     .help("Return to history")
+
+                    Button {
+                        viewModel.copyRealResumeCommand(session: focused)
+                        Task { await SystemNotifier.shared.notify(title: "CodMate", body: "真实命令已拷贝") }
+                    } label: {
+                        Image(systemName: "doc.on.doc")
+                    }
+                    .help("Copy real resume command")
                 } else {
                     Button {
                         exportMarkdownForFocused()
@@ -397,7 +414,7 @@ struct ContentView: View {
             : session.fileURL.deletingLastPathComponent().path
         switch app {
         case .iterm2:
-            let cmd = "codex resume \(session.id)"
+            let cmd = viewModel.buildResumeCLIInvocation(session: session)
             viewModel.openPreferredTerminalViaScheme(app: .iterm2, directory: dir, command: cmd)
         case .warp:
             viewModel.openPreferredTerminalViaScheme(app: .warp, directory: dir)

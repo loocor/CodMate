@@ -30,6 +30,7 @@ UI Rules (macOS specific)
   - Sticky action bar at top: Resume, Reveal in Finder, Delete, Export Markdown.
   - “Task Instructions” uses a DisclosureGroup; load lazily when expanded.
   - Conversation timeline uses LazyVStack; differentiate user/assistant/tool/info bubbles.
+  - Context menu in list rows adds: “Generate Title & 100-char Summary” to run LLM on-demand for the selected session.
 
 Performance Contract
 - Fast path indexing: memory‑mapped reads; parse first ~400 lines + read tail ~64KB to correct `lastUpdatedAt`.
@@ -49,11 +50,18 @@ CLI Integration (codex)
 - Resolve executable path: prefer user setting; fallback to `/opt/homebrew/bin` → `/usr/local/bin` → `env which codex`.
 - Always set `PATH` to include `/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin` before launching.
 - `resume` runs with `currentDirectoryURL` = original session `cwd` when it exists (fallback: log file directory).
+- New command options exposed in Settings › Command:
+   - Sandbox policy (`-s/--sandbox`): `read-only`, `workspace-write`, `danger-full-access`.
+   - Approval policy (`-a/--ask-for-approval`): `untrusted`, `on-failure`, `on-request`, `never`.
+   - `--full-auto` convenience alias (maps to `-a on-failure` + `--sandbox workspace-write`).
+   - `--dangerously-bypass-approvals-and-sandbox` (overrides other flags; only for externally sandboxed envs).
+ - UI adds a "Copy real command" button in the detail action bar when the embedded terminal is active; this copies the exact `codex resume <id>` invocation including flags.
 
-LLM Integration (OpenAI‑style)
-- Settings fields: Base URL, API Key, Model, “Auto‑generate title/summary”.
-- Client: implement `LLMClient` with an OpenAI‑compatible `/v1/chat/completions` call; return `{title, summary}`.
-- Safety: store API key in UserDefaults for now (roadmap: Keychain). Rate‑limit requests and cache results under `~/Library/Caches/CodMate/`.
+Session Metadata (Rename/Comment)
+- Users can rename any session and attach a short comment.
+- Trigger: click the title at the top-left of the detail pane to open the editor.
+- Persistence: stored in `~/Library/Application Support/CodMate/sessionNotes-v1.json`, keyed by session id.
+- Display: the name replaces the ID in the detail header and list; the comment is used as the row snippet when present.
 
 File/Folder Layout
 - Sources/CodMate/
@@ -74,4 +82,3 @@ Known Pitfalls
 - `.searchable` may hijack the trailing toolbar slot on macOS; use `SearchField` in a `ToolbarItem` to control placement.
 - Don’t put Info.plist in Copy Bundle Resources (Xcode will warn and refuse to build).
 - OutlineGroup row height is affected by control size and insets; tighten with `.environment(\.defaultMinListRowHeight, 18)` and `.listRowInsets(...)` inside the row content.
-
