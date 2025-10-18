@@ -12,6 +12,11 @@ struct SessionListColumnView: View {
     let onReveal: (SessionSummary) -> Void
     let onDeleteRequest: (SessionSummary) -> Void
     let onExportMarkdown: (SessionSummary) -> Void
+    // running state probe
+    var isRunning: ((SessionSummary) -> Bool)? = nil
+    // open embedded terminal (Alpha)
+    var onOpenEmbedded: ((SessionSummary) -> Void)? = nil
+    @EnvironmentObject private var viewModel: SessionListViewModel
 
     var body: some View {
         VStack(spacing: 0) {
@@ -20,18 +25,27 @@ struct SessionListColumnView: View {
                 .padding(.top, 0)
                 .padding(.bottom, 8)
 
-            if isLoading {
+            if isLoading && sections.isEmpty {
                 ProgressView("Scanning…")
                     .padding(.vertical)
             } else if isEnriching {
                 VStack(spacing: 8) {
-                    ProgressView(value: Double(enrichmentProgress), total: Double(enrichmentTotal))
-                        .progressViewStyle(.linear)
-                        .frame(maxWidth: 200)
-
-                    Text("Enriching session data… \(enrichmentProgress)/\(enrichmentTotal)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    if enrichmentTotal > 0 {
+                        let clamped = min(max(enrichmentProgress, 0), enrichmentTotal)
+                        ProgressView(value: Double(clamped), total: Double(enrichmentTotal))
+                            .progressViewStyle(.linear)
+                            .frame(maxWidth: 200)
+                        Text("Enriching session data… \(clamped)/\(enrichmentTotal)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ProgressView()
+                            .progressViewStyle(.linear)
+                            .frame(maxWidth: 200)
+                        Text("Enriching session data…")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 .padding(.vertical)
             }
@@ -46,7 +60,7 @@ struct SessionListColumnView: View {
                     ForEach(sections) { section in
                         Section {
                             ForEach(section.sessions, id: \.id) { session in
-                                SessionListRowView(summary: session)
+                                SessionListRowView(summary: session, isRunning: isRunning?(session) ?? false)
                                     .tag(session.id)
                                     .listRowInsets(EdgeInsets())
                                     .contextMenu {
@@ -54,6 +68,13 @@ struct SessionListColumnView: View {
                                             onResume(session)
                                         } label: {
                                             Label("Resume", systemImage: "play.fill")
+                                        }
+                                        if let openEmbedded = onOpenEmbedded {
+                                            Button {
+                                                openEmbedded(session)
+                                            } label: {
+                                                Label("Open Embedded Terminal (Alpha)", systemImage: "rectangle.badge.plus")
+                                            }
                                         }
                                         Button {
                                             onReveal(session)

@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 
 struct ContentView: View {
     @ObservedObject var viewModel: SessionListViewModel
+    @Environment(\.colorScheme) private var colorScheme
 
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var selection = Set<SessionSummary.ID>()
@@ -13,6 +14,24 @@ struct ContentView: View {
     @State private var resumeOutput: String?
     @State private var selectingSessionsRoot = false
     @State private var selectingExecutable = false
+    // Track which sessions are running in embedded terminal
+    @State private var runningSessionIDs = Set<SessionSummary.ID>()
+    @State private var isDetailMaximized = false
+    // Expose a common font helper to feed TerminalHostView
+    private func makeTerminalFont(size: CGFloat) -> NSFont {
+        #if canImport(SwiftTerm)
+        // Reuse the same logic as EmbeddedTerminalView
+        let candidates = [
+            "Sarasa Mono SC", "Sarasa Term SC",
+            "LXGW WenKai Mono",
+            "Noto Sans Mono CJK SC", "NotoSansMonoCJKsc-Regular",
+            "JetBrainsMonoNL Nerd Font Mono", "JetBrainsMono Nerd Font Mono",
+            "SF Mono", "Menlo",
+        ]
+        for name in candidates { if let f = NSFont(name: name, size: size) { return f } }
+        #endif
+        return NSFont.monospacedSystemFont(ofSize: size, weight: .regular)
+    }
 
     init(viewModel: SessionListViewModel) {
         self.viewModel = viewModel
@@ -20,107 +39,132 @@ struct ContentView: View {
 
     var body: some View {
         GeometryReader { geometry in
-            let sidebarMaxWidth = geometry.size.width * 0.25
-
-            NavigationSplitView(columnVisibility: $columnVisibility) {
-                SessionNavigationView(
-                    totalCount: viewModel.totalSessionCount,
-                    isLoading: viewModel.isLoading
-                )
-                .environmentObject(viewModel)
-                .navigationSplitViewColumnWidth(
-                    min: 250, ideal: 270, max: max(250, sidebarMaxWidth))
-            } content: {
-                SessionListColumnView(
-                    sections: viewModel.sections,
-                    selection: $selection,
-                    sortOrder: $viewModel.sortOrder,
-                    isLoading: viewModel.isLoading,
-                    isEnriching: viewModel.isEnriching,
-                    enrichmentProgress: viewModel.enrichmentProgress,
-                    enrichmentTotal: viewModel.enrichmentTotal,
-                    onResume: resumeFromList,
-                    onReveal: { viewModel.reveal(session: $0) },
-                    onDeleteRequest: handleDeleteRequest,
-                    onExportMarkdown: exportMarkdownForSession
-                )
-                .navigationSplitViewColumnWidth(min: 420, ideal: 480, max: 600)
+            navigationSplitView(geometry: geometry)
+        }
+    }
+    
+    private func navigationSplitView(geometry: GeometryProxy) -> some View {
+        let sidebarMaxWidth = geometry.size.width * 0.25
+        
+        return NavigationSplitView(columnVisibility: $columnVisibility) {
+            sidebarContent(sidebarMaxWidth: sidebarMaxWidth)
+        } content: {
+            listContent
             } detail: {
                 detailColumn
             }
-            .navigationSplitViewStyle(.balanced)
-            .task {
-                await viewModel.refreshSessions()
+        .navigationSplitViewStyle(.balanced)
+        .task {
+            await viewModel.refreshSessions()
+        }
+        .onChange(of: viewModel.sections) { _, _ in
+            normalizeSelection()
+        }
+        .onChange(of: viewModel.errorMessage) { _, message in
+            guard let message else { return }
+            alertState = AlertState(title: "Operation Failed", message: message)
+            viewModel.errorMessage = nil
+        }
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                toolbarContent
             }
-            .onChange(of: viewModel.sections) { _, _ in
-                normalizeSelection()
+        }
+        .alert(item: $alertState) { state in
+            Alert(
+                title: Text(state.title),
+                message: Text(state.message),
+                dismissButton: .default(Text("OK"))
+            )
+        }
+        .alert(
+            "Delete selected sessions?", isPresented: $deleteConfirmationPresented,
+            presenting: Array(selection)
+        ) { ids in
+            Button("Cancel", role: .cancel) {}
+            Button("Move to Trash", role: .destructive) {
+                deleteSelections(ids: ids)
             }
-            .onChange(of: viewModel.errorMessage) { _, message in
-                guard let message else { return }
-                alertState = AlertState(title: "Operation Failed", message: message)
-                viewModel.errorMessage = nil
-            }
-            .toolbar {
-                ToolbarItem(placement: .primaryAction) {
-                    HStack(spacing: 12) {
-                        TextField("Search Sessions", text: $viewModel.searchText)
-                            .textFieldStyle(.roundedBorder)
-                            .frame(width: 360)
+        } message: { _ in
+            Text("Session files will be moved to Trash and can be restored in Finder.")
+        }
+        .fileImporter(
+            isPresented: $selectingSessionsRoot,
+            allowedContentTypes: [.folder],
+            allowsMultipleSelection: false
+        ) { result in
+            handleFolderSelection(result: result, update: viewModel.updateSessionsRoot)
+        }
+        .fileImporter(
+            isPresented: $selectingExecutable,
+            allowedContentTypes: [.unixExecutable],
+            allowsMultipleSelection: false
+        ) { result in
+            handleExecutableSelection(result: result)
+        }
+        .overlay(alignment: .bottom) {
+            toastOverlay
+        }
+    }
+    
+    private func sidebarContent(sidebarMaxWidth: CGFloat) -> some View {
+        SessionNavigationView(
+            totalCount: viewModel.totalSessionCount,
+            isLoading: viewModel.isLoading
+        )
+        .environmentObject(viewModel)
+        .navigationSplitViewColumnWidth(
+            min: 250, ideal: 270, max: max(250, sidebarMaxWidth))
+    }
+    
+    private var listContent: some View {
+        SessionListColumnView(
+            sections: viewModel.sections,
+            selection: $selection,
+            sortOrder: $viewModel.sortOrder,
+            isLoading: viewModel.isLoading,
+            isEnriching: viewModel.isEnriching,
+            enrichmentProgress: viewModel.enrichmentProgress,
+            enrichmentTotal: viewModel.enrichmentTotal,
+            onResume: resumeFromList,
+            onReveal: { viewModel.reveal(session: $0) },
+            onDeleteRequest: handleDeleteRequest,
+            onExportMarkdown: exportMarkdownForSession,
+            isRunning: { runningSessionIDs.contains($0.id) },
+            onOpenEmbedded: { startEmbedded(for: $0) }
+        )
+        .environmentObject(viewModel)
+        .navigationSplitViewColumnWidth(min: 420, ideal: 480, max: 600)
+    }
+    
+    private var toolbarContent: some View {
+        HStack(spacing: 12) {
+            TextField("Search Sessions", text: $viewModel.searchText)
+                .textFieldStyle(.roundedBorder)
+                .frame(width: 360)
 
-                        Button {
-                            Task { await viewModel.refreshSessions() }
-                        } label: {
-                            Image(systemName: "arrow.clockwise")
-                                .font(.system(size: 16, weight: .medium))
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                        .help("Refresh session index")
-                    }.padding(.horizontal, 4)
+            Button {
+                Task { await viewModel.refreshSessions() }
+            } label: {
+                Image(systemName: "arrow.clockwise")
+                    .font(.system(size: 16, weight: .medium))
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .help("Refresh session index")
+        }
+        .padding(.horizontal, 4)
+    }
+    
+    @ViewBuilder
+    private var toastOverlay: some View {
+        if let output = resumeOutput {
+            ToastView(text: output) {
+                withAnimation {
+                    resumeOutput = nil
                 }
             }
-            .alert(item: $alertState) { state in
-                Alert(
-                    title: Text(state.title),
-                    message: Text(state.message),
-                    dismissButton: .default(Text("OK"))
-                )
-            }
-            .alert(
-                "Delete selected sessions?", isPresented: $deleteConfirmationPresented,
-                presenting: Array(selection)
-            ) { ids in
-                Button("Cancel", role: .cancel) {}
-                Button("Move to Trash", role: .destructive) {
-                    deleteSelections(ids: ids)
-                }
-            } message: { _ in
-                Text("Session files will be moved to Trash and can be restored in Finder.")
-            }
-            .fileImporter(
-                isPresented: $selectingSessionsRoot,
-                allowedContentTypes: [.folder],
-                allowsMultipleSelection: false
-            ) { result in
-                handleFolderSelection(result: result, update: viewModel.updateSessionsRoot)
-            }
-            .fileImporter(
-                isPresented: $selectingExecutable,
-                allowedContentTypes: [.unixExecutable],
-                allowsMultipleSelection: false
-            ) { result in
-                handleExecutableSelection(result: result)
-            }
-            .overlay(alignment: .bottom) {
-                if let output = resumeOutput {
-                    ToastView(text: output) {
-                        withAnimation {
-                            resumeOutput = nil
-                        }
-                    }
-                    .padding(.bottom, 20)
-                }
-            }
+            .padding(.bottom, 20)
         }
     }
 
@@ -135,14 +179,40 @@ struct ContentView: View {
 
             Group {
                 if let focused = focusedSummary {
-                    SessionDetailView(
-                        summary: focused,
-                        isProcessing: isPerformingAction,
-                        onResume: { resume(session: focused) },
-                        onReveal: { viewModel.reveal(session: focused) },
-                        onDelete: presentDeleteConfirmation
-                    )
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    if runningSessionIDs.contains(focused.id) {
+                        ZStack(alignment: .topTrailing) {
+                            TerminalHostView(sessionID: focused.id,
+                                             initialCommands: viewModel.buildResumeCommands(session: focused),
+                                             font: makeTerminalFont(size: 12),
+                                             isDark: colorScheme == .dark)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                .padding(12)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                        .fill(Color.black.opacity(0.001)) // keep hit-testing simple, visually invisible
+                                )
+                                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                        .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                                )
+
+                            // NOTE: 终端最大化/还原按钮暂时隐藏，待折叠逻辑完善后恢复显示
+                            // maximizeToggleButton()
+                            //     .padding(.top, 18)
+                            //     .padding(.trailing, 18)
+                            //     .shadow(color: Color.black.opacity(0.25), radius: 8, x: 0, y: 2)
+                        }
+                    } else {
+                        SessionDetailView(
+                            summary: focused,
+                            isProcessing: isPerformingAction,
+                            onResume: { startEmbedded(for: focused) },
+                            onReveal: { viewModel.reveal(session: focused) },
+                            onDelete: presentDeleteConfirmation
+                        )
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    }
                 } else {
                     placeholder
                 }
@@ -161,13 +231,52 @@ struct ContentView: View {
             Spacer()
 
             HStack(spacing: 8) {
-                Button {
-                    if let focused = focusedSummary { resume(session: focused) }
+                Menu {
+                    // 1) Terminal (copy + open at path)
+                    Button {
+                        if let f = focusedSummary {
+                            let dir = FileManager.default.fileExists(atPath: f.cwd) ? f.cwd : f.fileURL.deletingLastPathComponent().path
+                            viewModel.copyResumeCommands(session: f)
+                            _ = viewModel.openAppleTerminal(at: dir)
+                            Task { await SystemNotifier.shared.notify(title: "CodMate", body: "命令已拷贝，请粘贴到打开的终端") }
+                        }
+                    } label: { Label("Open in Terminal", systemImage: "terminal") }
+
+                    // 2) iTerm2 via scheme (direct)
+                    Button {
+                        if let f = focusedSummary {
+                            let dir = FileManager.default.fileExists(atPath: f.cwd) ? f.cwd : f.fileURL.deletingLastPathComponent().path
+                            let cmd = "codex resume \(f.id)"
+                            viewModel.openPreferredTerminalViaScheme(app: .iterm2, directory: dir, command: cmd)
+                        }
+                    } label: { Label("Open in iTerm2 (Direct)", systemImage: "app.fill") }
+
+                    // 3) Warp via path (copy + open tab)
+                    Button {
+                        if let f = focusedSummary {
+                            let dir = FileManager.default.fileExists(atPath: f.cwd) ? f.cwd : f.fileURL.deletingLastPathComponent().path
+                            viewModel.copyResumeCommands(session: f)
+                            viewModel.openPreferredTerminalViaScheme(app: .warp, directory: dir)
+                            Task { await SystemNotifier.shared.notify(title: "CodMate", body: "命令已拷贝，请粘贴到打开的终端") }
+                        }
+                    } label: { Label("Open in Warp (Path)", systemImage: "app.gift.fill") }
+
+                    // Alpha: embedded terminal
+                    Button {
+                        if let f = focusedSummary { startEmbedded(for: f) }
+                    } label: { Label("Open Embedded Terminal (Alpha)", systemImage: "rectangle.badge.plus") }
                 } label: {
-                    Image(systemName: "play.fill")
+                    Label("Resume", systemImage: "play.fill")
+                } primaryAction: {
+                    if let f = focusedSummary {
+                        viewModel.copyResumeCommands(session: f)
+                        resumeOutput = "Commands copied to clipboard"
+                    }
                 }
                 .disabled(isPerformingAction || focusedSummary == nil)
-                .help("Resume")
+                .help("Resume and more options")
+                .menuStyle(.borderedButton)
+                .controlSize(.small)
 
                 Button {
                     if let focused = focusedSummary { viewModel.reveal(session: focused) }
@@ -177,13 +286,22 @@ struct ContentView: View {
                 .disabled(focusedSummary == nil)
                 .help("Reveal in Finder")
 
-                Button {
-                    exportMarkdownForFocused()
-                } label: {
-                    Image(systemName: "square.and.arrow.down")
+                if let focused = focusedSummary, runningSessionIDs.contains(focused.id) {
+                    Button {
+                        stopEmbedded(forID: focused.id)
+                    } label: {
+                        Image(systemName: "arrow.uturn.backward")
+                    }
+                    .help("Return to history")
+                } else {
+                    Button {
+                        exportMarkdownForFocused()
+                    } label: {
+                        Image(systemName: "square.and.arrow.down")
+                    }
+                    .disabled(focusedSummary == nil)
+                    .help("Export Markdown")
                 }
-                .disabled(focusedSummary == nil)
-                .help("Export Markdown")
 
                 Button(role: .destructive) {
                     presentDeleteConfirmation()
@@ -229,7 +347,7 @@ struct ContentView: View {
 
     private func resumeFromList(_ session: SessionSummary) {
         selection = [session.id]
-        resume(session: session)
+        openPreferredExternal(for: session)
     }
 
     private func handleDeleteRequest(_ session: SessionSummary) {
@@ -259,32 +377,58 @@ struct ContentView: View {
         }
     }
 
-    private func resume(session: SessionSummary) {
-        guard !isPerformingAction else { return }
-        isPerformingAction = true
+    private func startEmbedded(for session: SessionSummary) {
+        runningSessionIDs.insert(session.id)
+    }
 
-        Task {
-            let result = await viewModel.resume(session: session)
-            await MainActor.run {
-                isPerformingAction = false
-                switch result {
-                case .success(let processResult):
-                    resumeOutput =
-                        processResult.output.isEmpty ? "Session resumed." : processResult.output
-                    Task {
-                        try? await Task.sleep(nanoseconds: 4_000_000_000)
-                        await MainActor.run {
-                            withAnimation {
-                                resumeOutput = nil
-                            }
-                        }
-                    }
-                case .failure(let error):
-                    alertState = AlertState(
-                        title: "Resume Failed", message: error.localizedDescription)
-                }
-            }
+    private func stopEmbedded(forID id: SessionSummary.ID) {
+        runningSessionIDs.remove(id)
+        if runningSessionIDs.isEmpty {
+            isDetailMaximized = false
+            columnVisibility = .all
         }
+    }
+
+    private func openPreferredExternal(for session: SessionSummary) {
+        viewModel.copyResumeCommands(session: session)
+        let app = viewModel.preferences.defaultResumeExternalApp
+        let dir = FileManager.default.fileExists(atPath: session.cwd)
+            ? session.cwd
+            : session.fileURL.deletingLastPathComponent().path
+        switch app {
+        case .iterm2:
+            let cmd = "codex resume \(session.id)"
+            viewModel.openPreferredTerminalViaScheme(app: .iterm2, directory: dir, command: cmd)
+        case .warp:
+            viewModel.openPreferredTerminalViaScheme(app: .warp, directory: dir)
+        case .terminal:
+            _ = viewModel.openAppleTerminal(at: dir)
+        default:
+            viewModel.openPreferredTerminal(app: app)
+        }
+        Task { await SystemNotifier.shared.notify(title: "CodMate", body: "命令已拷贝，请粘贴到打开的终端") }
+    }
+
+    private func toggleDetailMaximized() {
+        withAnimation(.easeInOut(duration: 0.18)) {
+            let shouldHide = columnVisibility != .detailOnly
+            columnVisibility = shouldHide ? .detailOnly : .all
+            isDetailMaximized = shouldHide
+        }
+    }
+
+    @ViewBuilder
+    private func maximizeToggleButton() -> some View {
+        Button {
+            toggleDetailMaximized()
+        } label: {
+            Image(systemName: isDetailMaximized ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right")
+                .font(.system(size: 15, weight: .semibold))
+                .padding(8)
+                .background(.ultraThinMaterial, in: Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(isDetailMaximized ? "Restore view" : "Maximize terminal")
     }
 
     private func handleFolderSelection(

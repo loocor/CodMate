@@ -36,7 +36,6 @@
 		31B626742EA24E3B008CA40F /* SystemNotifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31B626732EA24E3B008CA40F /* SystemNotifier.swift */; };
 		31B626762EA26B6D008CA40F /* TerminalSessionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31B626752EA26B6D008CA40F /* TerminalSessionManager.swift */; };
 		31B626782EA26BEE008CA40F /* TerminalHostView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31B626772EA26BEE008CA40F /* TerminalHostView.swift */; };
-		31B6267A2EA279CC008CA40F /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 31B626792EA279CC008CA40F /* Assets.xcassets */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */

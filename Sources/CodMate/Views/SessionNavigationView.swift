@@ -51,11 +51,12 @@ struct SessionNavigationView: View {
 
         return HStack(spacing: 8) {
             Image(systemName: "tray.full")
-                .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
+                .foregroundStyle(isSelected ? Color.white : Color.secondary)
                 .font(.caption)
 
             Text("All Sessions")
                 .font(.caption)
+                .foregroundStyle(isSelected ? Color.white : Color.primary)
 
             Spacer(minLength: 8)
 
@@ -64,12 +65,12 @@ struct SessionNavigationView: View {
             } else {
                 Text(totalCount > 0 ? "\(totalCount)" : "—")
                     .font(.caption2.monospacedDigit())
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(isSelected ? Color.white.opacity(0.9) : Color.secondary.opacity(0.5))
             }
         }
         .frame(height: 16)
         .padding(8)
-        .background(isSelected ? Color.accentColor.opacity(0.5) : Color.clear)
+        .background(isSelected ? Color.accentColor : Color.clear)
         .cornerRadius(8)
         .contentShape(Rectangle())
         .onTapGesture {
