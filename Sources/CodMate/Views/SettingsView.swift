@@ -3,7 +3,12 @@ import SwiftUI
 
 struct SettingsView: View {
     @ObservedObject var preferences: SessionPreferencesStore
-    @State private var selectedCategory: SettingCategory = .general
+    @Binding private var selectedCategory: SettingCategory
+
+    init(preferences: SessionPreferencesStore, selection: Binding<SettingCategory>) {
+        self._preferences = ObservedObject(wrappedValue: preferences)
+        self._selectedCategory = selection
+    }
 
     var body: some View {
         ZStack(alignment: .topLeading) {
@@ -55,6 +60,8 @@ struct SettingsView: View {
             terminalSettings
         case .command:
             commandSettings
+        case .about:
+            aboutSettings
         }
     }
 
@@ -75,79 +82,54 @@ struct SettingsView: View {
                         .font(.headline)
                         .foregroundColor(.primary)
 
-                    // Use a 3-column Grid: [label+help] | [value] | [button]
-                    // so names and values are horizontally aligned across rows.
                     Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 12) {
-                        // Row: Sessions Directory
                         GridRow {
                             VStack(alignment: .leading, spacing: 4) {
                                 Label("Sessions Directory", systemImage: "folder")
-                                    .font(.subheadline)
-                                    .fontWeight(.medium)
+                                    .font(.subheadline).fontWeight(.medium)
                                 Text("Directory where Codex session files are stored")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
+                                    .font(.caption).foregroundColor(.secondary)
                             }
-                            .gridColumnAlignment(.leading)
 
                             Text(preferences.sessionsRoot.path)
                                 .lineLimit(1)
                                 .truncationMode(.middle)
                                 .frame(maxWidth: .infinity, alignment: .trailing)
-                                .gridColumnAlignment(.trailing)
 
                             Button("Change…", action: selectSessionsRoot)
                                 .buttonStyle(.bordered)
                         }
 
-                        // Row: Codex CLI Path
                         GridRow {
                             VStack(alignment: .leading, spacing: 4) {
                                 Label("Codex CLI Path", systemImage: "terminal")
-                                    .font(.subheadline)
-                                    .fontWeight(.medium)
+                                    .font(.subheadline).fontWeight(.medium)
                                 Text("Path to the codex executable")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
+                                    .font(.caption).foregroundColor(.secondary)
                             }
-                            .gridColumnAlignment(.leading)
 
                             Text(preferences.codexExecutableURL.path)
                                 .lineLimit(1)
                                 .truncationMode(.middle)
                                 .frame(maxWidth: .infinity, alignment: .trailing)
-                                .gridColumnAlignment(.trailing)
 
                             Button("Change…", action: selectExecutable)
                                 .buttonStyle(.bordered)
                         }
                     }
-                    // Align grid with the left edge of the section header,
-                    // keep top/bottom/trailing breathing room.
-                    .padding(.vertical, 12)
-                    .padding(.trailing, 12)
-                    .background(Color(NSColor.controlBackgroundColor).opacity(0.5))
-                    .cornerRadius(8)
                 }
 
-                VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 8) {
                     Text("Reset")
                         .font(.headline)
                         .foregroundColor(.primary)
 
-                    VStack(alignment: .leading, spacing: 8) {
-                        Button("Reset All Settings to Defaults") { resetToDefaults() }
-                            .buttonStyle(.bordered)
-                            .tint(.red)
-                        Text("Restores sessions root, CLI path, and command options to factory defaults.")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.vertical, 12)
-                    .padding(.horizontal, 12)
-                    .background(Color(NSColor.controlBackgroundColor).opacity(0.5))
-                    .cornerRadius(8)
+                    Button("Reset All Settings to Defaults") { resetToDefaults() }
+                        .buttonStyle(.bordered)
+                        .tint(.red)
+                    Text("Restores sessions root, CLI path, and command options to factory defaults.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
                 }
             }
         }
@@ -183,6 +165,7 @@ struct SettingsView: View {
                             Toggle("", isOn: $preferences.defaultResumeUseEmbeddedTerminal)
                                 .labelsHidden()
                                 .frame(maxWidth: .infinity, alignment: .trailing)
+                                .gridColumnAlignment(.trailing)
                         }
 
                         // Row: Copy to clipboard
@@ -196,6 +179,7 @@ struct SettingsView: View {
                             Toggle("", isOn: $preferences.defaultResumeCopyToClipboard)
                                 .labelsHidden()
                                 .frame(maxWidth: .infinity, alignment: .trailing)
+                                .gridColumnAlignment(.trailing)
                         }
 
                         // Row: Default external app
@@ -213,17 +197,11 @@ struct SettingsView: View {
                             }
                             .labelsHidden()
                             .pickerStyle(.segmented)
-                            .frame(maxWidth: 280)
                             .frame(maxWidth: .infinity, alignment: .trailing)
                             .gridColumnAlignment(.trailing)
                             .gridCellAnchor(.trailing)
                         }
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.vertical, 12)
-                    .padding(.trailing, 12)
-                    .background(Color(NSColor.controlBackgroundColor).opacity(0.5))
-                    .cornerRadius(8)
                 }
 
             }
@@ -237,7 +215,7 @@ struct SettingsView: View {
                     Text("Command Options")
                         .font(.title2)
                         .fontWeight(.bold)
-                    Text("Default sandbox and approval policies for generated commands")
+                    Text("Default sandbox and approval policies for Codex commands")
                         .font(.subheadline)
                         .foregroundColor(.secondary)
                 }
@@ -247,14 +225,13 @@ struct SettingsView: View {
                         VStack(alignment: .leading, spacing: 4) {
                             Text("Sandbox policy (-s, --sandbox)")
                                 .font(.subheadline).fontWeight(.medium)
-                            Text("Filesystem access level for commands")
+                            Text("Filesystem access level for generated commands")
                                 .font(.caption).foregroundColor(.secondary)
                         }
                         Picker("", selection: $preferences.defaultResumeSandboxMode) {
                             ForEach(SandboxMode.allCases) { Text($0.title).tag($0) }
                         }
                         .labelsHidden()
-                        .frame(maxWidth: 280)
                         .frame(maxWidth: .infinity, alignment: .trailing)
                         .gridColumnAlignment(.trailing)
                     }
@@ -270,7 +247,6 @@ struct SettingsView: View {
                             ForEach(ApprovalPolicy.allCases) { Text($0.title).tag($0) }
                         }
                         .labelsHidden()
-                        .frame(maxWidth: 280)
                         .frame(maxWidth: .infinity, alignment: .trailing)
                         .gridColumnAlignment(.trailing)
                     }
@@ -285,6 +261,7 @@ struct SettingsView: View {
                         Toggle("", isOn: $preferences.defaultResumeFullAuto)
                             .labelsHidden()
                             .frame(maxWidth: .infinity, alignment: .trailing)
+                            .gridColumnAlignment(.trailing)
                     }
 
                     GridRow {
@@ -299,16 +276,64 @@ struct SettingsView: View {
                             .labelsHidden()
                             .tint(.red)
                             .frame(maxWidth: .infinity, alignment: .trailing)
+                            .gridColumnAlignment(.trailing)
                     }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.vertical, 12)
-                .padding(.trailing, 12)
-                .background(Color(NSColor.controlBackgroundColor).opacity(0.5))
-                .cornerRadius(8)
             }
         }
     }
+
+    private var aboutSettings: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("About CodMate")
+                        .font(.title2)
+                        .fontWeight(.bold)
+                    Text("Build information and project links")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
+
+                VStack(alignment: .leading, spacing: 12) {
+                    LabeledContent("Version") { Text(versionString) }
+                    LabeledContent("Build Timestamp") { Text(buildTimestampString) }
+                    LabeledContent("Project URL") {
+                        Link(projectURL.absoluteString, destination: projectURL)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                Text("CodMate is a macOS companion for managing Codex CLI sessions.")
+                    .font(.body)
+                    .foregroundColor(.secondary)
+            }
+        }
+    }
+
+    private var versionString: String {
+        let info = Bundle.main.infoDictionary
+        let version = info?["CFBundleShortVersionString"] as? String ?? "—"
+        let build = info?["CFBundleVersion"] as? String ?? "—"
+        return "\(version) (\(build))"
+    }
+
+    private var buildTimestampString: String {
+        guard let executableURL = Bundle.main.executableURL,
+              let attrs = try? FileManager.default.attributesOfItem(atPath: executableURL.path),
+              let date = attrs[.modificationDate] as? Date
+        else { return "Unavailable" }
+        return Self.buildDateFormatter.string(from: date)
+    }
+
+    private var projectURL: URL { URL(string: "https://umate.ai/codmate")! }
+
+    private static let buildDateFormatter: DateFormatter = {
+        let df = DateFormatter()
+        df.dateStyle = .medium
+        df.timeStyle = .medium
+        return df
+    }()
 
     private func selectSessionsRoot() {
         let panel = NSOpenPanel()
@@ -356,7 +381,7 @@ struct SettingsView: View {
 
 #Preview {
     let mockPreferences = SessionPreferencesStore()
-    return SettingsView(preferences: mockPreferences)
+    return SettingsView(preferences: mockPreferences, selection: .constant(.general))
 }
 
 #Preview("With Custom Paths") {
@@ -364,5 +389,5 @@ struct SettingsView: View {
     mockPreferences.sessionsRoot = URL(fileURLWithPath: "/Users/developer/.codex/sessions")
     mockPreferences.codexExecutableURL = URL(fileURLWithPath: "/opt/homebrew/bin/codex")
 
-    return SettingsView(preferences: mockPreferences)
+    return SettingsView(preferences: mockPreferences, selection: .constant(.command))
 }

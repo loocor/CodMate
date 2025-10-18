@@ -4,6 +4,7 @@ enum SettingCategory: String, CaseIterable, Identifiable {
   case general
   case terminal
   case command
+  case about
 
   var id: String { rawValue }
 
@@ -12,6 +13,7 @@ enum SettingCategory: String, CaseIterable, Identifiable {
     case .general: return "General"
     case .terminal: return "Terminal"
     case .command: return "Command"
+    case .about: return "About"
     }
   }
 
@@ -20,6 +22,7 @@ enum SettingCategory: String, CaseIterable, Identifiable {
     case .general: return "gear"
     case .terminal: return "terminal"
     case .command: return "slider.horizontal.3"
+    case .about: return "info.circle"
     }
   }
 
@@ -28,6 +31,7 @@ enum SettingCategory: String, CaseIterable, Identifiable {
     case .general: return "Basic application settings"
     case .terminal: return "Terminal and resume preferences"
     case .command: return "Command execution policies"
+    case .about: return "App info and project links"
+    }
   }
-}
 }

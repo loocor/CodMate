@@ -152,6 +152,29 @@ final class SessionListViewModel: ObservableObject {
         )
     }
 
+    func copyNewSessionCommands(session: SessionSummary) {
+        actions.copyNewSessionCommands(
+            session: session,
+            executableURL: preferences.codexExecutableURL,
+            options: preferences.resumeOptions
+        )
+    }
+
+    func buildNewSessionCLIInvocation(session: SessionSummary) -> String {
+        actions.buildNewSessionCLIInvocation(
+            session: session,
+            options: preferences.resumeOptions
+        )
+    }
+
+    func openNewSession(session: SessionSummary) {
+        _ = actions.openNewSession(
+            session: session,
+            executableURL: preferences.codexExecutableURL,
+            options: preferences.resumeOptions
+        )
+    }
+
     func copyRealResumeCommand(session: SessionSummary) {
         actions.copyRealResumeInvocation(
             session: session,
