@@ -23,5 +23,8 @@ struct CodMateApp: App {
         Settings {
             SettingsView(preferences: preferences)
         }
+        .windowResizability(.contentMinSize)
+        .windowStyle(.hiddenTitleBar)
+        .windowToolbarStyle(.unified)
     }
 }
