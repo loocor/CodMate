@@ -92,6 +92,174 @@ struct SessionActions {
         }
     }
 
+    // MARK: - Resume helpers (copy/open Terminal)
+    private func shellEscapedPath(_ path: String) -> String {
+        // Simple escape: wrap in single quotes and escape existing single quotes
+        return "'" + path.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
+
+    func buildResumeCommandLines(session: SessionSummary, executableURL: URL) -> String {
+        let cwd = FileManager.default.fileExists(atPath: session.cwd)
+            ? session.cwd : session.fileURL.deletingLastPathComponent().path
+        let cd = "cd " + shellEscapedPath(cwd)
+        let injectedPATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:${PATH}"
+        let execPath = resolveExecutableURL(preferred: executableURL)?.path
+            ?? executableURL.path
+        // Embedded terminal path: keep environment exports for robustness
+        let exports = "export LANG=zh_CN.UTF-8; export LC_ALL=zh_CN.UTF-8; export LC_CTYPE=zh_CN.UTF-8; export TERM=xterm-256color"
+        let resume = "PATH=\(injectedPATH) \(shellEscapedPath(execPath)) resume \(session.id)"
+        return cd + "\n" + exports + "\n" + resume + "\n"
+    }
+
+    // Simplified two-line command for external terminals
+    func buildExternalResumeCommands(session: SessionSummary, executableURL: URL) -> String {
+        let cwd = FileManager.default.fileExists(atPath: session.cwd)
+            ? session.cwd : session.fileURL.deletingLastPathComponent().path
+        let cd = "cd " + shellEscapedPath(cwd)
+        let execPath = resolveExecutableURL(preferred: executableURL)?.path ?? "codex"
+        let resume = shellEscapedPath(execPath) + " resume " + session.id
+        return cd + "\n" + resume + "\n"
+    }
+
+    func copyResumeCommands(session: SessionSummary, executableURL: URL, simplifiedForExternal: Bool = true) {
+        let commands = simplifiedForExternal
+            ? buildExternalResumeCommands(session: session, executableURL: executableURL)
+            : buildResumeCommandLines(session: session, executableURL: executableURL)
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.setString(commands, forType: .string)
+    }
+
+    @discardableResult
+    func openInTerminal(session: SessionSummary, executableURL: URL) -> Bool {
+        let scriptText = {
+            let lines = buildResumeCommandLines(session: session, executableURL: executableURL)
+                .replacingOccurrences(of: "\n", with: "; ")
+            return """
+            tell application "Terminal"
+              activate
+              do script "\(lines)"
+            end tell
+            """
+        }()
+
+        if let script = NSAppleScript(source: scriptText) {
+            var errorDict: NSDictionary?
+            script.executeAndReturnError(&errorDict)
+            return errorDict == nil
+        }
+        return false
+    }
+
+    // Open a terminal app without auto-executing; user can paste clipboard
+    func openTerminalApp(_ app: TerminalApp) {
+        guard let bundleID = app.bundleIdentifier else { return }
+
+        if #available(macOS 10.15, *) {
+            if let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) {
+                let config = NSWorkspace.OpenConfiguration()
+                config.activates = true
+                NSWorkspace.shared.openApplication(at: appURL, configuration: config, completionHandler: nil)
+            } else {
+                // Fall back to bundle launch if URL lookup fails
+                _ = NSWorkspace.shared.launchApplication(withBundleIdentifier: bundleID,
+                                                         options: [.default],
+                                                         additionalEventParamDescriptor: nil,
+                                                         launchIdentifier: nil)
+            }
+        } else {
+            _ = NSWorkspace.shared.launchApplication(withBundleIdentifier: bundleID,
+                                                     options: [.default],
+                                                     additionalEventParamDescriptor: nil,
+                                                     launchIdentifier: nil)
+        }
+    }
+
+    // Optional: open using URL schemes (iTerm2 / Warp) when available
+    func openTerminalViaScheme(_ app: TerminalApp, directory: String?, command: String? = nil) {
+        let dir = directory ?? NSHomeDirectory()
+        switch app {
+        case .iterm2:
+            var comps = URLComponents()
+            comps.scheme = "iterm2"
+            comps.path = "/command"
+            comps.queryItems = [URLQueryItem(name: "d", value: dir)]
+            if let command { comps.queryItems?.append(URLQueryItem(name: "c", value: command)) }
+            if let url = comps.url {
+                NSWorkspace.shared.open(url)
+            } else {
+                openTerminalApp(.iterm2)
+            }
+        case .warp:
+            var comps = URLComponents()
+            comps.scheme = "warp"
+            comps.host = "action"
+            comps.path = "/new_tab"
+            comps.queryItems = [URLQueryItem(name: "path", value: dir)]
+            if let url = comps.url {
+                NSWorkspace.shared.open(url)
+            } else {
+                openTerminalApp(.warp)
+            }
+        default:
+            openTerminalApp(app)
+        }
+    }
+
+    // Open Terminal.app at a given directory (no auto-run). Returns success.
+    @discardableResult
+    func openAppleTerminal(at directory: String) -> Bool {
+        // Use `open -a Terminal <dir>` to spawn a new window in that path
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+        proc.arguments = ["-a", "Terminal", directory]
+        do {
+            try proc.run(); proc.waitUntilExit()
+            return proc.terminationStatus == 0
+        } catch { return false }
+    }
+
+    // MARK: - Warp Launch Configuration
+    @discardableResult
+    func openWarpLaunchConfig(session: SessionSummary) -> Bool {
+        let cwd = FileManager.default.fileExists(atPath: session.cwd)
+            ? session.cwd : session.fileURL.deletingLastPathComponent().path
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        let folder = home.appendingPathComponent(".warp", isDirectory: true)
+            .appendingPathComponent("launch_configurations", isDirectory: true)
+        do {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        } catch { /* ignore */ }
+
+        let baseName = "codmate-resume-\(session.id)"
+        let fileName = baseName + ".yaml"
+        let fileURL = folder.appendingPathComponent(fileName)
+        let yaml = """
+        version: 1
+        name: CodMate Resume \(session.id)
+        windows:
+          - tabs:
+              - title: Codex
+                panes:
+                  - cwd: \(cwd)
+                    commands:
+                      - exec: codex resume \(session.id)
+        """
+        do { try yaml.data(using: .utf8)?.write(to: fileURL) } catch {}
+
+        // Prefer warp://launch/<config_name> (Warp resolves in its config dir), fallback to absolute path.
+        if let urlByName = URL(string: "warp://launch/\(baseName)") {
+            let ok = NSWorkspace.shared.open(urlByName)
+            if ok { return true }
+        }
+        var comps = URLComponents()
+        comps.scheme = "warp"
+        comps.host = "launch"
+        comps.path = "/" + fileURL.path
+        if let url = comps.url { return NSWorkspace.shared.open(url) }
+        return false
+    }
+
     func revealInFinder(session: SessionSummary) {
         NSWorkspace.shared.activateFileViewerSelecting([session.fileURL])
     }

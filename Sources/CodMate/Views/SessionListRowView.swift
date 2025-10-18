@@ -2,6 +2,7 @@ import SwiftUI
 
 struct SessionListRowView: View {
     let summary: SessionSummary
+    var isRunning: Bool = false
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -51,6 +52,14 @@ struct SessionListRowView: View {
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .padding(.vertical, 8)
         .buttonStyle(.plain)
+        .overlay(alignment: .trailing) {
+            if isRunning {
+                Image(systemName: "play.circle.fill")
+                    .foregroundStyle(Color.green)
+                    .font(.system(size: 28, weight: .semibold))
+                    .padding(.trailing, 8)
+            }
+        }
     }
 }
 

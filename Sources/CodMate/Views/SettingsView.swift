@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct SettingsView: View {
@@ -22,8 +23,7 @@ struct SettingsView: View {
                         .lineLimit(1)
                         .truncationMode(.middle)
                     Spacer()
-                    Button("Change…", action: { /* to be implemented */  })
-                        .disabled(true)
+                    Button("Change…", action: selectSessionsRoot)
                 }
             }
             LabeledContent("Codex CLI Path") {
@@ -32,9 +32,19 @@ struct SettingsView: View {
                         .lineLimit(1)
                         .truncationMode(.middle)
                     Spacer()
-                    Button("Change…", action: { /* to be implemented */  })
-                        .disabled(true)
+                    Button("Change…", action: selectExecutable)
                 }
+            }
+
+            Section("Resume Defaults") {
+                Toggle("Run in embedded terminal", isOn: $preferences.defaultResumeUseEmbeddedTerminal)
+                Toggle("Copy resume commands to clipboard", isOn: $preferences.defaultResumeCopyToClipboard)
+                Picker("Open external terminal", selection: $preferences.defaultResumeExternalApp) {
+                    ForEach(TerminalApp.allCases) { app in
+                        Text(app.title).tag(app)
+                    }
+                }
+                .pickerStyle(.segmented)
             }
         }
     }
@@ -57,6 +67,36 @@ struct SettingsView: View {
                     .frame(maxWidth: 200)
             }
             Toggle("Auto-generate title & summary", isOn: $preferences.llmAutoGenerate)
+        }
+    }
+
+    private func selectSessionsRoot() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = true
+        panel.directoryURL = preferences.sessionsRoot
+        panel.message = "Select the directory where session files are stored"
+
+        panel.begin { response in
+            guard response == .OK, let url = panel.url else { return }
+            preferences.sessionsRoot = url
+        }
+    }
+
+    private func selectExecutable() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [.unixExecutable, .executable]
+        panel.directoryURL = preferences.codexExecutableURL.deletingLastPathComponent()
+        panel.message = "Select the codex executable"
+
+        panel.begin { response in
+            guard response == .OK, let url = panel.url else { return }
+            preferences.codexExecutableURL = url
         }
     }
 }

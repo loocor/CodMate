@@ -19,9 +19,18 @@ final class SessionListViewModel: ObservableObject {
     @Published var selectedPath: String? = nil { didSet { applyFilters() } }
     @Published var selectedDay: Date? = nil {
         didSet {
-            // 日期改变可能影响 scope，需要重新加载
+            // 日期改变：仅当跨月且使用 updated 维度时才触发重载，减少频繁解析
             if oldValue != selectedDay {
-                Task { await refreshSessions() }
+                let cal = Calendar.current
+                if dateDimension == .updated,
+                   let oldDay = oldValue,
+                   let newDay = selectedDay,
+                   cal.isDate(oldDay, equalTo: newDay, toGranularity: .month) {
+                    // 同一月份内切换（updated 维度）无需重载，直接过滤
+                    applyFilters()
+                } else {
+                    Task { await refreshSessions() }
+                }
             }
         }
     }
@@ -44,7 +53,7 @@ final class SessionListViewModel: ObservableObject {
     private var enrichmentTask: Task<Void, Never>?
     @Published var globalSessionCount: Int = 0
     @Published private(set) var pathTreeRootPublished: PathTreeNode?
-    private var monthCountsCache: [String: [Int: Int]] = [:]  // key: "dim|yyyy-MM"
+    @Published private var monthCountsCache: [String: [Int: Int]] = [:]  // key: "dim|yyyy-MM"
 
     init(
         preferences: SessionPreferencesStore,
@@ -73,6 +82,12 @@ final class SessionListViewModel: ObservableObject {
             applyFilters()
             startBackgroundEnrichment()
             Task { await self.refreshGlobalCount() }
+            // 刷新侧边栏路径树，确保新增文件通过刷新即可出现
+            Task {
+                let counts = await indexer.collectCWDCounts(root: preferences.sessionsRoot)
+                let tree = counts.buildPathTreeFromCounts()
+                await MainActor.run { self.pathTreeRootPublished = tree }
+            }
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -86,6 +101,38 @@ final class SessionListViewModel: ObservableObject {
         } catch {
             return .failure(error)
         }
+    }
+
+    func copyResumeCommands(session: SessionSummary) {
+        actions.copyResumeCommands(session: session, executableURL: preferences.codexExecutableURL, simplifiedForExternal: true)
+    }
+
+    func openInTerminal(session: SessionSummary) -> Bool {
+        actions.openInTerminal(session: session, executableURL: preferences.codexExecutableURL)
+    }
+
+    func buildResumeCommands(session: SessionSummary) -> String {
+        actions.buildResumeCommandLines(session: session, executableURL: preferences.codexExecutableURL)
+    }
+
+    func buildExternalResumeCommands(session: SessionSummary) -> String {
+        actions.buildExternalResumeCommands(session: session, executableURL: preferences.codexExecutableURL)
+    }
+
+    func openWarpLaunch(session: SessionSummary) {
+        _ = actions.openWarpLaunchConfig(session: session)
+    }
+
+    func openPreferredTerminal(app: TerminalApp) {
+        actions.openTerminalApp(app)
+    }
+
+    func openPreferredTerminalViaScheme(app: TerminalApp, directory: String, command: String? = nil) {
+        actions.openTerminalViaScheme(app, directory: directory, command: command)
+    }
+
+    func openAppleTerminal(at directory: String) -> Bool {
+        actions.openAppleTerminal(at: directory)
     }
 
     func reveal(session: SessionSummary) {

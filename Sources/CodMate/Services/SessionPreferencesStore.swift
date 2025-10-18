@@ -18,6 +18,9 @@ final class SessionPreferencesStore: ObservableObject {
         static let llmAPIKey = "codex.llm.apiKey"
         static let llmModel = "codex.llm.model"
         static let llmAuto = "codex.llm.autoGenerate"
+        static let resumeUseEmbedded = "codex.resume.useEmbedded"
+        static let resumeCopyClipboard = "codex.resume.copyClipboard"
+        static let resumeExternalApp = "codex.resume.externalApp"
     }
 
     init(
@@ -38,11 +41,19 @@ final class SessionPreferencesStore: ObservableObject {
         } else {
             self.codexExecutableURL = SessionPreferencesStore.defaultExecutableURL()
         }
-        self.llmBaseURL = ""
-        self.llmAPIKey = ""
-        self.llmModel = ""
-        self.llmAutoGenerate = false
-        loadLLMDefaults()
+        // Initialize LLM prefs from defaults directly to avoid calling methods before initialization completes
+        self.llmBaseURL = defaults.string(forKey: Keys.llmBaseURL) ?? "https://api.openai.com"
+        self.llmAPIKey = defaults.string(forKey: Keys.llmAPIKey) ?? ""
+        self.llmModel = defaults.string(forKey: Keys.llmModel) ?? "gpt-4o-mini"
+        self.llmAutoGenerate = defaults.object(forKey: Keys.llmAuto) as? Bool ?? false
+
+        // Resume defaults
+        self.defaultResumeUseEmbeddedTerminal =
+            defaults.object(forKey: Keys.resumeUseEmbedded) as? Bool ?? true
+        self.defaultResumeCopyToClipboard =
+            defaults.object(forKey: Keys.resumeCopyClipboard) as? Bool ?? true
+        let appRaw = defaults.string(forKey: Keys.resumeExternalApp) ?? TerminalApp.terminal.rawValue
+        self.defaultResumeExternalApp = TerminalApp(rawValue: appRaw) ?? .terminal
     }
 
     private func persist() {
@@ -68,12 +79,7 @@ final class SessionPreferencesStore: ObservableObject {
         self.init(defaults: defaults, fileManager: .default)
     }
 
-    private func loadLLMDefaults() {
-        llmBaseURL = defaults.string(forKey: Keys.llmBaseURL) ?? "https://api.openai.com"
-        llmAPIKey = defaults.string(forKey: Keys.llmAPIKey) ?? ""
-        llmModel = defaults.string(forKey: Keys.llmModel) ?? "gpt-4o-mini"
-        llmAutoGenerate = defaults.object(forKey: Keys.llmAuto) as? Bool ?? false
-    }
+    private func loadLLMDefaults() {}
 
     static func defaultSessionsRoot(for homeDirectory: URL) -> URL {
         homeDirectory
@@ -83,5 +89,16 @@ final class SessionPreferencesStore: ObservableObject {
 
     static func defaultExecutableURL() -> URL {
         URL(fileURLWithPath: "/usr/local/bin/codex")
+    }
+
+    // MARK: - Resume Preferences
+    @Published var defaultResumeUseEmbeddedTerminal: Bool {
+        didSet { defaults.set(defaultResumeUseEmbeddedTerminal, forKey: Keys.resumeUseEmbedded) }
+    }
+    @Published var defaultResumeCopyToClipboard: Bool {
+        didSet { defaults.set(defaultResumeCopyToClipboard, forKey: Keys.resumeCopyClipboard) }
+    }
+    @Published var defaultResumeExternalApp: TerminalApp {
+        didSet { defaults.set(defaultResumeExternalApp.rawValue, forKey: Keys.resumeExternalApp) }
     }
 }

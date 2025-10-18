@@ -9,6 +9,8 @@ struct CodMateApp: App {
         let prefs = SessionPreferencesStore()
         _preferences = StateObject(wrappedValue: prefs)
         _listViewModel = StateObject(wrappedValue: SessionListViewModel(preferences: prefs))
+        // Prepare user notifications early so banners can show while app is active
+        SystemNotifier.shared.bootstrap()
     }
 
     var body: some Scene {
