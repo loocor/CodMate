@@ -92,4 +92,92 @@ final class CodMateTests: XCTestCase {
         XCTAssertEqual(summaries.count, 1)
         XCTAssertEqual(summaries.first?.id, "session-zero-pad")
     }
+
+    func testTimelineLoaderSkipsInstructionsAndNoise() throws {
+        let fileManager = FileManager.default
+        let tempURL = fileManager.temporaryDirectory.appendingPathComponent(
+            UUID().uuidString + ".jsonl")
+        defer { try? fileManager.removeItem(at: tempURL) }
+
+        let lines = [
+            #"{"timestamp":"2025-10-18T12:00:00Z","type":"session_meta","payload":{"id":"session","timestamp":"2025-10-18T12:00:00Z","cwd":"/tmp","originator":"codex","cli_version":"0.1.0","instructions":"Task info"}}"#,
+            #"{"timestamp":"2025-10-18T12:00:01Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<user_instructions>Hidden</user_instructions>"}]}}"#,
+            #"{"timestamp":"2025-10-18T12:00:02Z","type":"event_msg","payload":{"type":"user_message","message":"Need help with task","kind":"plain"}}"#,
+            #"{"timestamp":"2025-10-18T12:00:03Z","type":"event_msg","payload":{"type":"token_count","message":"","kind":"plain"}}"#,
+            #"{"timestamp":"2025-10-18T12:00:04Z","type":"response_item","payload":{"type":"function_call","call_id":"call1","name":"noop","content":[]}}"#,
+            #"{"timestamp":"2025-10-18T12:00:05Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Here is the answer"}]}}"#
+        ]
+        try lines.joined(separator: "\n").data(using: .utf8)?.write(to: tempURL)
+
+        let loader = SessionTimelineLoader()
+        let turns = try loader.load(url: tempURL)
+
+        XCTAssertEqual(turns.count, 1)
+        let turn = try XCTUnwrap(turns.first)
+        XCTAssertEqual(turn.userMessage?.text, "Need help with task")
+        XCTAssertEqual(turn.outputs.count, 1)
+        XCTAssertEqual(turn.outputs.first?.text, "Here is the answer")
+        XCTAssertFalse(turn.allEvents.contains { $0.text?.contains("user_instructions") == true })
+    }
+
+    func testTimelineLoaderDeduplicatesContextUpdates() throws {
+        let fileManager = FileManager.default
+        let tempURL = fileManager.temporaryDirectory.appendingPathComponent(
+            UUID().uuidString + ".jsonl")
+        defer { try? fileManager.removeItem(at: tempURL) }
+
+        let lines = [
+            #"{"timestamp":"2025-10-18T12:00:00Z","type":"session_meta","payload":{"id":"session","timestamp":"2025-10-18T12:00:00Z","cwd":"/tmp","originator":"codex","cli_version":"0.1.0"}}"#,
+            #"{"timestamp":"2025-10-18T12:00:01Z","type":"turn_context","payload":{"model":"gpt-5","approval_policy":"never","cwd":"/tmp","summary":""}}"#,
+            #"{"timestamp":"2025-10-18T12:00:02Z","type":"turn_context","payload":{"model":"gpt-5","approval_policy":"never","cwd":"/tmp","summary":""}}"#,
+            #"{"timestamp":"2025-10-18T12:00:03Z","type":"turn_context","payload":{"model":"gpt-5","approval_policy":"never","cwd":"/tmp","summary":""}}"#
+        ]
+        try lines.joined(separator: "\n").data(using: .utf8)?.write(to: tempURL)
+
+        let loader = SessionTimelineLoader()
+        let turns = try loader.load(url: tempURL)
+
+        XCTAssertEqual(turns.count, 1)
+        let turn = try XCTUnwrap(turns.first)
+        XCTAssertNil(turn.userMessage)
+        XCTAssertEqual(turn.outputs.count, 1)
+        XCTAssertEqual(turn.outputs.first?.repeatCount, 3)
+    }
+
+    func testTimelineLoaderKeepsEnvironmentTokenAndReasoning() throws {
+        let fileManager = FileManager.default
+        let tempURL = fileManager.temporaryDirectory.appendingPathComponent(
+            UUID().uuidString + ".jsonl")
+        defer { try? fileManager.removeItem(at: tempURL) }
+
+        let lines = [
+            #"{"timestamp":"2025-10-18T12:00:00Z","type":"session_meta","payload":{"id":"session","timestamp":"2025-10-18T12:00:00Z","cwd":"/tmp","originator":"codex","cli_version":"0.1.0"}}"#,
+            #"{"timestamp":"2025-10-18T12:00:01Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<environment_context><cwd>/tmp</cwd><approval_policy>never</approval_policy><sandbox_mode>workspace-write</sandbox_mode></environment_context>"}]}}"#,
+            #"{"timestamp":"2025-10-18T12:00:02Z","type":"event_msg","payload":{"type":"user_message","message":"Hello","kind":"plain"}}"#,
+            #"{"timestamp":"2025-10-18T12:00:03Z","type":"event_msg","payload":{"type":"agent_reasoning","text":"Thinking about the answer"}} "#,
+            #"{"timestamp":"2025-10-18T12:00:04Z","type":"event_msg","payload":{"type":"token_count","info":{"total":{"input_tokens":100,"output_tokens":20}}, "rate_limits":{"primary":{"used_percent":10.0,"window_minutes":60,"resets_in_seconds":100}}}}"#,
+            #"{"timestamp":"2025-10-18T12:00:05Z","type":"event_msg","payload":{"type":"agent_message","message":"Here you go","kind":"plain"}}"#
+        ]
+        try lines.joined(separator: "\n").data(using: .utf8)?.write(to: tempURL)
+
+        let loader = SessionTimelineLoader()
+        let turns = try loader.load(url: tempURL)
+
+        XCTAssertEqual(turns.count, 2)
+
+        let environmentTurn = turns[0]
+        XCTAssertNil(environmentTurn.userMessage)
+        XCTAssertEqual(environmentTurn.outputs.first?.title, "Environment Context")
+        XCTAssertEqual(environmentTurn.outputs.first?.metadata?["cwd"], "/tmp")
+
+        let mainTurn = turns[1]
+        XCTAssertEqual(mainTurn.userMessage?.text, "Hello")
+        let reasoning = mainTurn.outputs.first { $0.title == "Agent Reasoning" }
+        XCTAssertEqual(reasoning?.text, "Thinking about the answer")
+
+        let token = mainTurn.outputs.first { $0.title == "Token Usage" }
+        XCTAssertNotNil(token)
+        XCTAssertEqual(token?.metadata?["totalInput_tokens"], "100.0")
+        XCTAssertEqual(token?.metadata?["rate_PrimaryUsed_percent"], "10.0")
+    }
 }

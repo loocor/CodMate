@@ -1,6 +1,7 @@
 import SwiftUI
+
 #if os(macOS)
-import AppKit
+    import AppKit
 #endif
 
 @main
@@ -24,11 +25,6 @@ struct CodMateApp: App {
                 Button("About CodMate") {
                     presentSettings(for: .about)
                 }
-                Divider()
-                Button("Settings…") {
-                    presentSettings(for: .general)
-                }
-                .keyboardShortcut(",")
             }
             CommandMenu("CodMate") {
                 Button("Refresh Sessions") {
@@ -57,9 +53,9 @@ struct CodMateApp: App {
 
     private func presentSettings(for category: SettingCategory) {
         settingsSelection = category
-#if os(macOS)
-        NSApplication.shared.activate(ignoringOtherApps: true)
-        openSettings()
-#endif
+        #if os(macOS)
+            NSApplication.shared.activate(ignoringOtherApps: true)
+            openSettings()
+        #endif
     }
 }

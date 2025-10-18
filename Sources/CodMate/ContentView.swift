@@ -545,7 +545,7 @@ extension ContentView {
 
     private func exportMarkdownForSession(_ session: SessionSummary) {
         let loader = SessionTimelineLoader()
-        let events = (try? loader.load(url: session.fileURL)) ?? []
+        let turns = (try? loader.load(url: session.fileURL)) ?? []
         var lines: [String] = []
         lines.append("# \(session.displayName)")
         lines.append("")
@@ -554,20 +554,31 @@ extension ContentView {
         if let model = session.model { lines.append("- Model: \(model)") }
         if let approval = session.approvalPolicy { lines.append("- Approval Policy: \(approval)") }
         lines.append("")
-        for e in events {
-            let prefix: String
-            switch e.actor {
-            case .user: prefix = "**User**"
-            case .assistant: prefix = "**Assistant**"
-            case .tool: prefix = "**Tool**"
-            case .info: prefix = "**Info**"
+        for turn in turns {
+            if let user = turn.userMessage {
+                lines.append("**User** · \(user.timestamp)")
+                if let text = user.text, !text.isEmpty { lines.append(text) }
             }
-            lines.append("\(prefix) · \(e.timestamp)\n")
-            if let title = e.title { lines.append("> \(title)") }
-            if let text = e.text, !text.isEmpty { lines.append(text) }
-            if let meta = e.metadata, !meta.isEmpty {
+            for event in turn.outputs {
+                let prefix: String
+                switch event.actor {
+                case .assistant: prefix = "**Codex**"
+                case .tool: prefix = "**Tool**"
+                case .info: prefix = "**Info**"
+                case .user: prefix = "**User**"
+                }
                 lines.append("")
-                for k in meta.keys.sorted() { lines.append("- \(k): \(meta[k] ?? "")") }
+                lines.append("\(prefix) · \(event.timestamp)")
+                if let title = event.title { lines.append("> \(title)") }
+                if let text = event.text, !text.isEmpty { lines.append(text) }
+                if let meta = event.metadata, !meta.isEmpty {
+                    for key in meta.keys.sorted() {
+                        lines.append("- \(key): \(meta[key] ?? "")")
+                    }
+                }
+                if event.repeatCount > 1 {
+                    lines.append("- repeated: ×\(event.repeatCount)")
+                }
             }
             lines.append("")
         }
