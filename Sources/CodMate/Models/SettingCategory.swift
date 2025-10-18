@@ -3,8 +3,7 @@ import Foundation
 enum SettingCategory: String, CaseIterable, Identifiable {
   case general
   case terminal
-  case llm
-  case advanced
+  case command
 
   var id: String { rawValue }
 
@@ -12,8 +11,7 @@ enum SettingCategory: String, CaseIterable, Identifiable {
     switch self {
     case .general: return "General"
     case .terminal: return "Terminal"
-    case .llm: return "LLM"
-    case .advanced: return "Advanced"
+    case .command: return "Command"
     }
   }
 
@@ -21,8 +19,7 @@ enum SettingCategory: String, CaseIterable, Identifiable {
     switch self {
     case .general: return "gear"
     case .terminal: return "terminal"
-    case .llm: return "brain"
-    case .advanced: return "slider.horizontal.3"
+    case .command: return "slider.horizontal.3"
     }
   }
 
@@ -30,8 +27,7 @@ enum SettingCategory: String, CaseIterable, Identifiable {
     switch self {
     case .general: return "Basic application settings"
     case .terminal: return "Terminal and resume preferences"
-    case .llm: return "AI model configuration"
-    case .advanced: return "Advanced options and debugging"
-    }
+    case .command: return "Command execution policies"
   }
+}
 }

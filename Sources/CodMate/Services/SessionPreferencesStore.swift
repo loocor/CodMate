@@ -1,5 +1,7 @@
 import Foundation
 
+import Foundation
+
 @MainActor
 final class SessionPreferencesStore: ObservableObject {
     @Published var sessionsRoot: URL {
@@ -14,13 +16,13 @@ final class SessionPreferencesStore: ObservableObject {
     private struct Keys {
         static let sessionsRootPath = "codex.sessions.rootPath"
         static let executablePath = "codex.sessions.executablePath"
-        static let llmBaseURL = "codex.llm.baseURL"
-        static let llmAPIKey = "codex.llm.apiKey"
-        static let llmModel = "codex.llm.model"
-        static let llmAuto = "codex.llm.autoGenerate"
         static let resumeUseEmbedded = "codex.resume.useEmbedded"
         static let resumeCopyClipboard = "codex.resume.copyClipboard"
         static let resumeExternalApp = "codex.resume.externalApp"
+        static let resumeSandboxMode = "codex.resume.sandboxMode"
+        static let resumeApprovalPolicy = "codex.resume.approvalPolicy"
+        static let resumeFullAuto = "codex.resume.fullAuto"
+        static let resumeDangerBypass = "codex.resume.dangerBypass"
     }
 
     init(
@@ -41,12 +43,6 @@ final class SessionPreferencesStore: ObservableObject {
         } else {
             self.codexExecutableURL = SessionPreferencesStore.defaultExecutableURL()
         }
-        // Initialize LLM prefs from defaults directly to avoid calling methods before initialization completes
-        self.llmBaseURL = defaults.string(forKey: Keys.llmBaseURL) ?? "https://api.openai.com"
-        self.llmAPIKey = defaults.string(forKey: Keys.llmAPIKey) ?? ""
-        self.llmModel = defaults.string(forKey: Keys.llmModel) ?? "gpt-4o-mini"
-        self.llmAutoGenerate = defaults.object(forKey: Keys.llmAuto) as? Bool ?? false
-
         // Resume defaults
         self.defaultResumeUseEmbeddedTerminal =
             defaults.object(forKey: Keys.resumeUseEmbedded) as? Bool ?? true
@@ -54,6 +50,20 @@ final class SessionPreferencesStore: ObservableObject {
             defaults.object(forKey: Keys.resumeCopyClipboard) as? Bool ?? true
         let appRaw = defaults.string(forKey: Keys.resumeExternalApp) ?? TerminalApp.terminal.rawValue
         self.defaultResumeExternalApp = TerminalApp(rawValue: appRaw) ?? .terminal
+
+        // CLI policy defaults
+        if let s = defaults.string(forKey: Keys.resumeSandboxMode), let val = SandboxMode(rawValue: s) {
+            self.defaultResumeSandboxMode = val
+        } else {
+            self.defaultResumeSandboxMode = .workspaceWrite
+        }
+        if let a = defaults.string(forKey: Keys.resumeApprovalPolicy), let val = ApprovalPolicy(rawValue: a) {
+            self.defaultResumeApprovalPolicy = val
+        } else {
+            self.defaultResumeApprovalPolicy = .onRequest
+        }
+        self.defaultResumeFullAuto = defaults.object(forKey: Keys.resumeFullAuto) as? Bool ?? false
+        self.defaultResumeDangerBypass = defaults.object(forKey: Keys.resumeDangerBypass) as? Bool ?? false
     }
 
     private func persist() {
@@ -61,25 +71,9 @@ final class SessionPreferencesStore: ObservableObject {
         defaults.set(codexExecutableURL.path, forKey: Keys.executablePath)
     }
 
-    // MARK: - LLM Preferences
-    @Published var llmBaseURL: String {
-        didSet { defaults.set(llmBaseURL, forKey: Keys.llmBaseURL) }
-    }
-    @Published var llmAPIKey: String {
-        didSet { defaults.set(llmAPIKey, forKey: Keys.llmAPIKey) }
-    }
-    @Published var llmModel: String {
-        didSet { defaults.set(llmModel, forKey: Keys.llmModel) }
-    }
-    @Published var llmAutoGenerate: Bool {
-        didSet { defaults.set(llmAutoGenerate, forKey: Keys.llmAuto) }
-    }
-
     convenience init(defaults: UserDefaults = .standard) {
         self.init(defaults: defaults, fileManager: .default)
     }
-
-    private func loadLLMDefaults() {}
 
     static func defaultSessionsRoot(for homeDirectory: URL) -> URL {
         homeDirectory
@@ -100,5 +94,27 @@ final class SessionPreferencesStore: ObservableObject {
     }
     @Published var defaultResumeExternalApp: TerminalApp {
         didSet { defaults.set(defaultResumeExternalApp.rawValue, forKey: Keys.resumeExternalApp) }
+    }
+
+    @Published var defaultResumeSandboxMode: SandboxMode {
+        didSet { defaults.set(defaultResumeSandboxMode.rawValue, forKey: Keys.resumeSandboxMode) }
+    }
+    @Published var defaultResumeApprovalPolicy: ApprovalPolicy {
+        didSet { defaults.set(defaultResumeApprovalPolicy.rawValue, forKey: Keys.resumeApprovalPolicy) }
+    }
+    @Published var defaultResumeFullAuto: Bool {
+        didSet { defaults.set(defaultResumeFullAuto, forKey: Keys.resumeFullAuto) }
+    }
+    @Published var defaultResumeDangerBypass: Bool {
+        didSet { defaults.set(defaultResumeDangerBypass, forKey: Keys.resumeDangerBypass) }
+    }
+
+    var resumeOptions: ResumeOptions {
+        ResumeOptions(
+            sandbox: defaultResumeSandboxMode,
+            approval: defaultResumeApprovalPolicy,
+            fullAuto: defaultResumeFullAuto,
+            dangerouslyBypass: defaultResumeDangerBypass
+        )
     }
 }

@@ -16,7 +16,7 @@ struct SessionListRowView: View {
                 )
 
             VStack(alignment: .leading, spacing: 4) {
-                Text(summary.displayName)
+                Text(summary.effectiveTitle)
                     .font(.headline)
                 HStack(spacing: 12) {
                     Text(summary.startedAt.formatted(date: .numeric, time: .shortened))
@@ -29,7 +29,7 @@ struct SessionListRowView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-                Text(summary.instructionSnippet)
+                Text(summary.commentSnippet)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(2)

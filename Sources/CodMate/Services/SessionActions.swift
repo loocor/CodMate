@@ -46,7 +46,7 @@ struct SessionActions {
         return nil
     }
 
-    func resume(session: SessionSummary, executableURL: URL) async throws -> ProcessResult {
+    func resume(session: SessionSummary, executableURL: URL, options: ResumeOptions) async throws -> ProcessResult {
         guard let exec = resolveExecutableURL(preferred: executableURL) else { throw SessionActionError.executableNotFound(executableURL) }
 
         return try await withCheckedThrowingContinuation { continuation in
@@ -54,7 +54,7 @@ struct SessionActions {
                 do {
                     let process = Process()
                     process.executableURL = exec
-                    process.arguments = ["resume", session.id]
+                    process.arguments = self.buildResumeArguments(session: session, options: options)
                     // Prefer original session cwd if exists
                     if FileManager.default.fileExists(atPath: session.cwd) {
                         process.currentDirectoryURL = URL(fileURLWithPath: session.cwd, isDirectory: true)
@@ -98,7 +98,30 @@ struct SessionActions {
         return "'" + path.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 
-    func buildResumeCommandLines(session: SessionSummary, executableURL: URL) -> String {
+    private func flags(from options: ResumeOptions) -> [String] {
+        // Highest precedence: dangerously bypass
+        if options.dangerouslyBypass { return ["--dangerously-bypass-approvals-and-sandbox"] }
+        // Next: full-auto shortcut
+        if options.fullAuto { return ["--full-auto"] }
+        // Otherwise explicit -s and -a when provided
+        var f: [String] = []
+        if let s = options.sandbox { f += ["-s", s.rawValue] }
+        if let a = options.approval { f += ["-a", a.rawValue] }
+        return f
+    }
+
+    func buildResumeCLIInvocation(session: SessionSummary, executablePath: String, options: ResumeOptions) -> String {
+        let exe = shellEscapedPath(executablePath)
+        let base = "\(exe) resume \(session.id)"
+        let f = flags(from: options).joined(separator: " ")
+        return f.isEmpty ? base : base + " " + f
+    }
+
+    func buildResumeArguments(session: SessionSummary, options: ResumeOptions) -> [String] {
+        ["resume", session.id] + flags(from: options)
+    }
+
+    func buildResumeCommandLines(session: SessionSummary, executableURL: URL, options: ResumeOptions) -> String {
         let cwd = FileManager.default.fileExists(atPath: session.cwd)
             ? session.cwd : session.fileURL.deletingLastPathComponent().path
         let cd = "cd " + shellEscapedPath(cwd)
@@ -107,33 +130,42 @@ struct SessionActions {
             ?? executableURL.path
         // Embedded terminal path: keep environment exports for robustness
         let exports = "export LANG=zh_CN.UTF-8; export LC_ALL=zh_CN.UTF-8; export LC_CTYPE=zh_CN.UTF-8; export TERM=xterm-256color"
-        let resume = "PATH=\(injectedPATH) \(shellEscapedPath(execPath)) resume \(session.id)"
+        let invocation = buildResumeCLIInvocation(session: session, executablePath: execPath, options: options)
+        let resume = "PATH=\(injectedPATH) \(invocation)"
         return cd + "\n" + exports + "\n" + resume + "\n"
     }
 
     // Simplified two-line command for external terminals
-    func buildExternalResumeCommands(session: SessionSummary, executableURL: URL) -> String {
+    func buildExternalResumeCommands(session: SessionSummary, executableURL: URL, options: ResumeOptions) -> String {
         let cwd = FileManager.default.fileExists(atPath: session.cwd)
             ? session.cwd : session.fileURL.deletingLastPathComponent().path
         let cd = "cd " + shellEscapedPath(cwd)
         let execPath = resolveExecutableURL(preferred: executableURL)?.path ?? "codex"
-        let resume = shellEscapedPath(execPath) + " resume " + session.id
+        let resume = buildResumeCLIInvocation(session: session, executablePath: execPath, options: options)
         return cd + "\n" + resume + "\n"
     }
 
-    func copyResumeCommands(session: SessionSummary, executableURL: URL, simplifiedForExternal: Bool = true) {
+    func copyResumeCommands(session: SessionSummary, executableURL: URL, options: ResumeOptions, simplifiedForExternal: Bool = true) {
         let commands = simplifiedForExternal
-            ? buildExternalResumeCommands(session: session, executableURL: executableURL)
-            : buildResumeCommandLines(session: session, executableURL: executableURL)
+            ? buildExternalResumeCommands(session: session, executableURL: executableURL, options: options)
+            : buildResumeCommandLines(session: session, executableURL: executableURL, options: options)
         let pb = NSPasteboard.general
         pb.clearContents()
         pb.setString(commands, forType: .string)
     }
 
+    func copyRealResumeInvocation(session: SessionSummary, executableURL: URL, options: ResumeOptions) {
+        let execPath = resolveExecutableURL(preferred: executableURL)?.path ?? executableURL.path
+        let cmd = buildResumeCLIInvocation(session: session, executablePath: execPath, options: options)
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.setString(cmd + "\n", forType: .string)
+    }
+
     @discardableResult
-    func openInTerminal(session: SessionSummary, executableURL: URL) -> Bool {
+    func openInTerminal(session: SessionSummary, executableURL: URL, options: ResumeOptions) -> Bool {
         let scriptText = {
-            let lines = buildResumeCommandLines(session: session, executableURL: executableURL)
+            let lines = buildResumeCommandLines(session: session, executableURL: executableURL, options: options)
                 .replacingOccurrences(of: "\n", with: "; ")
             return """
             tell application "Terminal"
@@ -221,7 +253,7 @@ struct SessionActions {
 
     // MARK: - Warp Launch Configuration
     @discardableResult
-    func openWarpLaunchConfig(session: SessionSummary) -> Bool {
+    func openWarpLaunchConfig(session: SessionSummary, options: ResumeOptions) -> Bool {
         let cwd = FileManager.default.fileExists(atPath: session.cwd)
             ? session.cwd : session.fileURL.deletingLastPathComponent().path
         let home = FileManager.default.homeDirectoryForCurrentUser
@@ -234,6 +266,17 @@ struct SessionActions {
         let baseName = "codmate-resume-\(session.id)"
         let fileName = baseName + ".yaml"
         let fileURL = folder.appendingPathComponent(fileName)
+        let flagsString: String = {
+            // Use configured options; prefer bare `codex` so Warp resolves via PATH.
+            let cmd = buildResumeCLIInvocation(session: session, executablePath: "codex", options: options)
+            // buildResumeCLIInvocation quotes the executable; strip single quotes for YAML simplicity.
+            if cmd.hasPrefix("'codex'") { return String(cmd.dropFirst("'codex' ".count)) }
+            if cmd.hasPrefix("\"codex\"") { return String(cmd.dropFirst("\"codex\" ".count)) }
+            // Fallback: remove leading "codex " if present
+            if cmd.hasPrefix("codex ") { return String(cmd.dropFirst("codex ".count)) }
+            return cmd
+        }()
+
         let yaml = """
         version: 1
         name: CodMate Resume \(session.id)
@@ -243,7 +286,7 @@ struct SessionActions {
                 panes:
                   - cwd: \(cwd)
                     commands:
-                      - exec: codex resume \(session.id)
+                      - exec: codex \(flagsString)
         """
         do { try yaml.data(using: .utf8)?.write(to: fileURL) } catch {}
 

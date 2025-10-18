@@ -43,7 +43,7 @@ struct SettingsView: View {
                 }
             }
         }
-        .frame(minWidth: 600, minHeight: 460)
+        .frame(minWidth: 600, minHeight: 560)
     }
 
     @ViewBuilder
@@ -53,10 +53,8 @@ struct SettingsView: View {
             generalSettings
         case .terminal:
             terminalSettings
-        case .llm:
-            llmSettings
-        case .advanced:
-            advancedSettings
+        case .command:
+            commandSettings
         }
     }
 
@@ -128,6 +126,26 @@ struct SettingsView: View {
                     // keep top/bottom/trailing breathing room.
                     .padding(.vertical, 12)
                     .padding(.trailing, 12)
+                    .background(Color(NSColor.controlBackgroundColor).opacity(0.5))
+                    .cornerRadius(8)
+                }
+
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Reset")
+                        .font(.headline)
+                        .foregroundColor(.primary)
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Button("Reset All Settings to Defaults") { resetToDefaults() }
+                            .buttonStyle(.bordered)
+                            .tint(.red)
+                        Text("Restores sessions root, CLI path, and command options to factory defaults.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 12)
+                    .padding(.horizontal, 12)
                     .background(Color(NSColor.controlBackgroundColor).opacity(0.5))
                     .cornerRadius(8)
                 }
@@ -207,165 +225,87 @@ struct SettingsView: View {
                     .background(Color(NSColor.controlBackgroundColor).opacity(0.5))
                     .cornerRadius(8)
                 }
+
             }
         }
     }
 
-    private var llmSettings: some View {
+    private var commandSettings: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("LLM Settings")
+                    Text("Command Options")
                         .font(.title2)
                         .fontWeight(.bold)
-                    Text("Configure AI model settings for automatic title and summary generation")
+                    Text("Default sandbox and approval policies for generated commands")
                         .font(.subheadline)
                         .foregroundColor(.secondary)
                 }
 
-                VStack(alignment: .leading, spacing: 16) {
-                    Text("API Configuration")
-                        .font(.headline)
-                        .foregroundColor(.primary)
-
-                    Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 18) {
-                        // Base URL
-                        GridRow {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Label("API Base URL", systemImage: "globe")
-                                    .font(.subheadline).fontWeight(.medium)
-                                Text("The base URL for the LLM API endpoint")
-                                    .font(.caption).foregroundColor(.secondary)
-                            }
-                            TextField("e.g. https://api.openai.com", text: $preferences.llmBaseURL)
-                                .textFieldStyle(.roundedBorder)
-                                .frame(maxWidth: 400)
-                                .frame(maxWidth: .infinity, alignment: .trailing)
-                        }
-
-                        // API Key
-                        GridRow {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Label("API Key", systemImage: "key")
-                                    .font(.subheadline).fontWeight(.medium)
-                                Text("Your API key for authentication (stored securely)")
-                                    .font(.caption).foregroundColor(.secondary)
-                            }
-                            SecureField("sk-...", text: $preferences.llmAPIKey)
-                                .textFieldStyle(.roundedBorder)
-                                .frame(maxWidth: 400)
-                                .frame(maxWidth: .infinity, alignment: .trailing)
-                        }
-
-                        // Model
-                        GridRow {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Label("Model", systemImage: "brain")
-                                    .font(.subheadline).fontWeight(.medium)
-                                Text("The AI model to use for generation")
-                                    .font(.caption).foregroundColor(.secondary)
-                            }
-                            TextField("gpt-4o-mini", text: $preferences.llmModel)
-                                .textFieldStyle(.roundedBorder)
-                                .frame(maxWidth: 200)
-                                .frame(maxWidth: .infinity, alignment: .trailing)
-                        }
-                    }
-                    .padding(.vertical, 12)
-                    .padding(.trailing, 12)
-                    .background(Color(NSColor.controlBackgroundColor).opacity(0.5))
-                    .cornerRadius(8)
-                }
-
-                // 功能设置
-                VStack(alignment: .leading, spacing: 16) {
-                    Text("Features")
-                        .font(.headline)
-                        .foregroundColor(.primary)
-
-                    Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 18) {
-                        GridRow {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("Auto-generate title & summary")
-                                    .font(.subheadline).fontWeight(.medium)
-                                Text(
-                                    "Automatically generate titles and summaries for new sessions using AI"
-                                )
+                Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 18) {
+                    GridRow {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Sandbox policy (-s, --sandbox)")
+                                .font(.subheadline).fontWeight(.medium)
+                            Text("Filesystem access level for commands")
                                 .font(.caption).foregroundColor(.secondary)
-                            }
-                            Toggle("", isOn: $preferences.llmAutoGenerate)
-                                .labelsHidden()
-                                .frame(maxWidth: .infinity, alignment: .trailing)
                         }
-                    }
-                    .padding(.vertical, 12)
-                    .padding(.trailing, 12)
-                    .background(Color(NSColor.controlBackgroundColor).opacity(0.5))
-                    .cornerRadius(8)
-                }
-            }
-        }
-    }
-
-    private var advancedSettings: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Advanced Settings")
-                        .font(.title2)
-                        .fontWeight(.bold)
-                    Text("Advanced options and debugging settings")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                }
-
-                VStack(alignment: .leading, spacing: 16) {
-                    Text("Debugging")
-                        .font(.headline)
-                        .foregroundColor(.primary)
-
-                    Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 18) {
-                        GridRow {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Label("Enable debug logging", systemImage: "ladybug")
-                                    .font(.subheadline).fontWeight(.medium)
-                                Text("Enable detailed logging and debugging information")
-                                    .font(.caption).foregroundColor(.secondary)
-                            }
-                            Toggle("", isOn: .constant(false))
-                                .frame(maxWidth: .infinity, alignment: .trailing)
+                        Picker("", selection: $preferences.defaultResumeSandboxMode) {
+                            ForEach(SandboxMode.allCases) { Text($0.title).tag($0) }
                         }
+                        .labelsHidden()
+                        .frame(maxWidth: 280)
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                        .gridColumnAlignment(.trailing)
                     }
-                    .padding(.vertical, 12)
-                    .padding(.trailing, 12)
-                    .background(Color(NSColor.controlBackgroundColor).opacity(0.5))
-                    .cornerRadius(8)
-                }
 
-                VStack(alignment: .leading, spacing: 16) {
-                    Text("Reset")
-                        .font(.headline)
-                        .foregroundColor(.primary)
-
-                    Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 18) {
-                        GridRow {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Label("Reset All Settings", systemImage: "arrow.clockwise")
-                                    .font(.subheadline).fontWeight(.medium)
-                                Text("Reset all settings to their default values")
-                                    .font(.caption).foregroundColor(.secondary)
-                            }
-                            Button("Reset to Defaults", action: resetToDefaults)
-                                .buttonStyle(.bordered)
-                                .tint(.red)
-                                .frame(maxWidth: .infinity, alignment: .trailing)
+                    GridRow {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Approval policy (-a, --ask-for-approval)")
+                                .font(.subheadline).fontWeight(.medium)
+                            Text("When human confirmation is required")
+                                .font(.caption).foregroundColor(.secondary)
                         }
+                        Picker("", selection: $preferences.defaultResumeApprovalPolicy) {
+                            ForEach(ApprovalPolicy.allCases) { Text($0.title).tag($0) }
+                        }
+                        .labelsHidden()
+                        .frame(maxWidth: 280)
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                        .gridColumnAlignment(.trailing)
                     }
-                    .padding(.vertical, 12)
-                    .padding(.trailing, 12)
-                    .background(Color(NSColor.controlBackgroundColor).opacity(0.5))
-                    .cornerRadius(8)
+
+                    GridRow {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Enable full-auto (--full-auto)")
+                                .font(.subheadline).fontWeight(.medium)
+                            Text("Alias for on-failure approvals with workspace-write sandbox")
+                                .font(.caption).foregroundColor(.secondary)
+                        }
+                        Toggle("", isOn: $preferences.defaultResumeFullAuto)
+                            .labelsHidden()
+                            .frame(maxWidth: .infinity, alignment: .trailing)
+                    }
+
+                    GridRow {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Bypass approvals & sandbox")
+                                .font(.subheadline).fontWeight(.medium)
+                                .foregroundColor(.red)
+                            Text("--dangerously-bypass-approvals-and-sandbox (use with care)")
+                                .font(.caption).foregroundColor(.secondary)
+                        }
+                        Toggle("", isOn: $preferences.defaultResumeDangerBypass)
+                            .labelsHidden()
+                            .tint(.red)
+                            .frame(maxWidth: .infinity, alignment: .trailing)
+                    }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 12)
+                .padding(.trailing, 12)
+                .background(Color(NSColor.controlBackgroundColor).opacity(0.5))
+                .cornerRadius(8)
             }
         }
     }
@@ -404,13 +344,13 @@ struct SettingsView: View {
         preferences.sessionsRoot = SessionPreferencesStore.defaultSessionsRoot(
             for: FileManager.default.homeDirectoryForCurrentUser)
         preferences.codexExecutableURL = SessionPreferencesStore.defaultExecutableURL()
-        preferences.llmBaseURL = "https://api.openai.com"
-        preferences.llmAPIKey = ""
-        preferences.llmModel = "gpt-4o-mini"
-        preferences.llmAutoGenerate = false
         preferences.defaultResumeUseEmbeddedTerminal = true
         preferences.defaultResumeCopyToClipboard = true
         preferences.defaultResumeExternalApp = .terminal
+        preferences.defaultResumeSandboxMode = .workspaceWrite
+        preferences.defaultResumeApprovalPolicy = .onRequest
+        preferences.defaultResumeFullAuto = false
+        preferences.defaultResumeDangerBypass = false
     }
 }
 
@@ -423,10 +363,6 @@ struct SettingsView: View {
     let mockPreferences = SessionPreferencesStore()
     mockPreferences.sessionsRoot = URL(fileURLWithPath: "/Users/developer/.codex/sessions")
     mockPreferences.codexExecutableURL = URL(fileURLWithPath: "/opt/homebrew/bin/codex")
-    mockPreferences.llmBaseURL = "https://api.openai.com"
-    mockPreferences.llmAPIKey = "sk-1234567890abcdef"
-    mockPreferences.llmModel = "gpt-4o"
-    mockPreferences.llmAutoGenerate = true
 
     return SettingsView(preferences: mockPreferences)
 }

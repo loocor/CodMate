@@ -21,6 +21,10 @@ struct SessionSummary: Identifiable, Hashable, Sendable, Codable {
     let lineCount: Int
     let lastUpdatedAt: Date?
 
+    // User-provided metadata (rename/comment)
+    var userTitle: String? = nil
+    var userComment: String? = nil
+
     var duration: TimeInterval {
         guard let end = endedAt ?? lastUpdatedAt else {
             return 0
@@ -41,6 +45,9 @@ struct SessionSummary: Identifiable, Hashable, Sendable, Codable {
         return filename
     }
 
+    // Prefer user-provided title when available
+    var effectiveTitle: String { (userTitle?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 } ?? displayName }
+
     var instructionSnippet: String {
         guard let instructions, !instructions.isEmpty else { return "—" }
         let trimmed = instructions.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -49,6 +56,16 @@ struct SessionSummary: Identifiable, Hashable, Sendable, Codable {
         }
         let index = trimmed.index(trimmed.startIndex, offsetBy: 220)
         return "\(trimmed[..<index])…"
+    }
+
+    // Prefer user comment (100 chars) when available
+    var commentSnippet: String {
+        if let s = userComment?.trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty {
+            if s.count <= 100 { return s }
+            let idx = s.index(s.startIndex, offsetBy: 100)
+            return String(s[..<idx]) + "…"
+        }
+        return instructionSnippet
     }
 
     var readableDuration: String {
@@ -72,6 +89,8 @@ struct SessionSummary: Identifiable, Hashable, Sendable, Codable {
         let haystack = [
             id,
             displayName,
+            userTitle ?? "",
+            userComment ?? "",
             cliVersion,
             cwd,
             originator,

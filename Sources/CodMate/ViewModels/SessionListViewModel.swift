@@ -51,6 +51,11 @@ final class SessionListViewModel: ObservableObject {
     private var fulltextMatches: Set<String> = []  // SessionSummary.id set
     private var fulltextTask: Task<Void, Never>?
     private var enrichmentTask: Task<Void, Never>?
+    private let notesStore = SessionNotesStore()
+    private var notesSnapshot: [String: SessionNotesStore.SessionNote] = [:]
+    @Published var editingSession: SessionSummary? = nil
+    @Published var editTitle: String = ""
+    @Published var editComment: String = ""
     @Published var globalSessionCount: Int = 0
     @Published private(set) var pathTreeRootPublished: PathTreeNode?
     @Published private var monthCountsCache: [String: [Int: Int]] = [:]  // key: "dim|yyyy-MM"
@@ -75,8 +80,11 @@ final class SessionListViewModel: ObservableObject {
 
         do {
             let scope = currentScope()
-            let sessions = try await indexer.refreshSessions(
+            var sessions = try await indexer.refreshSessions(
                 root: preferences.sessionsRoot, scope: scope)
+            let notes = await notesStore.all()
+            notesSnapshot = notes
+            apply(notes: notes, to: &sessions)
             allSessions = sessions
             await computeCalendarCaches()
             applyFilters()
@@ -96,7 +104,9 @@ final class SessionListViewModel: ObservableObject {
     func resume(session: SessionSummary) async -> Result<ProcessResult, Error> {
         do {
             let result = try await actions.resume(
-                session: session, executableURL: preferences.codexExecutableURL)
+                session: session,
+                executableURL: preferences.codexExecutableURL,
+                options: preferences.resumeOptions)
             return .success(result)
         } catch {
             return .failure(error)
@@ -104,23 +114,54 @@ final class SessionListViewModel: ObservableObject {
     }
 
     func copyResumeCommands(session: SessionSummary) {
-        actions.copyResumeCommands(session: session, executableURL: preferences.codexExecutableURL, simplifiedForExternal: true)
+        actions.copyResumeCommands(
+            session: session,
+            executableURL: preferences.codexExecutableURL,
+            options: preferences.resumeOptions,
+            simplifiedForExternal: true
+        )
     }
 
     func openInTerminal(session: SessionSummary) -> Bool {
-        actions.openInTerminal(session: session, executableURL: preferences.codexExecutableURL)
+        actions.openInTerminal(session: session, executableURL: preferences.codexExecutableURL, options: preferences.resumeOptions)
     }
 
     func buildResumeCommands(session: SessionSummary) -> String {
-        actions.buildResumeCommandLines(session: session, executableURL: preferences.codexExecutableURL)
+        actions.buildResumeCommandLines(
+            session: session,
+            executableURL: preferences.codexExecutableURL,
+            options: preferences.resumeOptions
+        )
     }
 
     func buildExternalResumeCommands(session: SessionSummary) -> String {
-        actions.buildExternalResumeCommands(session: session, executableURL: preferences.codexExecutableURL)
+        actions.buildExternalResumeCommands(
+            session: session,
+            executableURL: preferences.codexExecutableURL,
+            options: preferences.resumeOptions
+        )
+    }
+
+    func buildResumeCLIInvocation(session: SessionSummary) -> String {
+        let execPath = actions.resolveExecutableURL(preferred: preferences.codexExecutableURL)?.path
+            ?? preferences.codexExecutableURL.path
+        return actions.buildResumeCLIInvocation(
+            session: session,
+            executablePath: execPath,
+            options: preferences.resumeOptions
+        )
+    }
+
+    func copyRealResumeCommand(session: SessionSummary) {
+        actions.copyRealResumeInvocation(
+            session: session,
+            executableURL: preferences.codexExecutableURL,
+            options: preferences.resumeOptions
+        )
     }
 
     func openWarpLaunch(session: SessionSummary) {
-        _ = actions.openWarpLaunchConfig(session: session)
+        _ = actions.openWarpLaunchConfig(session: session, options: preferences.resumeOptions)
     }
 
     func openPreferredTerminal(app: TerminalApp) {
@@ -133,6 +174,41 @@ final class SessionListViewModel: ObservableObject {
 
     func openAppleTerminal(at directory: String) -> Bool {
         actions.openAppleTerminal(at: directory)
+    }
+
+    // MARK: - Rename / Comment
+    func beginEditing(session: SessionSummary) async {
+        editingSession = session
+        if let note = await notesStore.note(for: session.id) {
+            editTitle = note.title ?? ""
+            editComment = note.comment ?? ""
+        } else {
+            editTitle = session.userTitle ?? ""
+            editComment = session.userComment ?? ""
+        }
+    }
+
+    func saveEdits() async {
+        guard let session = editingSession else { return }
+        let titleValue = editTitle.isEmpty ? nil : editTitle
+        let commentValue = editComment.isEmpty ? nil : editComment
+        await notesStore.upsert(id: session.id, title: titleValue, comment: commentValue)
+        notesSnapshot[session.id] = SessionNotesStore.SessionNote(id: session.id, title: titleValue, comment: commentValue, updatedAt: Date())
+        var map = Dictionary(uniqueKeysWithValues: allSessions.map { ($0.id, $0) })
+        if var s = map[session.id] {
+            s.userTitle = titleValue
+            s.userComment = commentValue
+            map[session.id] = s
+        }
+        allSessions = Array(map.values)
+        applyFilters()
+        cancelEdits()
+    }
+
+    func cancelEdits() {
+        editingSession = nil
+        editTitle = ""
+        editComment = ""
     }
 
     func reveal(session: SessionSummary) {
@@ -356,7 +432,14 @@ final class SessionListViewModel: ObservableObject {
                     await MainActor.run {
                         var map = Dictionary(
                             uniqueKeysWithValues: self.allSessions.map { ($0.id, $0) })
-                        for (id, item) in updatesBuffer { map[id] = item }
+                        for (id, item) in updatesBuffer {
+                            var enriched = item
+                            if let note = self.notesSnapshot[id] {
+                                enriched.userTitle = note.title
+                                enriched.userComment = note.comment
+                            }
+                            map[id] = enriched
+                        }
                         self.allSessions = Array(map.values)
                         self.applyFilters()
                     }
@@ -411,6 +494,15 @@ final class SessionListViewModel: ObservableObject {
 }
 
 extension SessionListViewModel {
+    private func apply(notes: [String: SessionNotesStore.SessionNote], to sessions: inout [SessionSummary]) {
+        for index in sessions.indices {
+            if let note = notes[sessions[index].id] {
+                sessions[index].userTitle = note.title
+                sessions[index].userComment = note.comment
+            }
+        }
+    }
+
     func refreshGlobalCount() async {
         let count = await indexer.countAllSessions(root: preferences.sessionsRoot)
         await MainActor.run { self.globalSessionCount = count }
