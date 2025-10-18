@@ -29,6 +29,6 @@ let package = Package(
             name: "CodMateTests",
             dependencies: ["CodMate"],
             path: "Tests"
-        )
+        ),
     ]
 )
