@@ -162,40 +162,7 @@ actor SessionIndexer {
 
     private func sessionFileURLs(at root: URL, scope: SessionLoadScope) throws -> [URL] {
         var urls: [URL] = []
-        let (base, _): (URL, Int) = {
-            let cal = Calendar.current
-            switch scope {
-            case .today:
-                let d = cal.startOfDay(for: Date())
-                let comps = cal.dateComponents([.year, .month, .day], from: d)
-                var u = root.appendingPathComponent("\(comps.year!)", isDirectory: true)
-                u.appendPathComponent("\(comps.month!)", isDirectory: true)
-                u.appendPathComponent("\(comps.day!)", isDirectory: true)
-                return (u, 3)
-            case .day(let d):
-                let day = cal.startOfDay(for: d)
-                let comps = cal.dateComponents([.year, .month, .day], from: day)
-                var u = root.appendingPathComponent("\(comps.year!)", isDirectory: true)
-                u.appendPathComponent("\(comps.month!)", isDirectory: true)
-                u.appendPathComponent("\(comps.day!)", isDirectory: true)
-                return (u, 3)
-            case .month(let d):
-                let comps = cal.dateComponents([.year, .month], from: d)
-                var u = root.appendingPathComponent("\(comps.year!)", isDirectory: true)
-                u.appendPathComponent("\(comps.month!)", isDirectory: true)
-                return (u, 2)
-            case .all:
-                return (root, 0)
-            }
-        }()
-
-        let enumeratorURL = base
-        var isDir: ObjCBool = false
-        if !fileManager.fileExists(atPath: enumeratorURL.path, isDirectory: &isDir)
-            || !isDir.boolValue
-        {
-            return []
-        }
+        guard let enumeratorURL = scopeBaseURL(root: root, scope: scope) else { return [] }
 
         guard
             let enumerator = fileManager.enumerator(
@@ -221,8 +188,7 @@ actor SessionIndexer {
         let cal = Calendar.current
         let comps = cal.dateComponents([.year, .month], from: monthStart)
         guard let year = comps.year, let month = comps.month else { return [:] }
-        var monthURL = root.appendingPathComponent("\(year)", isDirectory: true)
-        monthURL.appendPathComponent("\(month)", isDirectory: true)
+        guard let monthURL = monthDirectory(root: root, year: year, month: month) else { return [:] }
         guard
             let enumerator = fileManager.enumerator(
                 at: monthURL,
@@ -260,6 +226,65 @@ actor SessionIndexer {
             }
         }
         return counts
+    }
+
+    private func scopeBaseURL(root: URL, scope: SessionLoadScope) -> URL? {
+        let cal = Calendar.current
+        switch scope {
+        case .today:
+            return dayDirectory(root: root, date: Date())
+        case .day(let date):
+            return dayDirectory(root: root, date: date)
+        case .month(let date):
+            return monthDirectory(root: root, date: date)
+        case .all:
+            return directoryIfExists(root)
+        }
+    }
+
+    private func monthDirectory(root: URL, date: Date) -> URL? {
+        let cal = Calendar.current
+        let components = cal.dateComponents([.year, .month], from: date)
+        guard let year = components.year, let month = components.month else { return nil }
+        return monthDirectory(root: root, year: year, month: month)
+    }
+
+    private func dayDirectory(root: URL, date: Date) -> URL? {
+        let cal = Calendar.current
+        let components = cal.dateComponents([.year, .month, .day], from: cal.startOfDay(for: date))
+        guard let year = components.year,
+            let month = components.month,
+            let day = components.day
+        else { return nil }
+        return dayDirectory(root: root, year: year, month: month, day: day)
+    }
+
+    private func monthDirectory(root: URL, year: Int, month: Int) -> URL? {
+        guard let yearURL = directoryIfExists(root.appendingPathComponent("\(year)", isDirectory: true))
+        else { return nil }
+        return numberedDirectory(base: yearURL, value: month)
+    }
+
+    private func dayDirectory(root: URL, year: Int, month: Int, day: Int) -> URL? {
+        guard let monthURL = monthDirectory(root: root, year: year, month: month) else { return nil }
+        return numberedDirectory(base: monthURL, value: day)
+    }
+
+    private func numberedDirectory(base: URL, value: Int) -> URL? {
+        let candidates = [String(format: "%02d", value), "\(value)"]
+        for name in candidates {
+            let url = base.appendingPathComponent(name, isDirectory: true)
+            if let existing = directoryIfExists(url) { return existing }
+        }
+        return nil
+    }
+
+    private func directoryIfExists(_ url: URL) -> URL? {
+        var isDir: ObjCBool = false
+        if fileManager.fileExists(atPath: url.path, isDirectory: &isDir), isDir.boolValue {
+            return url
+        }
+        return nil
     }
 
     // Sidebar: collect cwd counts using disk cache or quick head-scan
