@@ -9,10 +9,15 @@ struct SessionDetailView: View {
     let onReveal: () -> Void
     let onDelete: () -> Void
 
-    @State private var turns: [ConversationTurn] = []
+    @State private var turns: [ConversationTurn] = []           // filtered + sorted for display
+    @State private var allTurns: [ConversationTurn] = []        // raw full timeline
     @State private var loadingTimeline = false
     @State private var isConversationExpanded = false
     @State private var expandedTurnIDs: Set<String> = []
+    @State private var searchText: String = ""
+    @State private var sortAscending: Bool = false
+    @State private var monitor: DirectoryMonitor? = nil
+    @State private var debounceReloadTask: Task<Void, Never>? = nil
     @State private var environmentExpanded = false
     @State private var environmentLoading = false
     @State private var environmentInfo: EnvironmentContextInfo?
@@ -38,23 +43,9 @@ struct SessionDetailView: View {
                 alignment: .topLeading
             )
         }
-        .task(id: summary.id) {
-            loadingTimeline = true
-            defer { loadingTimeline = false }
-            do {
-                turns = try loader.load(url: summary.fileURL).removingEnvironmentContext()
-                expandedTurnIDs = []
-                environmentExpanded = false
-                environmentInfo = nil
-                environmentLoading = false
-            } catch {
-                turns = []
-                expandedTurnIDs = []
-                environmentExpanded = false
-                environmentInfo = nil
-                environmentLoading = false
-            }
-        }
+        .task(id: summary.id) { await initialLoadAndMonitor() }
+        .onChange(of: searchText) { _, _ in applyFilterAndSort() }
+        .onChange(of: sortAscending) { _, _ in applyFilterAndSort() }
     }
 
     // moved actions to fixed top bar
@@ -158,6 +149,10 @@ struct SessionDetailView: View {
                 }
             } label: {
                 Label("Environment Context", systemImage: "macwindow")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                    .onTapGesture { environmentExpanded.toggle() }
+                    .hoverHand()
             }
         }
     }
@@ -194,6 +189,10 @@ struct SessionDetailView: View {
                 }
             } label: {
                 Label("Task Instructions", systemImage: "list.bullet.rectangle")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                    .onTapGesture { instructionsExpanded.toggle() }
+                    .hoverHand()
             }
         }
     }
@@ -204,6 +203,23 @@ struct SessionDetailView: View {
                 .font(.headline)
 
             Spacer()
+
+            // 搜索（内嵌放大镜与清除按钮，自绘样式以兼容性为先）
+            conversationSearchField
+
+            // Sort order toggle
+            Button {
+                sortAscending.toggle()
+            } label: {
+                Label(
+                    sortAscending ? "Oldest First" : "Newest First",
+                    systemImage: sortAscending ? "arrow.up" : "arrow.down"
+                )
+                .font(.callout)
+            }
+            .buttonStyle(.borderless)
+            .help(sortAscending ? "Sort oldest → newest" : "Sort newest → oldest")
+            .hoverHand()
 
             let allExpanded = !turns.isEmpty && expandedTurnIDs.count == turns.count
             Button {
@@ -219,6 +235,16 @@ struct SessionDetailView: View {
             .buttonStyle(.borderless)
             .disabled(turns.isEmpty)
             .help(allExpanded ? "Collapse all turns" : "Expand all turns")
+            .hoverHand()
+
+            // Refresh current conversation file (match borderless style for consistency)
+            Button { Task { await reloadConversation() } } label: {
+                Label("Refresh", systemImage: "arrow.clockwise")
+                    .font(.callout)
+            }
+            .buttonStyle(.borderless)
+            .help("Reload latest records from this session file")
+            .hoverHand()
 
             Button {
                 withAnimation(.easeInOut(duration: 0.2)) {
@@ -227,13 +253,14 @@ struct SessionDetailView: View {
             } label: {
                 Image(
                     systemName: isConversationExpanded
-                        ? "arrow.down.left.and.arrow.up.right"
-                        : "arrow.up.right.and.arrow.down.left"
+                        ? "arrow.up.right.and.arrow.down.left"  // show Restore icon
+                        : "arrow.down.left.and.arrow.up.right"  // show Expand icon
                 )
                 .font(.body)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.borderless)
             .help(isConversationExpanded ? "Restore layout" : "Expand conversation")
+            .hoverHand()
         }
     }
 
@@ -248,7 +275,11 @@ struct SessionDetailView: View {
                     ContentUnavailableView("No messages to display", systemImage: "text.bubble")
                         .frame(maxWidth: .infinity, alignment: .center)
                 } else {
-                    ConversationTimelineView(turns: turns, expandedTurnIDs: $expandedTurnIDs)
+                    ConversationTimelineView(
+                        turns: turns,
+                        expandedTurnIDs: $expandedTurnIDs,
+                        ascending: sortAscending
+                    )
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -259,6 +290,98 @@ struct SessionDetailView: View {
 
 // MARK: - Export
 extension SessionDetailView {
+    // 自定义搜索框，保证 macOS 兼容性
+    private var conversationSearchField: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.secondary)
+                .padding(.leading, 4)
+            TextField("Filter in conversation", text: $searchText)
+                .textFieldStyle(.plain)
+                .frame(minWidth: 160)
+            if !searchText.isEmpty {
+                Button { searchText = "" } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.tertiary)
+                }
+                .buttonStyle(.plain)
+                .keyboardShortcut(.cancelAction)
+                .hoverHand()
+            }
+        }
+        .padding(.vertical, 6)
+        .padding(.horizontal, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color(nsColor: .textBackgroundColor))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(Color.secondary.opacity(0.25), lineWidth: 1)
+                )
+        )
+        .frame(minWidth: 220)
+    }
+
+    // MARK: - Loading helpers
+    private func initialLoadAndMonitor() async {
+        await reloadConversation(resetUI: true)
+        // Configure file monitor for live reload
+        monitor?.cancel()
+        monitor = DirectoryMonitor(url: summary.fileURL) { [fileURL = summary.fileURL] in
+            // Debounce rapid write events
+            debounceReloadTask?.cancel()
+            debounceReloadTask = Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 300_000_000) // 300ms
+                // Confirm file still the same session file
+                guard fileURL == summary.fileURL else { return }
+                await reloadConversation()
+            }
+        }
+    }
+
+    @MainActor
+    private func reloadConversation(resetUI: Bool = false) async {
+        loadingTimeline = true
+        defer { loadingTimeline = false }
+        do {
+            let loaded = try loader.load(url: summary.fileURL).removingEnvironmentContext()
+            allTurns = loaded
+            if resetUI {
+                expandedTurnIDs = []
+                environmentExpanded = false
+                environmentInfo = nil
+                environmentLoading = false
+            }
+            applyFilterAndSort()
+        } catch {
+            allTurns = []
+            turns = []
+        }
+    }
+
+    @MainActor
+    private func applyFilterAndSort() {
+        let term = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let filtered: [ConversationTurn]
+        if term.isEmpty {
+            filtered = allTurns
+        } else {
+            filtered = allTurns.filter { turn in
+                func contains(_ s: String?) -> Bool { (s ?? "").lowercased().contains(term) }
+                if contains(turn.userMessage?.text) { return true }
+                for e in turn.outputs {
+                    if contains(e.title) || contains(e.text) { return true }
+                    if let md = e.metadata, md.values.contains(where: { $0.lowercased().contains(term) }) { return true }
+                }
+                return false
+            }
+        }
+        let sorted = filtered.sorted { a, b in
+            sortAscending ? (a.timestamp < b.timestamp) : (a.timestamp > b.timestamp)
+        }
+        turns = sorted
+    }
+
     private func exportMarkdown() {
         let md = buildMarkdown()
         let panel = NSSavePanel()

@@ -10,13 +10,15 @@ private let timelineTimeFormatter: DateFormatter = {
 struct ConversationTimelineView: View {
     let turns: [ConversationTurn]
     @Binding var expandedTurnIDs: Set<String>
+    var ascending: Bool = false
 
     var body: some View {
         LazyVStack(alignment: .leading, spacing: 20) {
             ForEach(Array(turns.enumerated()), id: \.element.id) { index, turn in
+                let pos = ascending ? (index + 1) : (turns.count - index)
                 ConversationTurnRow(
                     turn: turn,
-                    position: index + 1,
+                    position: pos,
                     isFirst: index == turns.startIndex,
                     isLast: index == turns.count - 1,
                     isExpanded: expandedTurnIDs.contains(turn.id),
@@ -35,6 +37,8 @@ struct ConversationTimelineView: View {
     }
 }
 
+ 
+
 private struct ConversationTurnRow: View {
     let turn: ConversationTurn
     let position: Int
@@ -49,15 +53,11 @@ private struct ConversationTurnRow: View {
                 position: position,
                 timeText: timelineTimeFormatter.string(from: turn.timestamp),
                 isFirst: isFirst,
-                isLast: isLast,
-                toggle: toggleExpanded
+                isLast: isLast
             )
 
-            Button(action: toggleExpanded) {
-                ConversationCard(turn: turn, isExpanded: isExpanded)
-            }
-            .buttonStyle(.plain)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            ConversationCard(turn: turn, isExpanded: isExpanded, toggle: toggleExpanded)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 }
@@ -67,7 +67,6 @@ private struct TimelineMarker: View {
     let timeText: String
     let isFirst: Bool
     let isLast: Bool
-    let toggle: () -> Void
 
     var body: some View {
         VStack(alignment: .center, spacing: 6) {
@@ -81,12 +80,9 @@ private struct TimelineMarker: View {
                         .fill(Color.accentColor)
                 )
 
-            Button(action: toggle) {
-                Text(timeText)
-                    .font(.caption2.monospacedDigit())
-                    .foregroundStyle(Color.accentColor)
-            }
-            .buttonStyle(.plain)
+            Text(timeText)
+                .font(.caption2.monospacedDigit())
+                .foregroundStyle(Color.accentColor)
 
             VStack(spacing: 0) {
                 Rectangle()
@@ -111,6 +107,7 @@ private struct TimelineMarker: View {
 private struct ConversationCard: View {
     let turn: ConversationTurn
     let isExpanded: Bool
+    let toggle: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -153,6 +150,9 @@ private struct ConversationCard: View {
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.secondary)
         }
+        .contentShape(Rectangle())
+        .onTapGesture(perform: toggle)
+        .hoverHand()
     }
 
     @ViewBuilder
@@ -321,5 +321,14 @@ private struct ConversationTimelinePreview: View {
         )
         .padding()
         .frame(width: 540)
+    }
+}
+
+// 本文件内提供小手指针扩展，确保可点击区域光标一致
+extension View {
+    func hoverHand() -> some View {
+        self.onHover { inside in
+            if inside { NSCursor.pointingHand.set() } else { NSCursor.arrow.set() }
+        }
     }
 }

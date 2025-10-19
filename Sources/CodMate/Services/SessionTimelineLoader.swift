@@ -158,11 +158,24 @@ struct SessionTimelineLoader {
         var currentUser: TimelineEvent?
         var pendingOutputs: [TimelineEvent] = []
 
+        // Use a stable, content-agnostic key per turn to preserve UI expansion state
+        // across reloads when outputs are appended (commonly the last turn).
+        var seenTurnKeys: [String: Int] = [:]
+
+        func stableTurnID(anchor timestamp: Date, hasUser: Bool) -> String {
+            let millis = Int(timestamp.timeIntervalSince1970 * 1000)
+            let baseKey = "\(millis)-\(hasUser ? "u" : "o")"
+            let seq = (seenTurnKeys[baseKey] ?? 0) + 1
+            seenTurnKeys[baseKey] = seq
+            return "t-\(baseKey)-\(seq)"
+        }
+
         func flushTurn() {
             guard currentUser != nil || !pendingOutputs.isEmpty else { return }
             let timestamp = currentUser?.timestamp ?? pendingOutputs.first?.timestamp ?? Date()
+            let id = stableTurnID(anchor: timestamp, hasUser: currentUser != nil)
             let turn = ConversationTurn(
-                id: UUID().uuidString,
+                id: id,
                 timestamp: timestamp,
                 userMessage: currentUser,
                 outputs: pendingOutputs
