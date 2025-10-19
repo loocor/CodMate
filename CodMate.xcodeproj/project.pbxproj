@@ -74,8 +74,8 @@
 		1A00013B2A00000100000001 /* ConversationTurn.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ConversationTurn.swift; path = Sources/CodMate/Models/ConversationTurn.swift; sourceTree = SOURCE_ROOT; };
 		1A0001272A00000100000001 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SettingsView.swift; path = Sources/CodMate/Views/SettingsView.swift; sourceTree = SOURCE_ROOT; };
 		1A0001282A00000100000001 /* SessionLoadScope.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SessionLoadScope.swift; path = Sources/CodMate/Models/SessionLoadScope.swift; sourceTree = SOURCE_ROOT; };
-		311247A12EA38F7600D8D33E /* WindowConfigurator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowConfigurator.swift; sourceTree = "<group>"; };
-		311247A32EA3A51D00D8D33E /* ResumeOptions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResumeOptions.swift; sourceTree = "<group>"; };
+		311247A12EA38F7600D8D33E /* WindowConfigurator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/CodMate/Utils/WindowConfigurator.swift; sourceTree = SOURCE_ROOT; };
+		311247A32EA3A51D00D8D33E /* ExecutionPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/CodMate/Models/ExecutionPolicy.swift; sourceTree = SOURCE_ROOT; };
 		311247A92EA3BBCE00D8D33E /* SessionNotesStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SessionNotesStore.swift; path = Sources/CodMate/Services/SessionNotesStore.swift; sourceTree = SOURCE_ROOT; };
 		311247AB2EA3BBED00D8D33E /* EditSessionMetaView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = EditSessionMetaView.swift; path = Sources/CodMate/Views/EditSessionMetaView.swift; sourceTree = SOURCE_ROOT; };
 		31B6266F2EA24A22008CA40F /* TerminalApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = TerminalApp.swift; path = Sources/CodMate/Models/TerminalApp.swift; sourceTree = SOURCE_ROOT; };
@@ -272,7 +272,7 @@
 			buildActionMask = 2147483647;
             files = (
                 311247A22EA38F7600D8D33E /* WindowConfigurator.swift in Sources */,
-                311247A42EA3A51D00D8D33E /* ResumeOptions.swift in Sources */,
+                311247A42EA3A51D00D8D33E /* ExecutionPolicy.swift in Sources */,
                 1A0001012A00000100000001 /* CodMateApp.swift in Sources */,
                 1A0001022A00000100000001 /* ContentView.swift in Sources */,
                 1A0001032A00000100000001 /* SessionListViewModel.swift in Sources */,
