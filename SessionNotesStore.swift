@@ -29,10 +29,7 @@ actor SessionNotesStore {
         self.fileURL = directory.appendingPathComponent("session-notes.json")
         
         // Load existing notes synchronously during init
-        self.loadSync()
-    }
-    
-    private func loadSync() {
+        // We can safely access notes directly during init before actor isolation begins
         guard FileManager.default.fileExists(atPath: fileURL.path) else { return }
         
         do {
@@ -55,7 +52,7 @@ actor SessionNotesStore {
             notes[id] = SessionNote(id: id, title: title, comment: comment, updatedAt: Date())
         }
         Task {
-            await self.save()
+            self.save()
         }
     }
     
@@ -66,7 +63,7 @@ actor SessionNotesStore {
     func delete(id: String) {
         notes.removeValue(forKey: id)
         Task {
-            await self.save()
+            self.save()
         }
     }
     

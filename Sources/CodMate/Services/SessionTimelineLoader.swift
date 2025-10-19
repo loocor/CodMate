@@ -235,25 +235,24 @@ struct SessionTimelineLoader {
         if let regex {
             let nsString = NSString(string: String(inner))
             let matches = regex.matches(in: String(inner), range: NSRange(location: 0, length: nsString.length))
-            for match in matches {
-                if match.numberOfRanges >= 3 {
-                    let key = nsString.substring(with: match.range(at: 1))
-                    var value = nsString.substring(with: match.range(at: 2))
-                    value = value.trimmingCharacters(in: .whitespacesAndNewlines)
-                    metadata[key] = value
-                }
+            for match in matches where match.numberOfRanges >= 3 {
+                let key = nsString.substring(with: match.range(at: 1))
+                var value = nsString.substring(with: match.range(at: 2))
+                value = value.trimmingCharacters(in: .whitespacesAndNewlines)
+                metadata[key] = value
             }
         }
-        let textLines = metadata
-            .sorted(by: { $0.key < $1.key })
+        let sortedEntries = metadata.sorted(by: { $0.key < $1.key })
+        let textLines = sortedEntries
             .map { "\($0.key): \($0.value)" }
             .joined(separator: "\n")
+        let displayText = textLines.isEmpty ? cleanedText(String(inner)) : textLines
         return TimelineEvent(
             id: UUID().uuidString,
             timestamp: timestamp,
             actor: .info,
-            title: "Environment Context",
-            text: textLines.isEmpty ? nil : textLines,
+            title: TimelineEvent.environmentContextTitle,
+            text: displayText.isEmpty ? nil : displayText,
             metadata: metadata.isEmpty ? nil : metadata
         )
     }
@@ -320,5 +319,49 @@ struct SessionTimelineLoader {
             }
         }
         return nil
+    }
+
+    func loadEnvironmentContext(url: URL) throws -> EnvironmentContextInfo? {
+        let data = try Data(contentsOf: url, options: [.mappedIfSafe])
+        guard !data.isEmpty else { return nil }
+        let newline: UInt8 = 0x0A
+        let carriageReturn: UInt8 = 0x0D
+        var latest: TimelineEvent?
+
+        for var slice in data.split(separator: newline, omittingEmptySubsequences: true) {
+            if slice.last == carriageReturn { slice = slice.dropLast() }
+            guard !slice.isEmpty else { continue }
+            guard let row = try? decoder.decode(SessionRow.self, from: Data(slice)) else { continue }
+
+            switch row.kind {
+            case let .eventMessage(payload):
+                let type = payload.type.lowercased()
+                if type == "environment_context",
+                   let envText = payload.message ?? payload.text,
+                   let event = makeEnvironmentContextEvent(text: envText, timestamp: row.timestamp)
+                {
+                    latest = event
+                }
+            case let .responseItem(payload):
+                if payload.type.lowercased() == "message" {
+                    let text = joinedText(from: payload.content ?? [])
+                    guard text.contains("<environment_context") else { continue }
+                    if let event = makeEnvironmentContextEvent(text: text, timestamp: row.timestamp) {
+                        latest = event
+                    }
+                }
+            default:
+                continue
+            }
+        }
+
+        guard let event = latest else { return nil }
+        let metadataPairs = (event.metadata ?? [:]).sorted(by: { $0.key < $1.key })
+        let entries = metadataPairs.map { EnvironmentContextInfo.Entry(key: $0.key, value: $0.value) }
+        return EnvironmentContextInfo(
+            timestamp: event.timestamp,
+            entries: entries,
+            rawText: event.text
+        )
     }
 }

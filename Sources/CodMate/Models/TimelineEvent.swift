@@ -46,3 +46,7 @@ struct TimelineEvent: Identifiable, Hashable {
         )
     }
 }
+
+extension TimelineEvent {
+    static let environmentContextTitle = "Environment Context"
+}

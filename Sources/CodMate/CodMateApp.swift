@@ -28,7 +28,7 @@ struct CodMateApp: App {
             }
             CommandMenu("CodMate") {
                 Button("Refresh Sessions") {
-                    Task { await listViewModel.refreshSessions() }
+                    Task { await listViewModel.refreshSessions(force: true) }
                 }
                 .keyboardShortcut("r", modifiers: [.command])
             }

@@ -13,10 +13,12 @@ actor SessionNotesStore {
 
     init(fileManager: FileManager = .default) {
         let dir = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-            .appendingPathComponent("CodMate", isDirectory: true)
+            .appendingPathComponent("io.umate.codex", isDirectory: true)
         try? fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
-        url = dir.appendingPathComponent("sessionNotes-v1.json")
-        if let data = try? Data(contentsOf: url), let decoded = try? JSONDecoder().decode([String: SessionNote].self, from: data) {
+        url = dir.appendingPathComponent("session-notes.json")
+        if let data = try? Data(contentsOf: url),
+            let decoded = try? JSONDecoder().decode([String: SessionNote].self, from: data)
+        {
             map = decoded
         }
     }
@@ -32,7 +34,10 @@ actor SessionNotesStore {
         save()
     }
 
-    func remove(id: String) { map.removeValue(forKey: id); save() }
+    func remove(id: String) {
+        map.removeValue(forKey: id)
+        save()
+    }
 
     func all() -> [String: SessionNote] { map }
 
@@ -40,4 +45,3 @@ actor SessionNotesStore {
         if let data = try? JSONEncoder().encode(map) { try? data.write(to: url, options: .atomic) }
     }
 }
-

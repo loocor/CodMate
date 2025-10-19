@@ -43,8 +43,8 @@
 		31B626782EA26BEE008CA40F /* TerminalHostView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31B626772EA26BEE008CA40F /* TerminalHostView.swift */; };
 		31B6267A2EA279CC008CA40F /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 31B626792EA279CC008CA40F /* Assets.xcassets */; };
 		31B6267B2EA28000008CA40F /* SettingCategory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31B6267C2EA28000008CA40F /* SettingCategory.swift */; };
-		41A001002B00000100000001 /* SessionNotesStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41A001012B00000100000001 /* SessionNotesStore.swift */; };
-		41A001022B00000100000001 /* EditSessionMetaView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41A001032B00000100000001 /* EditSessionMetaView.swift */; };
+		41A001052B00000200000001 /* EnvironmentContextInfo.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41A001042B00000200000001 /* EnvironmentContextInfo.swift */; };
+		41A001072B00000300000001 /* DirectoryMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41A001052B00000300000001 /* DirectoryMonitor.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -76,8 +76,8 @@
 		1A0001282A00000100000001 /* SessionLoadScope.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SessionLoadScope.swift; path = Sources/CodMate/Models/SessionLoadScope.swift; sourceTree = SOURCE_ROOT; };
 		311247A12EA38F7600D8D33E /* WindowConfigurator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowConfigurator.swift; sourceTree = "<group>"; };
 		311247A32EA3A51D00D8D33E /* ResumeOptions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResumeOptions.swift; sourceTree = "<group>"; };
-		311247A92EA3BBCE00D8D33E /* SessionNotesStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionNotesStore.swift; sourceTree = "<group>"; };
-		311247AB2EA3BBED00D8D33E /* EditSessionMetaView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditSessionMetaView.swift; sourceTree = "<group>"; };
+		311247A92EA3BBCE00D8D33E /* SessionNotesStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SessionNotesStore.swift; path = Sources/CodMate/Services/SessionNotesStore.swift; sourceTree = SOURCE_ROOT; };
+		311247AB2EA3BBED00D8D33E /* EditSessionMetaView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = EditSessionMetaView.swift; path = Sources/CodMate/Views/EditSessionMetaView.swift; sourceTree = SOURCE_ROOT; };
 		31B6266F2EA24A22008CA40F /* TerminalApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = TerminalApp.swift; path = Sources/CodMate/Models/TerminalApp.swift; sourceTree = SOURCE_ROOT; };
 		31B626712EA24A9E008CA40F /* EmbeddedTerminalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = EmbeddedTerminalView.swift; path = Sources/CodMate/Views/EmbeddedTerminalView.swift; sourceTree = SOURCE_ROOT; };
 		31B626732EA24E3B008CA40F /* SystemNotifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SystemNotifier.swift; path = Sources/CodMate/Services/SystemNotifier.swift; sourceTree = SOURCE_ROOT; };
@@ -85,8 +85,8 @@
 		31B626772EA26BEE008CA40F /* TerminalHostView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = TerminalHostView.swift; path = Sources/CodMate/Views/TerminalHostView.swift; sourceTree = SOURCE_ROOT; };
 		31B626792EA279CC008CA40F /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; name = Assets.xcassets; path = CodMate/Assets.xcassets; sourceTree = SOURCE_ROOT; };
 		31B6267C2EA28000008CA40F /* SettingCategory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SettingCategory.swift; path = Sources/CodMate/Models/SettingCategory.swift; sourceTree = SOURCE_ROOT; };
-		41A001012B00000100000001 /* SessionNotesStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionNotesStore.swift; sourceTree = "<group>"; };
-		41A001032B00000100000001 /* EditSessionMetaView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditSessionMetaView.swift; sourceTree = "<group>"; };
+		41A001042B00000200000001 /* EnvironmentContextInfo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = EnvironmentContextInfo.swift; path = Sources/CodMate/Models/EnvironmentContextInfo.swift; sourceTree = SOURCE_ROOT; };
+		41A001052B00000300000001 /* DirectoryMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = DirectoryMonitor.swift; path = Sources/CodMate/Services/DirectoryMonitor.swift; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -136,7 +136,6 @@
 				1A00020A2A00000100000001 /* ViewModels */,
 				1A00020C2A00000100000001 /* Services */,
 				1A00020D2A00000100000001 /* Views */,
-				41A001032B00000100000001 /* EditSessionMetaView.swift */,
 			);
 			name = Sources;
 			sourceTree = SOURCE_ROOT;
@@ -144,9 +143,7 @@
 		1A00020A2A00000100000001 /* ViewModels */ = {
 			isa = PBXGroup;
 			children = (
-				1A0000832A00000100000001 /* SessionListViewModel.swift */,
-				311247A92EA3BBCE00D8D33E /* SessionNotesStore.swift */,
-				311247AB2EA3BBED00D8D33E /* EditSessionMetaView.swift */,
+				1A0000832A00000100000001 /* SessionListViewModel.swift */
 			);
 			name = ViewModels;
 			sourceTree = SOURCE_ROOT;
@@ -159,6 +156,7 @@
 				1A0000882A00000100000001 /* SessionEvent.swift */,
 				1A0001242A00000100000001 /* TimelineEvent.swift */,
 				1A00013B2A00000100000001 /* ConversationTurn.swift */,
+				41A001042B00000200000001 /* EnvironmentContextInfo.swift */,
 				1A0000892A00000100000001 /* SessionNavigation.swift */,
 				1A0001212A00000100000001 /* PathTree.swift */,
 				1A0001282A00000100000001 /* SessionLoadScope.swift */,
@@ -174,8 +172,9 @@
 				1A0000842A00000100000001 /* SessionIndexer.swift */,
 				1A0000852A00000100000001 /* SessionActions.swift */,
 				1A0000862A00000100000001 /* SessionPreferencesStore.swift */,
-				41A001012B00000100000001 /* SessionNotesStore.swift */,
+				311247A92EA3BBCE00D8D33E /* SessionNotesStore.swift */,
 				1A0001252A00000100000001 /* SessionTimelineLoader.swift */,
+				41A001052B00000300000001 /* DirectoryMonitor.swift */,
 				31B626732EA24E3B008CA40F /* SystemNotifier.swift */,
 				31B626752EA26B6D008CA40F /* TerminalSessionManager.swift */,
 				311247A32EA3A51D00D8D33E /* ResumeOptions.swift */,
@@ -198,6 +197,7 @@
 				31B626712EA24A9E008CA40F /* EmbeddedTerminalView.swift */,
 				31B626772EA26BEE008CA40F /* TerminalHostView.swift */,
 				311247A12EA38F7600D8D33E /* WindowConfigurator.swift */,
+				311247AB2EA3BBED00D8D33E /* EditSessionMetaView.swift */,
 			);
 			name = Views;
 			sourceTree = SOURCE_ROOT;
@@ -302,9 +302,9 @@
 				31B626762EA26B6D008CA40F /* TerminalSessionManager.swift in Sources */,
 				31B626782EA26BEE008CA40F /* TerminalHostView.swift in Sources */,
 				31B6267B2EA28000008CA40F /* SettingCategory.swift in Sources */,
-				41A001002B00000100000001 /* SessionNotesStore.swift in Sources */,
+				41A001052B00000200000001 /* EnvironmentContextInfo.swift in Sources */,
+				41A001072B00000300000001 /* DirectoryMonitor.swift in Sources */,
 				311247AC2EA3BBED00D8D33E /* EditSessionMetaView.swift in Sources */,
-				41A001022B00000100000001 /* EditSessionMetaView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

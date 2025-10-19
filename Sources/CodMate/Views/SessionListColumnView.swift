@@ -28,26 +28,6 @@ struct SessionListColumnView: View {
             if isLoading && sections.isEmpty {
                 ProgressView("Scanning…")
                     .padding(.vertical)
-            } else if isEnriching {
-                VStack(spacing: 8) {
-                    if enrichmentTotal > 0 {
-                        let clamped = min(max(enrichmentProgress, 0), enrichmentTotal)
-                        ProgressView(value: Double(clamped), total: Double(enrichmentTotal))
-                            .progressViewStyle(.linear)
-                            .frame(maxWidth: 200)
-                        Text("Enriching session data… \(clamped)/\(enrichmentTotal)")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    } else {
-                        ProgressView()
-                            .progressViewStyle(.linear)
-                            .frame(maxWidth: 200)
-                        Text("Enriching session data…")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .padding(.vertical)
             }
 
             List(selection: $selection) {
@@ -65,41 +45,48 @@ struct SessionListColumnView: View {
                                     isRunning: isRunning?(session) ?? false,
                                     isSelected: selectionContains(session.id)
                                 )
-                                    .tag(session.id)
-                                    .listRowInsets(EdgeInsets())
-                                    .contextMenu {
+                                .tag(session.id)
+                                .listRowInsets(EdgeInsets())
+                                .contextMenu {
+                                    Button {
+                                        onResume(session)
+                                    } label: {
+                                        Label("Resume", systemImage: "play.fill")
+                                    }
+                                    if let openEmbedded = onOpenEmbedded {
                                         Button {
-                                            onResume(session)
-                                        } label: {
-                                            Label("Resume", systemImage: "play.fill")
-                                        }
-                                        if let openEmbedded = onOpenEmbedded {
-                                            Button {
-                                                openEmbedded(session)
-                                            } label: {
-                                                Label("Open Embedded Terminal (Alpha)", systemImage: "rectangle.badge.plus")
-                                            }
-                                        }
-                                        Button {
-                                            onReveal(session)
-                                        } label: {
-                                            Label("Reveal in Finder", systemImage: "folder")
-                                        }
-                                        Button {
-                                            onExportMarkdown(session)
+                                            openEmbedded(session)
                                         } label: {
                                             Label(
-                                                "Export Markdown",
-                                                systemImage: "square.and.arrow.down")
-                                        }
-                                        // Rename/Comment is initiated from detail title (click)
-                                        Divider()
-                                        Button(role: .destructive) {
-                                            onDeleteRequest(session)
-                                        } label: {
-                                            Label("Delete Session", systemImage: "trash")
+                                                "Open Embedded Terminal (Alpha)",
+                                                systemImage: "rectangle.badge.plus")
                                         }
                                     }
+                                    Divider()
+                                    Button {
+                                        Task { await viewModel.beginEditing(session: session) }
+                                    } label: {
+                                        Label("Edit Title & Comment", systemImage: "pencil")
+                                    }
+                                    Button {
+                                        onReveal(session)
+                                    } label: {
+                                        Label("Reveal in Finder", systemImage: "folder")
+                                    }
+                                    Button {
+                                        onExportMarkdown(session)
+                                    } label: {
+                                        Label(
+                                            "Export Markdown",
+                                            systemImage: "square.and.arrow.down")
+                                    }
+                                    Divider()
+                                    Button(role: .destructive) {
+                                        onDeleteRequest(session)
+                                    } label: {
+                                        Label("Delete Session", systemImage: "trash")
+                                    }
+                                }
                             }
                         } header: {
                             HStack {

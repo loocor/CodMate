@@ -11,7 +11,6 @@ struct ContentView: View {
     @State private var isPerformingAction = false
     @State private var deleteConfirmationPresented = false
     @State private var alertState: AlertState?
-    @State private var resumeOutput: String?
     @State private var selectingSessionsRoot = false
     @State private var selectingExecutable = false
     // Track which sessions are running in embedded terminal
@@ -55,7 +54,7 @@ struct ContentView: View {
             }
         .navigationSplitViewStyle(.balanced)
         .task {
-            await viewModel.refreshSessions()
+            await viewModel.refreshSessions(force: true)
         }
         .onChange(of: viewModel.sections) { _, _ in
             normalizeSelection()
@@ -102,9 +101,6 @@ struct ContentView: View {
         ) { result in
             handleExecutableSelection(result: result)
         }
-        .overlay(alignment: .bottom) {
-            toastOverlay
-        }
     }
     
     private func sidebarContent(sidebarMaxWidth: CGFloat) -> some View {
@@ -147,30 +143,26 @@ struct ContentView: View {
                 .frame(width: 360)
 
             Button {
-                Task { await viewModel.refreshSessions() }
+                Task { await viewModel.refreshSessions(force: true) }
             } label: {
-                Image(systemName: "arrow.clockwise")
-                    .font(.system(size: 16, weight: .medium))
+                if viewModel.isEnriching {
+                    ProgressView()
+                        .progressViewStyle(.circular)
+                        .controlSize(.small)
+                        .frame(width: 16, height: 16)
+                } else {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 16, weight: .medium))
+                }
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
             .help("Refresh session index")
+            .disabled(viewModel.isEnriching || viewModel.isLoading)
         }
         .padding(.horizontal, 4)
     }
     
-    @ViewBuilder
-    private var toastOverlay: some View {
-        if let output = resumeOutput {
-            ToastView(text: output) {
-                withAnimation {
-                    resumeOutput = nil
-                }
-            }
-            .padding(.bottom, 20)
-        }
-    }
-
     private var detailColumn: some View {
         VStack(spacing: 0) {
             detailActionBar
@@ -294,7 +286,7 @@ struct ContentView: View {
                 } primaryAction: {
                     if let f = focusedSummary {
                         viewModel.copyResumeCommands(session: f)
-                        resumeOutput = "Commands copied to clipboard"
+                        Task { await SystemNotifier.shared.notify(title: "CodMate", body: "命令已拷贝") }
                     }
                 }
                 .disabled(isPerformingAction || focusedSummary == nil)
@@ -437,8 +429,6 @@ struct ContentView: View {
             _ = viewModel.openAppleTerminal(at: dir)
         case .none:
             break
-        default:
-            viewModel.openPreferredTerminal(app: app)
         }
         Task { await SystemNotifier.shared.notify(title: "CodMate", body: "命令已拷贝，请粘贴到打开的终端") }
     }
@@ -458,8 +448,6 @@ struct ContentView: View {
             viewModel.openNewSession(session: session)
         case .none:
             break
-        default:
-            viewModel.openPreferredTerminal(app: app)
         }
         Task { await SystemNotifier.shared.notify(title: "CodMate", body: "命令已拷贝，请粘贴到打开的终端") }
     }
@@ -467,7 +455,6 @@ struct ContentView: View {
     private func startNewSession(for session: SessionSummary) {
         viewModel.copyNewSessionCommands(session: session)
         openPreferredExternalForNew(session: session)
-        resumeOutput = "New session command copied to clipboard"
     }
 
     private func toggleDetailMaximized() {
@@ -545,7 +532,7 @@ extension ContentView {
 
     private func exportMarkdownForSession(_ session: SessionSummary) {
         let loader = SessionTimelineLoader()
-        let turns = (try? loader.load(url: session.fileURL)) ?? []
+        let turns = ((try? loader.load(url: session.fileURL)) ?? []).removingEnvironmentContext()
         var lines: [String] = []
         lines.append("# \(session.displayName)")
         lines.append("")

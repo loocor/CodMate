@@ -63,3 +63,25 @@ private extension TimelineActor {
         }
     }
 }
+
+extension Array where Element == ConversationTurn {
+    func removingEnvironmentContext() -> [ConversationTurn] {
+        compactMap { turn in
+            let filteredUser = (turn.userMessage?.title == TimelineEvent.environmentContextTitle)
+                ? nil : turn.userMessage
+            let filteredOutputs = turn.outputs.filter { $0.title != TimelineEvent.environmentContextTitle }
+            if filteredUser == nil && filteredOutputs.isEmpty {
+                return nil
+            }
+            if filteredUser == turn.userMessage && filteredOutputs.count == turn.outputs.count {
+                return turn
+            }
+            return ConversationTurn(
+                id: turn.id,
+                timestamp: turn.timestamp,
+                userMessage: filteredUser,
+                outputs: filteredOutputs
+            )
+        }
+    }
+}
