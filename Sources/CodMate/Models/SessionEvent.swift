@@ -208,17 +208,25 @@ struct SessionSummaryBuilder {
     private(set) var lineCount: Int = 0
     private(set) var fileSizeBytes: UInt64?
 
+    var hasEssentialMetadata: Bool {
+        id != nil && startedAt != nil && cliVersion != nil && cwd != nil
+    }
+
     mutating func setFileSize(_ size: UInt64?) {
         fileSizeBytes = size
     }
 
     mutating func seedLastUpdated(_ date: Date) {
-        if lastUpdatedAt == nil { lastUpdatedAt = date }
+        if let existing = lastUpdatedAt {
+            if date > existing { lastUpdatedAt = date }
+        } else {
+            lastUpdatedAt = date
+        }
     }
 
     mutating func observe(_ row: SessionRow) {
         lineCount += 1
-        lastUpdatedAt = row.timestamp
+        seedLastUpdated(row.timestamp)
 
         switch row.kind {
         case let .sessionMeta(payload):

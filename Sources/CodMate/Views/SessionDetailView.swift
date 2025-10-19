@@ -13,6 +13,9 @@ struct SessionDetailView: View {
     @State private var loadingTimeline = false
     @State private var isConversationExpanded = false
     @State private var expandedTurnIDs: Set<String> = []
+    @State private var environmentExpanded = false
+    @State private var environmentLoading = false
+    @State private var environmentInfo: EnvironmentContextInfo?
     private let loader = SessionTimelineLoader()
 
     var body: some View {
@@ -20,6 +23,7 @@ struct SessionDetailView: View {
             VStack(alignment: .leading, spacing: 16) {
                 if !isConversationExpanded {
                     sessionInfoCard
+                    environmentSection
                     instructionsSection
                     Divider()
                 }
@@ -38,11 +42,17 @@ struct SessionDetailView: View {
             loadingTimeline = true
             defer { loadingTimeline = false }
             do {
-                turns = try loader.load(url: summary.fileURL)
+                turns = try loader.load(url: summary.fileURL).removingEnvironmentContext()
                 expandedTurnIDs = []
+                environmentExpanded = false
+                environmentInfo = nil
+                environmentLoading = false
             } catch {
                 turns = []
                 expandedTurnIDs = []
+                environmentExpanded = false
+                environmentInfo = nil
+                environmentLoading = false
             }
         }
     }
@@ -102,6 +112,55 @@ struct SessionDetailView: View {
     @State private var instructionsExpanded = false
     @State private var instructionsLoading = false
     @State private var instructionsText: String?
+
+    private var environmentSection: some View {
+        GroupBox {
+            DisclosureGroup(isExpanded: $environmentExpanded) {
+                Group {
+                    if environmentLoading {
+                        ProgressView("Loading environment context…")
+                    } else if let info = environmentInfo, info.hasContent {
+                        VStack(alignment: .leading, spacing: 6) {
+                            ForEach(info.entries) { entry in
+                                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                                    Text(entry.key.uppercased())
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .frame(width: 120, alignment: .trailing)
+                                    Text(entry.value)
+                                        .font(.body)
+                                        .textSelection(.enabled)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                }
+                            }
+                            if let raw = info.rawText, !raw.isEmpty, info.entries.isEmpty {
+                                Text(raw)
+                                    .font(.body)
+                                    .textSelection(.enabled)
+                            }
+                            Text("Captured · \(info.timestamp.formatted(date: .abbreviated, time: .shortened))")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.top, 2)
+                    } else {
+                        Text("No environment context captured.")
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+                .task(id: environmentExpanded) {
+                    guard environmentExpanded, environmentInfo == nil else { return }
+                    environmentLoading = true
+                    defer { environmentLoading = false }
+                    environmentInfo = try? loader.loadEnvironmentContext(url: summary.fileURL)
+                }
+            } label: {
+                Label("Environment Context", systemImage: "macwindow")
+            }
+        }
+    }
 
     private var instructionsSection: some View {
         GroupBox {

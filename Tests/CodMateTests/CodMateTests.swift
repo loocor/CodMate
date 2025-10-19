@@ -180,4 +180,25 @@ final class CodMateTests: XCTestCase {
         XCTAssertEqual(token?.metadata?["totalInput_tokens"], "100.0")
         XCTAssertEqual(token?.metadata?["rate_PrimaryUsed_percent"], "10.0")
     }
+
+    func testLoadEnvironmentContextReturnsMetadata() throws {
+        let fileManager = FileManager.default
+        let tempURL = fileManager.temporaryDirectory.appendingPathComponent(
+            UUID().uuidString + ".jsonl")
+        defer { try? fileManager.removeItem(at: tempURL) }
+
+        let lines = [
+            #"{"timestamp":"2025-10-18T12:00:00Z","type":"session_meta","payload":{"id":"session","timestamp":"2025-10-18T12:00:00Z","cwd":"/tmp","originator":"codex","cli_version":"0.1.0"}}"#,
+            #"{"timestamp":"2025-10-18T12:00:01Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<environment_context><cwd>/tmp</cwd><approval_policy>never</approval_policy><sandbox_mode>workspace-write</sandbox_mode></environment_context>"}]}}"#
+        ]
+        try lines.joined(separator: "\n").data(using: .utf8)?.write(to: tempURL)
+
+        let loader = SessionTimelineLoader()
+        let info = try XCTUnwrap(loader.loadEnvironmentContext(url: tempURL))
+        let entries = info.entries
+        XCTAssertEqual(entries.first(where: { $0.key == "cwd" })?.value, "/tmp")
+        XCTAssertEqual(entries.first(where: { $0.key == "approval_policy" })?.value, "never")
+        XCTAssertEqual(entries.first(where: { $0.key == "sandbox_mode" })?.value, "workspace-write")
+        XCTAssertTrue(info.hasContent)
+    }
 }

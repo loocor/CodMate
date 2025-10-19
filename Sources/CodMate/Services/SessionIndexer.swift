@@ -15,7 +15,7 @@ fileprivate actor DiskCache {
         let dir = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first!
             .appendingPathComponent("CodMate", isDirectory: true)
         try? fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
-        url = dir.appendingPathComponent("sessionIndex-v1.json")
+        url = dir.appendingPathComponent("sessionIndex-v2.json")
 
         // 加载缓存
         if let data = try? Data(contentsOf: url),
@@ -50,6 +50,11 @@ actor SessionIndexer {
     private let decoder: JSONDecoder
     private let cache = NSCache<NSURL, CacheEntry>()
     private let diskCache: DiskCache
+    private nonisolated static let tailTimestampFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
 
     private final class CacheEntry {
         let modificationDate: Date?
@@ -108,7 +113,11 @@ actor SessionIndexer {
                         var builder = SessionSummaryBuilder()
                         if let size = values.fileSize { builder.setFileSize(UInt64(size)) }
                         // Seed updatedAt by fs metadata to avoid full scan for recency
-                        if let m = values.contentModificationDate { builder.seedLastUpdated(m) }
+                        if let lastUpdated = self.lastUpdatedTimestamp(
+                            for: url, modificationDate: values.contentModificationDate)
+                        {
+                            builder.seedLastUpdated(lastUpdated)
+                        }
                         guard
                             let summary = try await self.buildSummaryFast(
                                 for: url, builder: &builder)
@@ -160,6 +169,13 @@ actor SessionIndexer {
         cache.setObject(entry, forKey: key)
     }
 
+    nonisolated private func lastUpdatedTimestamp(for url: URL, modificationDate: Date?) -> Date? {
+        if let tail = readTailTimestamp(url: url) {
+            return tail
+        }
+        return modificationDate
+    }
+
     private func sessionFileURLs(at root: URL, scope: SessionLoadScope) throws -> [URL] {
         var urls: [URL] = []
         guard let enumeratorURL = scopeBaseURL(root: root, scope: scope) else { return [] }
@@ -188,10 +204,21 @@ actor SessionIndexer {
         let cal = Calendar.current
         let comps = cal.dateComponents([.year, .month], from: monthStart)
         guard let year = comps.year, let month = comps.month else { return [:] }
-        guard let monthURL = monthDirectory(root: root, year: year, month: month) else { return [:] }
+
+        // Updated 维度需要扫描所有文件，因为跨月更新的会话可能在任何月份的目录中
+        let scanURL: URL
+        if dimension == .updated {
+            scanURL = root
+        } else {
+            guard let monthURL = monthDirectory(root: root, year: year, month: month) else {
+                return [:]
+            }
+            scanURL = monthURL
+        }
+
         guard
             let enumerator = fileManager.enumerator(
-                at: monthURL,
+                at: scanURL,
                 includingPropertiesForKeys: [.isRegularFileKey, .contentModificationDateKey],
                 options: [.skipsHiddenFiles, .skipsPackageDescendants])
         else { return [:] }
@@ -207,29 +234,81 @@ actor SessionIndexer {
                     counts[day, default: 0] += 1
                 }
             case .updated:
-                // For updated dimension, use actual lastUpdatedAt from session content or tail timestamp
-                if let tailDate = readTailTimestamp(url: url),
-                    cal.isDate(tailDate, equalTo: monthStart, toGranularity: .month)
+                let values = try? url.resourceValues(forKeys: [.contentModificationDateKey])
+                if let date = lastUpdatedTimestamp(
+                    for: url, modificationDate: values?.contentModificationDate),
+                    cal.isDate(date, equalTo: monthStart, toGranularity: .month)
                 {
-                    let day = cal.component(.day, from: tailDate)
+                    let day = cal.component(.day, from: date)
                     counts[day, default: 0] += 1
-                } else {
-                    // Fallback to file modification date if tail timestamp unavailable
-                    let values = try? url.resourceValues(forKeys: [.contentModificationDateKey])
-                    if let date = values?.contentModificationDate,
-                        cal.isDate(date, equalTo: monthStart, toGranularity: .month)
-                    {
-                        let day = cal.component(.day, from: date)
-                        counts[day, default: 0] += 1
-                    }
                 }
             }
         }
         return counts
     }
 
-    private func scopeBaseURL(root: URL, scope: SessionLoadScope) -> URL? {
+    // MARK: - Updated dimension index
+
+    /// 快速索引：记录每个文件的最后更新日期，避免重复扫描
+    private var updatedDateIndex: [String: Date] = [:]
+
+    /// 构建 Updated 维度的日期索引（后台异步进行）
+    func buildUpdatedIndex(root: URL) async -> [String: Date] {
+        var index: [String: Date] = [:]
+        guard
+            let enumerator = fileManager.enumerator(
+                at: root,
+                includingPropertiesForKeys: [.isRegularFileKey],
+                options: [.skipsHiddenFiles, .skipsPackageDescendants]
+            )
+        else { return [:] }
+
+        let urls = enumerator.compactMap { $0 as? URL }
+
+        await withTaskGroup(of: (String, Date)?.self) { group in
+            for url in urls {
+                guard url.pathExtension.lowercased() == "jsonl" else { continue }
+                group.addTask { [weak self] in
+                    guard let self else { return nil }
+                    // 先尝试从磁盘缓存读取
+                    let values = try? url.resourceValues(forKeys: [.contentModificationDateKey])
+                    if let cached = await self.diskCache.get(
+                        path: url.path,
+                        modificationDate: values?.contentModificationDate
+                    ), let updated = cached.lastUpdatedAt {
+                        return (url.path, updated)
+                    }
+                    // 否则快速读取尾部时间戳
+                    if let tailDate = self.readTailTimestamp(url: url) {
+                        return (url.path, tailDate)
+                    }
+                    return nil
+                }
+            }
+            for await item in group {
+                if let (path, date) = item {
+                    index[path] = date
+                }
+            }
+        }
+        return index
+    }
+
+    /// 根据 Updated 索引快速筛选需要加载的文件
+    func sessionFileURLsForUpdatedDay(root: URL, day: Date, index: [String: Date]) -> [URL] {
         let cal = Calendar.current
+        let dayStart = cal.startOfDay(for: day)
+
+        var urls: [URL] = []
+        for (path, updatedDate) in index {
+            if cal.isDate(updatedDate, inSameDayAs: dayStart) {
+                urls.append(URL(fileURLWithPath: path))
+            }
+        }
+        return urls
+    }
+
+    private func scopeBaseURL(root: URL, scope: SessionLoadScope) -> URL? {
         switch scope {
         case .today:
             return dayDirectory(root: root, date: Date())
@@ -260,13 +339,17 @@ actor SessionIndexer {
     }
 
     private func monthDirectory(root: URL, year: Int, month: Int) -> URL? {
-        guard let yearURL = directoryIfExists(root.appendingPathComponent("\(year)", isDirectory: true))
+        guard
+            let yearURL = directoryIfExists(
+                root.appendingPathComponent("\(year)", isDirectory: true))
         else { return nil }
         return numberedDirectory(base: yearURL, value: month)
     }
 
     private func dayDirectory(root: URL, year: Int, month: Int, day: Int) -> URL? {
-        guard let monthURL = monthDirectory(root: root, year: year, month: month) else { return nil }
+        guard let monthURL = monthDirectory(root: root, year: year, month: month) else {
+            return nil
+        }
         return numberedDirectory(base: monthURL, value: day)
     }
 
@@ -352,12 +435,14 @@ actor SessionIndexer {
 
         let newline: UInt8 = 0x0A
         let carriageReturn: UInt8 = 0x0D
+        let fastLineLimit = 64
         var lineCount = 0
         for var slice in data.split(separator: newline, omittingEmptySubsequences: true) {
             if slice.last == carriageReturn { slice = slice.dropLast() }
             guard !slice.isEmpty else { continue }
-            // Parse first ~400 lines then stop; metadata should be captured
-            if lineCount > 400 { break }
+            if lineCount >= fastLineLimit, builder.hasEssentialMetadata {
+                break
+            }
             do {
                 let row = try decoder.decode(SessionRow.self, from: Data(slice))
                 builder.observe(row)
@@ -370,6 +455,12 @@ actor SessionIndexer {
         if let tailDate = readTailTimestamp(url: url) {
             if builder.lastUpdatedAt == nil || (builder.lastUpdatedAt ?? .distantPast) < tailDate {
                 builder.seedLastUpdated(tailDate)
+            }
+        } else if builder.lastUpdatedAt == nil {
+            // Final fallback: use file system modification date if everything else failed
+            let attrs = try? fileManager.attributesOfItem(atPath: url.path)
+            if let modDate = attrs?[.modificationDate] as? Date {
+                builder.seedLastUpdated(modDate)
             }
         }
 
@@ -440,28 +531,78 @@ actor SessionIndexer {
     }
 
     // MARK: - Tail timestamp helper
-    private func readTailTimestamp(url: URL) -> Date? {
+    nonisolated private func readTailTimestamp(url: URL) -> Date? {
         guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
         defer { try? handle.close() }
-        let fileSize =
-            (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?
-            .uint64Value ?? 0
-        let chunkSize: UInt64 = 64 * 1024
-        let offset = fileSize > chunkSize ? fileSize - chunkSize : 0
-        do { try handle.seek(toOffset: offset) } catch { return nil }
-        guard let buffer = try? handle.readToEnd(), !buffer.isEmpty else { return nil }
+
+        let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
+        let fileSize = (attributes?[.size] as? NSNumber)?.uint64Value ?? 0
+
+        // Start with a reasonable chunk size, will expand if needed
+        let chunkSize: UInt64 = 4096
+        let maxChunkSize: UInt64 = 1024 * 1024  // 1MB max to avoid excessive memory usage
+        let maxAttempts = 3
+
         let newline: UInt8 = 0x0A
         let carriageReturn: UInt8 = 0x0D
-        // Split and iterate from the end
-        let lines = buffer.split(separator: newline, omittingEmptySubsequences: true)
-        for var slice in lines.reversed() {
+
+        for attempt in 0..<maxAttempts {
+            let currentChunkSize = min(chunkSize * UInt64(1 << attempt), maxChunkSize, fileSize)
+            let offset = fileSize > currentChunkSize ? fileSize - currentChunkSize : 0
+
+            do { try handle.seek(toOffset: offset) } catch { return nil }
+            guard let buffer = try? handle.readToEnd(), !buffer.isEmpty else { return nil }
+
+            let lines = buffer.split(separator: newline, omittingEmptySubsequences: true)
+            guard var slice = lines.last else { continue }
+
             if slice.last == carriageReturn { slice = slice.dropLast() }
             guard !slice.isEmpty else { continue }
-            if let row = try? decoder.decode(SessionRow.self, from: Data(slice)) {
-                return row.timestamp
+
+            // Check if this looks like a complete line by looking for opening brace
+            // (all session log lines are JSON objects starting with {)
+            let hasOpeningBrace = slice.first == 0x7B  // '{'
+
+            if !hasOpeningBrace && attempt < maxAttempts - 1 {
+                // Line appears truncated, try with larger chunk
+                continue
             }
+
+            // Try to extract timestamp from first 100 bytes for performance
+            let limitedSlice = slice.prefix(100)
+            if let text = String(data: Data(limitedSlice), encoding: .utf8)
+                ?? String(bytes: limitedSlice, encoding: .utf8),
+                let timestamp = extractTimestamp(from: text)
+            {
+                return timestamp
+            }
+
+            // Fallback: try full line
+            if let fullText = String(data: Data(slice), encoding: .utf8),
+                let timestamp = extractTimestamp(from: fullText)
+            {
+                return timestamp
+            }
+
+            // If we've tried full line and still failed, no point in retrying with larger chunk
+            break
         }
+
         return nil
+    }
+
+    nonisolated private func extractTimestamp(from text: String) -> Date? {
+        let pattern = #""timestamp"\s*:\s*"([^"]+)""#
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else {
+            return nil
+        }
+        let range = NSRange(location: 0, length: (text as NSString).length)
+        guard let match = regex.firstMatch(in: text, options: [], range: range),
+            match.numberOfRanges >= 2
+        else { return nil }
+        let nsText = text as NSString
+        let isoString = nsText.substring(with: match.range(at: 1))
+        return SessionIndexer.tailTimestampFormatter.date(from: isoString)
     }
 
     // Global count for sidebar label

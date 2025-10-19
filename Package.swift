@@ -7,15 +7,15 @@ let package = Package(
     platforms: [
         .macOS(.v14)
     ],
-    dependencies: [
-        // Embedded terminal support (optional at build time)
-        .package(url: "https://github.com/migueldeicaza/SwiftTerm.git", from: "3.0.0")
-    ],
     products: [
         .executable(
             name: "CodMate",
             targets: ["CodMate"]
         )
+    ],
+    dependencies: [
+        // Embedded terminal support (optional at build time)
+        .package(url: "https://github.com/migueldeicaza/SwiftTerm.git", from: "3.0.0")
     ],
     targets: [
         .executableTarget(

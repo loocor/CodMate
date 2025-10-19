@@ -18,34 +18,22 @@ final class SessionListViewModel: ObservableObject {
     // 新的过滤状态：支持组合过滤
     @Published var selectedPath: String? = nil {
         didSet {
-            guard oldValue != selectedPath else { return }
+            guard !suppressFilterNotifications, oldValue != selectedPath else { return }
             applyFilters()
+            scheduleFilterRefresh(force: false)
         }
     }
     @Published var selectedDay: Date? = nil {
         didSet {
-            // 日期改变：仅当跨月且使用 updated 维度时才触发重载，减少频繁解析
-            if oldValue != selectedDay {
-                let cal = Calendar.current
-                if dateDimension == .updated,
-                    let oldDay = oldValue,
-                    let newDay = selectedDay,
-                    cal.isDate(oldDay, equalTo: newDay, toGranularity: .month)
-                {
-                    // 同一月份内切换（updated 维度）无需重载，直接过滤
-                    applyFilters()
-                } else {
-                    Task { await refreshSessions() }
-                }
-            }
+            guard !suppressFilterNotifications, oldValue != selectedDay else { return }
+            scheduleFilterRefresh(force: true)
         }
     }
     @Published var dateDimension: DateDimension = .updated {
         didSet {
-            // 维度改变会影响 scope（created vs updated），需要重新加载
-            if oldValue != dateDimension {
-                Task { await refreshSessions() }
-            }
+            guard !suppressFilterNotifications, oldValue != dateDimension else { return }
+            enrichmentSnapshots.removeAll()
+            scheduleFilterRefresh(force: true)
         }
     }
 
@@ -58,8 +46,15 @@ final class SessionListViewModel: ObservableObject {
     private var fulltextTask: Task<Void, Never>?
     private var enrichmentTask: Task<Void, Never>?
     private let notesStore = SessionNotesStore()
-    private var notesSnapshot: [String: SessionNotesStore.SessionNote] = [:]
+    private var notesSnapshot: [String: SessionNote] = [:]
     private var canonicalCwdCache: [String: String] = [:]
+    private var directoryMonitor: DirectoryMonitor?
+    private var directoryRefreshTask: Task<Void, Never>?
+    private var enrichmentSnapshots: [String: Set<String>] = [:]
+    private var suppressFilterNotifications = false
+    private var scheduledFilterRefresh: Task<Void, Never>?
+    private var currentMonthKey: String?
+    private var currentMonthDimension: DateDimension = .updated
     @Published var editingSession: SessionSummary? = nil
     @Published var editTitle: String = ""
     @Published var editComment: String = ""
@@ -78,17 +73,34 @@ final class SessionListViewModel: ObservableObject {
         // 启动时默认状态：All Sessions（无目录过滤）+ 当天日期
         let today = Date()
         let cal = Calendar.current
+        suppressFilterNotifications = true
         self.selectedDay = cal.startOfDay(for: today)
+        suppressFilterNotifications = false
+        configureDirectoryMonitor()
     }
 
-    func refreshSessions() async {
+    private var activeRefreshToken = UUID()
+
+    func refreshSessions(force: Bool = false) async {
+        scheduledFilterRefresh?.cancel()
+        scheduledFilterRefresh = nil
+        let token = UUID()
+        activeRefreshToken = token
         isLoading = true
-        defer { isLoading = false }
+        if force {
+            invalidateEnrichmentCache(for: selectedDay)
+        }
+        defer {
+            if token == activeRefreshToken {
+                isLoading = false
+            }
+        }
 
         do {
             let scope = currentScope()
             var sessions = try await indexer.refreshSessions(
                 root: preferences.sessionsRoot, scope: scope)
+            guard token == activeRefreshToken else { return }
             let notes = await notesStore.all()
             notesSnapshot = notes
             apply(notes: notes, to: &sessions)
@@ -97,6 +109,8 @@ final class SessionListViewModel: ObservableObject {
             await computeCalendarCaches()
             applyFilters()
             startBackgroundEnrichment()
+            currentMonthDimension = dateDimension
+            currentMonthKey = monthKey(for: selectedDay, dimension: dateDimension)
             Task { await self.refreshGlobalCount() }
             // 刷新侧边栏路径树，确保新增文件通过刷新即可出现
             Task {
@@ -105,7 +119,9 @@ final class SessionListViewModel: ObservableObject {
                 await MainActor.run { self.pathTreeRootPublished = tree }
             }
         } catch {
-            errorMessage = error.localizedDescription
+            if token == activeRefreshToken {
+                errorMessage = error.localizedDescription
+            }
         }
     }
 
@@ -228,7 +244,7 @@ final class SessionListViewModel: ObservableObject {
         let titleValue = editTitle.isEmpty ? nil : editTitle
         let commentValue = editComment.isEmpty ? nil : editComment
         await notesStore.upsert(id: session.id, title: titleValue, comment: commentValue)
-        notesSnapshot[session.id] = SessionNotesStore.SessionNote(
+        notesSnapshot[session.id] = SessionNote(
             id: session.id, title: titleValue, comment: commentValue, updatedAt: Date())
         var map = Dictionary(uniqueKeysWithValues: allSessions.map { ($0.id, $0) })
         if var s = map[session.id] {
@@ -257,7 +273,7 @@ final class SessionListViewModel: ObservableObject {
             for summary in summaries {
                 await indexer.invalidate(url: summary.fileURL)
             }
-            await refreshSessions()
+            await refreshSessions(force: true)
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -267,7 +283,9 @@ final class SessionListViewModel: ObservableObject {
         guard newURL != preferences.sessionsRoot else { return }
         preferences.sessionsRoot = newURL
         await indexer.invalidateAll()
-        await refreshSessions()
+        enrichmentSnapshots.removeAll()
+        configureDirectoryMonitor()
+        await refreshSessions(force: true)
     }
 
     func updateExecutablePath(to newURL: URL) {
@@ -282,6 +300,14 @@ final class SessionListViewModel: ObservableObject {
     func calendarCounts(for monthStart: Date, dimension: DateDimension) -> [Int: Int] {
         let key = cacheKey(monthStart, dimension)
         if let cached = monthCountsCache[key] { return cached }
+        if currentMonthDimension == dimension,
+            let currentKey = currentMonthKey,
+            currentKey == key
+        {
+            let counts = countsForLoadedMonth(dimension: dimension)
+            monthCountsCache[key] = counts
+            return counts
+        }
         Task { [monthStart, dimension] in
             let counts = await indexer.computeCalendarCounts(
                 root: preferences.sessionsRoot, monthStart: monthStart, dimension: dimension)
@@ -307,16 +333,22 @@ final class SessionListViewModel: ObservableObject {
     // MARK: - 过滤状态管理
 
     func setSelectedPath(_ path: String?) {
+        if selectedPath == path { return }
         selectedPath = path
     }
 
     func setSelectedDay(_ day: Date?) {
-        selectedDay = day
+        let normalized = day.map { Calendar.current.startOfDay(for: $0) }
+        if selectedDay == normalized { return }
+        selectedDay = normalized
     }
 
     func clearAllFilters() {
+        suppressFilterNotifications = true
         selectedPath = nil
         selectedDay = nil
+        suppressFilterNotifications = false
+        scheduleFilterRefresh(force: true)
         // searchText 保持不变，便于连续检索
     }
 
@@ -374,10 +406,12 @@ final class SessionListViewModel: ObservableObject {
         filtered = sortOrder.sort(filtered)
 
         // 5. 分组
-        sections = Self.groupSessions(filtered)
+        sections = Self.groupSessions(filtered, dimension: dateDimension)
     }
 
-    private static func groupSessions(_ sessions: [SessionSummary]) -> [SessionDaySection] {
+    private static func groupSessions(_ sessions: [SessionSummary], dimension: DateDimension)
+        -> [SessionDaySection]
+    {
         let calendar = Calendar.current
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
@@ -386,7 +420,10 @@ final class SessionListViewModel: ObservableObject {
 
         var grouped: [Date: [SessionSummary]] = [:]
         for session in sessions {
-            let day = calendar.startOfDay(for: session.startedAt)
+            // Always group by creation date (startedAt), regardless of dimension
+            // The dimension only affects filtering, not grouping
+            let referenceDate = session.startedAt
+            let day = calendar.startOfDay(for: referenceDate)
             grouped[day, default: []].append(session)
         }
 
@@ -446,7 +483,27 @@ final class SessionListViewModel: ObservableObject {
     // MARK: - Background enrichment
     private func startBackgroundEnrichment() {
         enrichmentTask?.cancel()
-        let sessions = allSessions  // snapshot
+        guard let cacheKey = dayCacheKey(for: selectedDay) else {
+            isEnriching = false
+            enrichmentProgress = 0
+            enrichmentTotal = 0
+            return
+        }
+        let sessions = sessionsForCurrentDay()
+        let currentIDs = Set(sessions.map(\.id))
+        if let cached = enrichmentSnapshots[cacheKey], cached == currentIDs {
+            isEnriching = false
+            enrichmentProgress = 0
+            enrichmentTotal = 0
+            return
+        }
+        if sessions.isEmpty {
+            isEnriching = false
+            enrichmentProgress = 0
+            enrichmentTotal = 0
+            enrichmentSnapshots[cacheKey] = currentIDs
+            return
+        }
         enrichmentTask = Task { [weak self] in
             guard let self else { return }
 
@@ -520,8 +577,32 @@ final class SessionListViewModel: ObservableObject {
                     self.isEnriching = false
                     self.enrichmentProgress = 0
                     self.enrichmentTotal = 0
+                    self.enrichmentSnapshots[cacheKey] = currentIDs
                 }
             }
+        }
+    }
+
+    private func sessionsForCurrentDay() -> [SessionSummary] {
+        guard let day = selectedDay else { return [] }
+        let calendar = Calendar.current
+        let pathFilter = selectedPath.map(Self.canonicalPath)
+        return allSessions.filter { summary in
+            let matchesDay: Bool = {
+                switch dateDimension {
+                case .created:
+                    return calendar.isDate(summary.startedAt, inSameDayAs: day)
+                case .updated:
+                    if let end = summary.lastUpdatedAt {
+                        return calendar.isDate(end, inSameDayAs: day)
+                    }
+                    return calendar.isDate(summary.startedAt, inSameDayAs: day)
+                }
+            }()
+            guard matchesDay else { return false }
+            guard let path = pathFilter else { return true }
+            let canonical = canonicalCwdCache[summary.id] ?? Self.canonicalPath(summary.cwd)
+            return canonical == path || canonical.hasPrefix(path + "/")
         }
     }
 
@@ -549,19 +630,114 @@ final class SessionListViewModel: ObservableObject {
                 // Created 维度：只加载该日目录下的文件
                 return .day(day)
             case .updated:
-                // Updated 维度：需要加载整个月的数据，因为文件可能在其他日期目录
-                // 然后在 applyFilters 中根据 lastUpdatedAt 过滤
-                return .month(day)
+                // Updated 维度：为确保与日历统计保持一致，统一加载全部文件后再过滤
+                return .all
             }
         }
         // 无日期过滤时：加载所有数据
         return .all
     }
+
+    private func configureDirectoryMonitor() {
+        directoryMonitor?.cancel()
+        directoryRefreshTask?.cancel()
+        let root = preferences.sessionsRoot
+        guard FileManager.default.fileExists(atPath: root.path) else {
+            directoryMonitor = nil
+            return
+        }
+        directoryMonitor = DirectoryMonitor(url: root) { [weak self] in
+            Task { @MainActor in
+                self?.scheduleDirectoryRefresh()
+            }
+        }
+    }
+
+    private func scheduleDirectoryRefresh() {
+        directoryRefreshTask?.cancel()
+        directoryRefreshTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            guard !Task.isCancelled else { return }
+            guard let self else { return }
+            self.enrichmentSnapshots.removeAll()
+            await self.refreshSessions(force: true)
+        }
+    }
+
+    private func invalidateEnrichmentCache(for day: Date?) {
+        if let key = dayCacheKey(for: day) {
+            enrichmentSnapshots.removeValue(forKey: key)
+        }
+    }
+
+    private func dayCacheKey(for day: Date?) -> String? {
+        guard let day else { return nil }
+        let calendar = Calendar.current
+        let comps = calendar.dateComponents([.year, .month, .day], from: day)
+        guard let year = comps.year, let month = comps.month, let dayComponent = comps.day else {
+            return nil
+        }
+        let pathKey: String
+        if let path = selectedPath {
+            pathKey = Self.canonicalPath(path)
+        } else {
+            pathKey = "*"
+        }
+        return "\(dateDimension.rawValue)|\(year)-\(month)-\(dayComponent)|\(pathKey)"
+    }
+
+    private func scheduleFilterRefresh(force: Bool) {
+        scheduledFilterRefresh?.cancel()
+        if force {
+            sections = []
+            isLoading = true
+        }
+        scheduledFilterRefresh = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 10_000_000)
+            guard let self, !Task.isCancelled else { return }
+            await self.refreshSessions(force: force)
+            self.scheduledFilterRefresh = nil
+        }
+    }
+
+    private func monthKey(for day: Date?, dimension: DateDimension) -> String? {
+        guard let day else { return nil }
+        let calendar = Calendar.current
+        let comps = calendar.dateComponents([.year, .month], from: day)
+        guard let year = comps.year, let month = comps.month else { return nil }
+        return "\(dimension.rawValue)|\(year)-\(month)"
+    }
+
+    private func countsForLoadedMonth(dimension: DateDimension) -> [Int: Int] {
+        var counts: [Int: Int] = [:]
+        let calendar = Calendar.current
+        // 获取当前选择的月份
+        guard let selectedDay = selectedDay else { return [:] }
+        let monthStart = calendar.date(
+            from: calendar.dateComponents([.year, .month], from: selectedDay))!
+
+        for session in allSessions {
+            let referenceDate: Date
+            switch dimension {
+            case .created:
+                referenceDate = session.startedAt
+            case .updated:
+                referenceDate = session.lastUpdatedAt ?? session.startedAt
+            }
+            // 验证日期是否属于当前月份
+            guard calendar.isDate(referenceDate, equalTo: monthStart, toGranularity: .month) else {
+                continue
+            }
+            let day = calendar.component(.day, from: referenceDate)
+            counts[day, default: 0] += 1
+        }
+        return counts
+    }
 }
 
 extension SessionListViewModel {
     private func apply(
-        notes: [String: SessionNotesStore.SessionNote], to sessions: inout [SessionSummary]
+        notes: [String: SessionNote], to sessions: inout [SessionSummary]
     ) {
         for index in sessions.indices {
             if let note = notes[sessions[index].id] {

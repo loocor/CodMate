@@ -60,6 +60,8 @@ struct SettingsView: View {
             terminalSettings
         case .command:
             commandSettings
+        case .mcpServer:
+            mcpServerSettings
         case .about:
             aboutSettings
         }
@@ -127,9 +129,11 @@ struct SettingsView: View {
                     Button("Reset All Settings to Defaults") { resetToDefaults() }
                         .buttonStyle(.bordered)
                         .tint(.red)
-                    Text("Restores sessions root, CLI path, and command options to factory defaults.")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                    Text(
+                        "Restores sessions root, CLI path, and command options to factory defaults."
+                    )
+                    .font(.caption)
+                    .foregroundColor(.secondary)
                 }
             }
         }
@@ -320,13 +324,15 @@ struct SettingsView: View {
 
     private var buildTimestampString: String {
         guard let executableURL = Bundle.main.executableURL,
-              let attrs = try? FileManager.default.attributesOfItem(atPath: executableURL.path),
-              let date = attrs[.modificationDate] as? Date
+            let attrs = try? FileManager.default.attributesOfItem(atPath: executableURL.path),
+            let date = attrs[.modificationDate] as? Date
         else { return "Unavailable" }
         return Self.buildDateFormatter.string(from: date)
     }
 
     private var projectURL: URL { URL(string: "https://umate.ai/codmate")! }
+    private var mcpMateURL: URL { URL(string: "https://mcpmate.io/")! }
+    private let mcpMateTagline = "Dedicated MCP orchestration for Codex workflows."
 
     private static let buildDateFormatter: DateFormatter = {
         let df = DateFormatter()
@@ -334,6 +340,59 @@ struct SettingsView: View {
         df.timeStyle = .medium
         return df
     }()
+
+    private var mcpServerSettings: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("MCP Server Integration")
+                        .font(.title2)
+                        .fontWeight(.bold)
+                    Text("Connect Codex sessions with managed MCP endpoints")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
+
+                VStack(alignment: .leading, spacing: 16) {
+                    HStack(alignment: .center, spacing: 12) {
+                        Image("MCPMateLogo")
+                            .resizable()
+                            .frame(width: 48, height: 48)
+                            .cornerRadius(12)
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("MCPMate")
+                                .font(.headline)
+                            Text(
+                                "A 'Maybe All-in-One' MCP service manager for developers and creators."
+                            )
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                        }
+                    }
+
+                    Text(
+                        "MCPMate now manages Codex MCP configuration and lifecycle. CodMate no longer bundles MCP controls—download MCPMate and reuse the same working directory and model defaults."
+                    )
+                    .font(.body)
+                    .foregroundColor(.secondary)
+
+                    Text("Quickly download MCPMate to configure MCP servers alongside CodMate.")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+
+                    Button(action: openMCPMateDownload) {
+                        Label("Download MCPMate", systemImage: "arrow.down.circle.fill")
+                            .labelStyle(.titleAndIcon)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    .font(.body.weight(.semibold))
+                }
+                .frame(alignment: .leading)
+            }
+        }
+    }
 
     private func selectSessionsRoot() {
         let panel = NSOpenPanel()
@@ -376,6 +435,10 @@ struct SettingsView: View {
         preferences.defaultResumeApprovalPolicy = .onRequest
         preferences.defaultResumeFullAuto = false
         preferences.defaultResumeDangerBypass = false
+    }
+
+    private func openMCPMateDownload() {
+        NSWorkspace.shared.open(mcpMateURL)
     }
 }
 

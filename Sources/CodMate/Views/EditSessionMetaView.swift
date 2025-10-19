@@ -17,8 +17,15 @@ struct EditSessionMetaView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Comment (optional)").font(.subheadline)
                 TextEditor(text: $viewModel.editComment)
+                    .font(.body)
+                    .textEditorStyle(.plain)
+                    .scrollContentBackground(.hidden)
                     .frame(minHeight: 120)
-                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.gray.opacity(0.2)))
+                    .padding(8) // use outer padding; avoid inner padding that can clip first baseline on macOS
+                    .background(
+                        RoundedRectangle(cornerRadius: 6)
+                            .stroke(Color.gray.opacity(0.2), lineWidth: 1)
+                    )
             }
 
             HStack {
@@ -32,4 +39,3 @@ struct EditSessionMetaView: View {
         .frame(minWidth: 520)
     }
 }
-

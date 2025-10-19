@@ -7,7 +7,7 @@ actor SessionCacheStore {
         let summary: SessionSummary
     }
 
-    private var map: [String: Entry] = [:] // key: file path
+    private var map: [String: Entry] = [:]  // key: file path
     private let url: URL
     private var needsSave = false
 
@@ -15,11 +15,12 @@ actor SessionCacheStore {
         let dir = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first!
             .appendingPathComponent("CodMate", isDirectory: true)
         try? fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
-        url = dir.appendingPathComponent("sessionIndex-v1.json")
-        
+        url = dir.appendingPathComponent("sessionIndex-v2.json")
+
         // 在 init 中同步加载缓存（init 是 nonisolated 的）
         if let data = try? Data(contentsOf: url),
-           let entries = try? JSONDecoder().decode([Entry].self, from: data) {
+            let entries = try? JSONDecoder().decode([Entry].self, from: data)
+        {
             map = Dictionary(uniqueKeysWithValues: entries.map { ($0.path, $0) })
         }
     }
@@ -49,4 +50,3 @@ actor SessionCacheStore {
         saveIfNeededDebounced()
     }
 }
-

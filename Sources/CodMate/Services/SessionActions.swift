@@ -257,23 +257,10 @@ struct SessionActions {
     func openTerminalApp(_ app: TerminalApp) {
         guard let bundleID = app.bundleIdentifier else { return }
 
-        if #available(macOS 10.15, *) {
-            if let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) {
-                let config = NSWorkspace.OpenConfiguration()
-                config.activates = true
-                NSWorkspace.shared.openApplication(at: appURL, configuration: config, completionHandler: nil)
-            } else {
-                // Fall back to bundle launch if URL lookup fails
-                _ = NSWorkspace.shared.launchApplication(withBundleIdentifier: bundleID,
-                                                         options: [.default],
-                                                         additionalEventParamDescriptor: nil,
-                                                         launchIdentifier: nil)
-            }
-        } else {
-            _ = NSWorkspace.shared.launchApplication(withBundleIdentifier: bundleID,
-                                                     options: [.default],
-                                                     additionalEventParamDescriptor: nil,
-                                                     launchIdentifier: nil)
+        if let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) {
+            let config = NSWorkspace.OpenConfiguration()
+            config.activates = true
+            NSWorkspace.shared.openApplication(at: appURL, configuration: config, completionHandler: nil)
         }
     }
 
