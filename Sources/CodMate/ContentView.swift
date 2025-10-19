@@ -16,10 +16,9 @@ struct ContentView: View {
     // Track which sessions are running in embedded terminal
     @State private var runningSessionIDs = Set<SessionSummary.ID>()
     @State private var isDetailMaximized = false
-    // Expose a common font helper to feed TerminalHostView
+    // Provide a simple font chooser that prefers CJK-capable monospace
     private func makeTerminalFont(size: CGFloat) -> NSFont {
         #if canImport(SwiftTerm)
-        // Reuse the same logic as EmbeddedTerminalView
         let candidates = [
             "Sarasa Mono SC", "Sarasa Term SC",
             "LXGW WenKai Mono",
@@ -57,6 +56,10 @@ struct ContentView: View {
             await viewModel.refreshSessions(force: true)
         }
         .onChange(of: viewModel.sections) { _, _ in
+            normalizeSelection()
+        }
+        .onChange(of: selection) { _, _ in
+            // Enforce: the middle list should always have one selected item
             normalizeSelection()
         }
         .onChange(of: viewModel.errorMessage) { _, message in
@@ -127,7 +130,7 @@ struct ContentView: View {
             onDeleteRequest: handleDeleteRequest,
             onExportMarkdown: exportMarkdownForSession,
             isRunning: { runningSessionIDs.contains($0.id) },
-            onOpenEmbedded: { startEmbedded(for: $0) }
+            onOpenEmbedded: (viewModel.preferences.defaultResumeUseEmbeddedTerminal ? { startEmbedded(for: $0) } : nil)
         )
         .environmentObject(viewModel)
         .navigationSplitViewColumnWidth(min: 420, ideal: 480, max: 600)
@@ -277,17 +280,16 @@ struct ContentView: View {
                         }
                     } label: { Label("Open in Warp (Path)", systemImage: "app.gift.fill") }
 
-                    // Alpha: embedded terminal
-                    Button {
-                        if let f = focusedSummary { startEmbedded(for: f) }
-                    } label: { Label("Open Embedded Terminal (Alpha)", systemImage: "rectangle.badge.plus") }
+                    // Alpha: embedded terminal (respect preference)
+                    if viewModel.preferences.defaultResumeUseEmbeddedTerminal {
+                        Button {
+                            if let f = focusedSummary { startEmbedded(for: f) }
+                        } label: { Label("Open Embedded Terminal (Alpha)", systemImage: "rectangle.badge.plus") }
+                    }
                 } label: {
                     Label("Resume", systemImage: "play.fill")
                 } primaryAction: {
-                    if let f = focusedSummary {
-                        viewModel.copyResumeCommands(session: f)
-                        Task { await SystemNotifier.shared.notify(title: "CodMate", body: "命令已拷贝") }
-                    }
+                    if let f = focusedSummary { openPreferredExternal(for: f) }
                 }
                 .disabled(isPerformingAction || focusedSummary == nil)
                 .help("Resume and more options")
@@ -362,11 +364,15 @@ struct ContentView: View {
     }
 
     private func normalizeSelection() {
-        let validIDs = Set(viewModel.sections.flatMap { $0.sessions.map(\.id) })
+        let orderedIDs = viewModel.sections.flatMap { $0.sessions.map(\.id) }
+        let validIDs = Set(orderedIDs)
+        let original = selection
         selection.formIntersection(validIDs)
-        if selection.isEmpty, let first = validIDs.first {
+        if selection.isEmpty, let first = orderedIDs.first {
             selection.insert(first)
         }
+        // Avoid unnecessary churn if nothing changed
+        if selection == original { return }
     }
 
     private func resumeFromList(_ session: SessionSummary) {
