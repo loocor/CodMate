@@ -61,6 +61,21 @@ final class SessionListViewModel: ObservableObject {
     @Published var globalSessionCount: Int = 0
     @Published private(set) var pathTreeRootPublished: PathTreeNode?
     @Published private var monthCountsCache: [String: [Int: Int]] = [:]  // key: "dim|yyyy-MM"
+    // Live activity indicators
+    @Published private(set) var activeUpdatingIDs: Set<String> = []
+    @Published private(set) var awaitingFollowupIDs: Set<String> = []
+
+    // Projects
+    private let configService = CodexConfigService()
+    @Published private(set) var projects: [Project] = []
+    @Published var selectedProjectId: String? = nil {
+        didSet {
+            guard !suppressFilterNotifications, oldValue != selectedProjectId else { return }
+            // Switch off directory filter when a project is selected
+            if selectedProjectId != nil { selectedPath = nil }
+            applyFilters()
+        }
+    }
 
     init(
         preferences: SessionPreferencesStore,
@@ -78,6 +93,19 @@ final class SessionListViewModel: ObservableObject {
         self.selectedDay = cal.startOfDay(for: today)
         suppressFilterNotifications = false
         configureDirectoryMonitor()
+        Task { await loadProjects() }
+        // Observe agent completion notifications to surface in list
+        NotificationCenter.default.addObserver(
+            forName: .codMateAgentCompleted,
+            object: nil,
+            queue: .main
+        ) { [weak self] note in
+            guard let self else { return }
+            if let id = note.userInfo?["sessionID"] as? String {
+                self.awaitingFollowupIDs.insert(id)
+            }
+        }
+        startActivityPruneTicker()
     }
 
     private var activeRefreshToken = UUID()
@@ -104,7 +132,10 @@ final class SessionListViewModel: ObservableObject {
             guard token == activeRefreshToken else { return }
             let notes = await notesStore.all()
             notesSnapshot = notes
+            // Refresh projects on each sessions refresh to reflect external edits
+            Task { await self.loadProjects() }
             apply(notes: notes, to: &sessions)
+            registerActivityHeartbeat(previous: allSessions, current: sessions)
             allSessions = sessions
             rebuildCanonicalCwdCache()
             await computeCalendarCaches()
@@ -125,6 +156,43 @@ final class SessionListViewModel: ObservableObject {
             }
         }
     }
+
+    private func registerActivityHeartbeat(previous: [SessionSummary], current: [SessionSummary]) {
+        // Map previous lastUpdated for quick lookup
+        var prevMap: [String: Date] = [:]
+        for s in previous { if let t = s.lastUpdatedAt { prevMap[s.id] = t } }
+        let now = Date()
+        for s in current {
+            guard let newT = s.lastUpdatedAt else { continue }
+            if let oldT = prevMap[s.id] {
+                if newT > oldT { activityHeartbeat[s.id] = now }
+            } else {
+                // New in list: treat as recently updated
+                activityHeartbeat[s.id] = now
+            }
+        }
+        recomputeActiveUpdatingIDs()
+    }
+
+    private var activityHeartbeat: [String: Date] = [:]
+    private var activityPruneTask: Task<Void, Never>?
+    private func startActivityPruneTicker() {
+        activityPruneTask?.cancel()
+        activityPruneTask = Task { [weak self] in
+            while !(Task.isCancelled) {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                await MainActor.run { self?.recomputeActiveUpdatingIDs() }
+            }
+        }
+    }
+
+    private func recomputeActiveUpdatingIDs() {
+        let cutoff = Date().addingTimeInterval(-3.0)
+        activeUpdatingIDs = Set(activityHeartbeat.filter { $0.value > cutoff }.keys)
+    }
+
+    func isActivelyUpdating(_ id: String) -> Bool { activeUpdatingIDs.contains(id) }
+    func isAwaitingFollowup(_ id: String) -> Bool { awaitingFollowupIDs.contains(id) }
 
     func resume(session: SessionSummary) async -> Result<ProcessResult, Error> {
         do {
@@ -362,6 +430,7 @@ final class SessionListViewModel: ObservableObject {
         suppressFilterNotifications = true
         selectedPath = nil
         selectedDay = nil
+        selectedProjectId = nil
         suppressFilterNotifications = false
         scheduleFilterRefresh(force: true)
         // searchText 保持不变，便于连续检索
@@ -393,7 +462,14 @@ final class SessionListViewModel: ObservableObject {
             }
         }
 
-        // 2. 日期过滤
+        // 2. 项目过滤（基于 notes 中的 projectId）
+        if let pid = selectedProjectId {
+            filtered = filtered.filter { summary in
+                notesSnapshot[summary.id]?.projectId == pid
+            }
+        }
+
+        // 3. 日期过滤
         if let day = selectedDay {
             filtered = filtered.filter { sess in
                 let cal = Calendar.current
@@ -409,7 +485,7 @@ final class SessionListViewModel: ObservableObject {
             }
         }
 
-        // 3. 搜索过滤
+        // 4. 搜索过滤
         let term = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         if !term.isEmpty {
             filtered = filtered.filter { summary in
@@ -417,10 +493,10 @@ final class SessionListViewModel: ObservableObject {
             }
         }
 
-        // 4. 排序
+        // 5. 排序
         filtered = sortOrder.sort(filtered)
 
-        // 5. 分组
+        // 6. 分组
         sections = Self.groupSessions(filtered, dimension: dateDimension)
     }
 
@@ -765,6 +841,38 @@ extension SessionListViewModel {
     func refreshGlobalCount() async {
         let count = await indexer.countAllSessions(root: preferences.sessionsRoot)
         await MainActor.run { self.globalSessionCount = count }
+    }
+
+    // MARK: - Projects
+    func loadProjects() async {
+        let list = await configService.listProjects()
+        await MainActor.run { self.projects = list }
+    }
+
+    func setSelectedProject(_ id: String?) {
+        selectedProjectId = id
+    }
+
+    func assignSessions(to projectId: String?, ids: [String]) async {
+        for id in ids { await notesStore.assignProject(id: id, projectId: projectId) }
+        let notes = await notesStore.all()
+        notesSnapshot = notes
+        applyFilters()
+    }
+
+    func projectCountsFromNotes() -> [String: Int] {
+        var counts: [String: Int] = [:]
+        for (_, note) in notesSnapshot {
+            if let pid = note.projectId { counts[pid, default: 0] += 1 }
+        }
+        return counts
+    }
+
+    // Helper for views to upsert a project
+    func configServiceUpsert(project: Project) async {
+        do { try await configService.upsertProject(project) } catch {
+            await MainActor.run { self.errorMessage = error.localizedDescription }
+        }
     }
 }
 

@@ -22,6 +22,17 @@ final class SystemNotifier: NSObject {
         let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: trigger)
         try? await center.add(request)
     }
+
+    // Specialized helper: agent completed and awaits user follow-up.
+    // Also posts an in-app notification to update list indicators.
+    func notifyAgentCompleted(sessionID: String, message: String) async {
+        await notify(title: "CodMate", body: message)
+        NotificationCenter.default.post(
+            name: .codMateAgentCompleted,
+            object: nil,
+            userInfo: ["sessionID": sessionID, "message": message]
+        )
+    }
 }
 
 extension SystemNotifier: UNUserNotificationCenterDelegate {
@@ -32,4 +43,8 @@ extension SystemNotifier: UNUserNotificationCenterDelegate {
     ) {
         completionHandler([.banner, .list, .sound])
     }
+}
+
+extension Notification.Name {
+    static let codMateAgentCompleted = Notification.Name("CodMate.AgentCompleted")
 }
