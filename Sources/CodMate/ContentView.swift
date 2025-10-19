@@ -130,6 +130,8 @@ struct ContentView: View {
             onDeleteRequest: handleDeleteRequest,
             onExportMarkdown: exportMarkdownForSession,
             isRunning: { runningSessionIDs.contains($0.id) },
+            isUpdating: { viewModel.isActivelyUpdating($0.id) },
+            isAwaitingFollowup: { viewModel.isAwaitingFollowup($0.id) },
             onOpenEmbedded: (viewModel.preferences.defaultResumeUseEmbeddedTerminal ? { startEmbedded(for: $0) } : nil)
         )
         .environmentObject(viewModel)

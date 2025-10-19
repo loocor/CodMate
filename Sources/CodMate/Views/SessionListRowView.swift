@@ -4,6 +4,8 @@ struct SessionListRowView: View {
     let summary: SessionSummary
     var isRunning: Bool = false
     var isSelected: Bool = false
+    var isUpdating: Bool = false
+    var awaitingFollowup: Bool = false
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -54,12 +56,28 @@ struct SessionListRowView: View {
         .padding(.vertical, 8)
         .buttonStyle(.plain)
         .overlay(alignment: .trailing) {
-            if isRunning {
-                Image(systemName: "play.circle.fill")
-                    .foregroundStyle(Color.green)
-                    .font(.system(size: 28, weight: .semibold))
-                    .padding(.trailing, 8)
+            HStack(spacing: 8) {
+                if isUpdating {
+                    Image(systemName: "timer")
+                        .foregroundStyle(Color.orange)
+                        .font(.system(size: 16, weight: .semibold))
+                        .symbolEffect(.pulse, isActive: true)
+                        .help("Updating…")
+                }
+                if isRunning {
+                    Image(systemName: "play.circle.fill")
+                        .foregroundStyle(Color.green)
+                        .font(.system(size: 22, weight: .semibold))
+                        .help("Running in terminal")
+                }
+                if awaitingFollowup {
+                    Image(systemName: "bell.badge")
+                        .foregroundStyle(Color.accentColor)
+                        .font(.system(size: 16, weight: .semibold))
+                        .help("Completed · Follow up needed")
+                }
             }
+            .padding(.trailing, 8)
         }
     }
 }

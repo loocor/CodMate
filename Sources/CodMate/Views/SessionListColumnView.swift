@@ -14,6 +14,10 @@ struct SessionListColumnView: View {
     let onExportMarkdown: (SessionSummary) -> Void
     // running state probe
     var isRunning: ((SessionSummary) -> Bool)? = nil
+    // live updating probe (file activity)
+    var isUpdating: ((SessionSummary) -> Bool)? = nil
+    // awaiting follow-up probe
+    var isAwaitingFollowup: ((SessionSummary) -> Bool)? = nil
     // open embedded terminal (Alpha)
     var onOpenEmbedded: ((SessionSummary) -> Void)? = nil
     @EnvironmentObject private var viewModel: SessionListViewModel
@@ -43,7 +47,9 @@ struct SessionListColumnView: View {
                                 SessionListRowView(
                                     summary: session,
                                     isRunning: isRunning?(session) ?? false,
-                                    isSelected: selectionContains(session.id)
+                                    isSelected: selectionContains(session.id),
+                                    isUpdating: isUpdating?(session) ?? false,
+                                    awaitingFollowup: isAwaitingFollowup?(session) ?? false
                                 )
                                 .tag(session.id)
                                 .listRowInsets(EdgeInsets())
@@ -67,6 +73,20 @@ struct SessionListColumnView: View {
                                         Task { await viewModel.beginEditing(session: session) }
                                     } label: {
                                         Label("Edit Title & Comment", systemImage: "pencil")
+                                    }
+                                    // Assign to Project submenu (MVP)
+                                    if !viewModel.projects.isEmpty {
+                                        Menu {
+                                            Button("(None)") { Task { await viewModel.assignSessions(to: nil, ids: [session.id]) } }
+                                            Divider()
+                                            ForEach(viewModel.projects) { p in
+                                                Button(p.name.isEmpty ? p.id : p.name) {
+                                                    Task { await viewModel.assignSessions(to: p.id, ids: [session.id]) }
+                                                }
+                                            }
+                                        } label: {
+                                            Label("Assign to Project…", systemImage: "folder.badge.plus")
+                                        }
                                     }
                                     Button {
                                         onReveal(session)
