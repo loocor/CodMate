@@ -70,11 +70,11 @@ struct EmbeddedTerminalView: NSViewRepresentable {
     }
 }
 
-/// Returns a font suitable for terminal display and a flag indicating if CJK width handling is needed
+/// Returns a font suitable for terminal display; prefers CJK-capable monospace
 private func makeTerminalFont(size: CGFloat) -> NSFont {
     // Prefer CJK-capable monospaced fonts that handle double-width correctly
     let preferredMonoCandidates = [
-        "Sarasa Mono SC",           // Excellent CJK monospace support
+        "Sarasa Mono SC",           // CJK monospace
         "Sarasa Term SC",
         "LXGW WenKai Mono",
         "Noto Sans Mono CJK SC",
@@ -84,22 +84,21 @@ private func makeTerminalFont(size: CGFloat) -> NSFont {
         "SF Mono",
         "Menlo",
     ]
-    
+
     for name in preferredMonoCandidates {
         if let f = NSFont(name: name, size: size), fontHasCJKGlyphs(f) {
             return f
         }
     }
-    
+
     // Fallback to system mono if it has CJK
     let sysMono = NSFont.monospacedSystemFont(ofSize: size, weight: .regular)
     if fontHasCJKGlyphs(sysMono) { return sysMono }
 
-    // Last resort: use PingFang SC with forced CJK width
+    // Last resort: use PingFang SC if nothing else, to ensure readable Chinese
     if let pf = NSFont(name: "PingFangSC-Regular", size: size) ?? NSFont(name: "PingFang SC", size: size) {
         return pf
     }
-    
     return sysMono
 }
 
@@ -144,7 +143,7 @@ struct EmbeddedTerminalView: View {
                     let pb = NSPasteboard.general
                     pb.clearContents()
                     pb.setString(initialCommands, forType: .string)
-                    Task { await SystemNotifier.shared.notify(title: "CodMate", body: "命令已拷贝") }
+                    Task { await SystemNotifier.shared.notify(title: "CodMate", body: "Commands copied") }
                 }
                 Button("Open Terminal") {
                     if #available(macOS 10.15, *) {

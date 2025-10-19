@@ -10,8 +10,12 @@ struct TerminalHostView: NSViewRepresentable {
     let font: NSFont
     let isDark: Bool
 
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
     func makeNSView(context: Context) -> LocalProcessTerminalView {
         let v = TerminalSessionManager.shared.view(for: sessionID, initialCommands: initialCommands, font: font)
+        // Attach context menu: Copy / Paste / Select All
+        context.coordinator.attach(to: v)
         applyTheme(v)
         return v
     }
@@ -32,6 +36,55 @@ struct TerminalHostView: NSViewRepresentable {
             v.nativeForegroundColor = NSColor(white: 0.10, alpha: 1.0)
             v.nativeBackgroundColor = NSColor(white: 0.98, alpha: 1.0)
             v.selectedTextBackgroundColor = NSColor(white: 0.7, alpha: 0.4)
+        }
+    }
+
+    final class Coordinator: NSObject {
+        weak var terminal: LocalProcessTerminalView?
+
+        func attach(to view: LocalProcessTerminalView) {
+            self.terminal = view
+            view.menu = makeMenu()
+        }
+
+        private func makeMenu() -> NSMenu {
+            let m = NSMenu()
+            let copy = NSMenuItem(title: "Copy", action: #selector(copyAction(_:)), keyEquivalent: "")
+            copy.target = self
+            let paste = NSMenuItem(title: "Paste", action: #selector(pasteAction(_:)), keyEquivalent: "")
+            paste.target = self
+            let selectAll = NSMenuItem(title: "Select All", action: #selector(selectAllAction(_:)), keyEquivalent: "")
+            selectAll.target = self
+            m.items = [copy, paste, NSMenuItem.separator(), selectAll]
+            return m
+        }
+
+        @objc func copyAction(_ sender: Any?) {
+            guard let term = terminal else { return }
+            // Prefer using SwiftTerm's selection API when available
+            if let selection = term.getSelection(), !selection.isEmpty {
+                let pb = NSPasteboard.general
+                pb.clearContents()
+                pb.setString(selection, forType: .string)
+                return
+            }
+            // Otherwise try standard copy:
+            if NSApp.sendAction(#selector(NSText.copy(_:)), to: term, from: sender) { return }
+            // No selection to copy
+            NSSound.beep()
+        }
+
+        @objc func pasteAction(_ sender: Any?) {
+            guard let term = terminal else { return }
+            let pb = NSPasteboard.general
+            if let s = pb.string(forType: .string), !s.isEmpty {
+                term.send(txt: s)
+            }
+        }
+
+        @objc func selectAllAction(_ sender: Any?) {
+            guard let term = terminal else { return }
+            _ = NSApp.sendAction(#selector(NSText.selectAll(_:)), to: term, from: sender)
         }
     }
 }
