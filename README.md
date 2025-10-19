@@ -13,7 +13,7 @@ Native SwiftUI utility that scans `~/.codex/sessions` JSONL logs, surfaces rich 
 
 ## Getting Started
 1. **Prerequisites**
-   - macOS 14+ with Swift toolchain 5.9 or later.
+   - macOS 15+ with a recent Swift toolchain (Xcode 16+ recommended).
    - Codex CLI installed (`codex --version`) and accessible (default search path `/usr/local/bin/codex`).
    - Existing session logs under `~/.codex/sessions` (created by Codex CLI runs).
 2. **Build (CLI)**
@@ -27,7 +27,7 @@ Native SwiftUI utility that scans `~/.codex/sessions` JSONL logs, surfaces rich 
    - Use the toolbar to refresh, pick a different sessions folder, or point to a custom Codex CLI binary.
 4. **Resuming Sessions**
    - Select a session in the sidebar and click **恢复** (Resume).
-   - The app spawns `codex resume <session-id>` in the session file’s directory and surfaces command output via a toast.
+   - The app spawns `codex resume <session-id>` in the session file’s directory. Output appears in the embedded terminal; completion and important events can trigger macOS system notifications.
 5. **Cleanup**
    - Command-click to multi-select sessions, then click **删除**. Files are moved to the Trash (Finder can restore them if needed).
 

@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 
 // 轻量级磁盘缓存
 fileprivate actor DiskCache {
@@ -50,7 +51,8 @@ actor SessionIndexer {
     private let decoder: JSONDecoder
     private let cache = NSCache<NSURL, CacheEntry>()
     private let diskCache: DiskCache
-    private nonisolated static let tailTimestampFormatter: ISO8601DateFormatter = {
+    private let logger = Logger(subsystem: "io.umate.codemate", category: "SessionIndexer")
+    private static let tailTimestampFormatter: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return formatter
@@ -75,72 +77,89 @@ actor SessionIndexer {
 
     func refreshSessions(root: URL, scope: SessionLoadScope) async throws -> [SessionSummary] {
         let sessionFiles = try sessionFileURLs(at: root, scope: scope)
+        logger.info("Refreshing sessions under \(root.path, privacy: .public) scope=\(String(describing: scope), privacy: .public) count=\(sessionFiles.count)")
         guard !sessionFiles.isEmpty else { return [] }
 
         let cpuCount = max(2, ProcessInfo.processInfo.processorCount)
         var summaries: [SessionSummary] = []
+        var firstError: Error?
         summaries.reserveCapacity(sessionFiles.count)
 
-        try await withThrowingTaskGroup(of: SessionSummary?.self) { group in
+        await withTaskGroup(of: Result<SessionSummary?, Error>.self) { group in
             var iterator = sessionFiles.makeIterator()
 
             func addNextTasks(_ n: Int) {
                 for _ in 0..<n {
                     guard let url = iterator.next() else { return }
                     group.addTask { [weak self] in
-                        guard let self else { return nil }
-                        let values = try url.resourceValues(forKeys: [
-                            .contentModificationDateKey, .fileSizeKey, .isRegularFileKey,
-                        ])
-                        guard values.isRegularFile == true else { return nil }
+                        guard let self else { return .success(nil) }
+                        do {
+                            let values = try url.resourceValues(forKeys: [
+                                .contentModificationDateKey, .fileSizeKey, .isRegularFileKey,
+                            ])
+                            guard values.isRegularFile == true else { return .success(nil) }
 
-                        // In-memory cache
-                        if let cached = await self.cachedSummary(
-                            for: url as NSURL, modificationDate: values.contentModificationDate)
-                        {
-                            return cached
-                        }
-                        // Disk cache
-                        if let disk = await self.diskCache.get(
-                            path: url.path, modificationDate: values.contentModificationDate)
-                        {
+                            // In-memory cache
+                            if let cached = await self.cachedSummary(
+                                for: url as NSURL, modificationDate: values.contentModificationDate)
+                            {
+                                return .success(cached)
+                            }
+                            // Disk cache
+                            if let disk = await self.diskCache.get(
+                                path: url.path, modificationDate: values.contentModificationDate)
+                            {
+                                await self.store(
+                                    summary: disk, for: url as NSURL,
+                                    modificationDate: values.contentModificationDate)
+                                return .success(disk)
+                            }
+
+                            var builder = SessionSummaryBuilder()
+                            if let size = values.fileSize { builder.setFileSize(UInt64(size)) }
+                            // Seed updatedAt by fs metadata to avoid full scan for recency
+                            if let lastUpdated = self.lastUpdatedTimestamp(
+                                for: url, modificationDate: values.contentModificationDate)
+                            {
+                                builder.seedLastUpdated(lastUpdated)
+                            }
+                            guard
+                                let summary = try await self.buildSummaryFast(
+                                    for: url, builder: &builder)
+                            else { return .success(nil) }
                             await self.store(
-                                summary: disk, for: url as NSURL,
+                                summary: summary, for: url as NSURL,
                                 modificationDate: values.contentModificationDate)
-                            return disk
+                            await self.diskCache.set(
+                                path: url.path, modificationDate: values.contentModificationDate,
+                                summary: summary)
+                            return .success(summary)
+                        } catch {
+                            return .failure(error)
                         }
-
-                        var builder = SessionSummaryBuilder()
-                        if let size = values.fileSize { builder.setFileSize(UInt64(size)) }
-                        // Seed updatedAt by fs metadata to avoid full scan for recency
-                        if let lastUpdated = self.lastUpdatedTimestamp(
-                            for: url, modificationDate: values.contentModificationDate)
-                        {
-                            builder.seedLastUpdated(lastUpdated)
-                        }
-                        guard
-                            let summary = try await self.buildSummaryFast(
-                                for: url, builder: &builder)
-                        else { return nil }
-                        await self.store(
-                            summary: summary, for: url as NSURL,
-                            modificationDate: values.contentModificationDate)
-                        await self.diskCache.set(
-                            path: url.path, modificationDate: values.contentModificationDate,
-                            summary: summary)
-                        return summary
                     }
                 }
             }
 
             addNextTasks(cpuCount)
 
-            while let result = try await group.next() {
-                if let s = result { summaries.append(s) }
+            while let result = await group.next() {
+                switch result {
+                case .success(let maybe):
+                    if let s = maybe { summaries.append(s) }
+                case .failure(let error):
+                    if firstError == nil { firstError = error }
+                    self.logger.error(
+                        "Failed to build session summary: \(error.localizedDescription, privacy: .public)"
+                    )
+                }
                 addNextTasks(1)
             }
         }
 
+        if summaries.isEmpty, let error = firstError {
+            throw error
+        }
         return summaries
     }
 
@@ -178,7 +197,10 @@ actor SessionIndexer {
 
     private func sessionFileURLs(at root: URL, scope: SessionLoadScope) throws -> [URL] {
         var urls: [URL] = []
-        guard let enumeratorURL = scopeBaseURL(root: root, scope: scope) else { return [] }
+        guard let enumeratorURL = scopeBaseURL(root: root, scope: scope) else {
+            logger.warning("No enumerator URL for scope=\(String(describing: scope), privacy: .public) root=\(root.path, privacy: .public)")
+            return []
+        }
 
         guard
             let enumerator = fileManager.enumerator(
@@ -186,13 +208,17 @@ actor SessionIndexer {
                 includingPropertiesForKeys: [.isRegularFileKey],
                 options: [.skipsHiddenFiles, .skipsPackageDescendants]
             )
-        else { return [] }
+        else {
+            logger.warning("Enumerator could not open \(enumeratorURL.path, privacy: .public)")
+            return []
+        }
 
         for case let fileURL as URL in enumerator {
             if fileURL.pathExtension.lowercased() == "jsonl" {
                 urls.append(fileURL)
             }
         }
+        logger.info("Enumerated \(urls.count) files under \(enumeratorURL.path, privacy: .public)")
         return urls
     }
 

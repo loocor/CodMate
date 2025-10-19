@@ -45,7 +45,7 @@ final class SessionListViewModel: ObservableObject {
     private var fulltextMatches: Set<String> = []  // SessionSummary.id set
     private var fulltextTask: Task<Void, Never>?
     private var enrichmentTask: Task<Void, Never>?
-    private let notesStore = SessionNotesStore()
+    private var notesStore: SessionNotesStore
     private var notesSnapshot: [String: SessionNote] = [:]
     private var canonicalCwdCache: [String: String] = [:]
     private var directoryMonitor: DirectoryMonitor?
@@ -70,6 +70,7 @@ final class SessionListViewModel: ObservableObject {
         self.preferences = preferences
         self.indexer = indexer
         self.actions = actions
+        self.notesStore = SessionNotesStore(notesRoot: preferences.notesRoot)
         // 启动时默认状态：All Sessions（无目录过滤）+ 当天日期
         let today = Date()
         let cal = Calendar.current
@@ -282,10 +283,24 @@ final class SessionListViewModel: ObservableObject {
     func updateSessionsRoot(to newURL: URL) async {
         guard newURL != preferences.sessionsRoot else { return }
         preferences.sessionsRoot = newURL
+        await notesStore.updateRoot(to: preferences.notesRoot)
         await indexer.invalidateAll()
         enrichmentSnapshots.removeAll()
         configureDirectoryMonitor()
         await refreshSessions(force: true)
+    }
+
+    func updateNotesRoot(to newURL: URL) async {
+        guard newURL != preferences.notesRoot else { return }
+        preferences.notesRoot = newURL
+        await notesStore.updateRoot(to: newURL)
+        // Reload notes snapshot and re-apply to current sessions
+        let notes = await notesStore.all()
+        notesSnapshot = notes
+        var sessions = allSessions
+        apply(notes: notes, to: &sessions)
+        allSessions = sessions
+        applyFilters()
     }
 
     func updateExecutablePath(to newURL: URL) {

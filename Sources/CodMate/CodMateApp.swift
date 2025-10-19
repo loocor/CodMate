@@ -45,6 +45,7 @@ struct CodMateApp: App {
 
         Settings {
             SettingsView(preferences: preferences, selection: $settingsSelection)
+                .environmentObject(listViewModel)
         }
         .windowResizability(.contentMinSize)
         .windowStyle(.hiddenTitleBar)

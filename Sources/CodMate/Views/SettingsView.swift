@@ -1,9 +1,12 @@
 import AppKit
 import SwiftUI
 
+@available(macOS 15.0, *)
 struct SettingsView: View {
     @ObservedObject var preferences: SessionPreferencesStore
     @Binding private var selectedCategory: SettingCategory
+    @StateObject private var codexVM = CodexVM()
+    @EnvironmentObject private var viewModel: SessionListViewModel
 
     init(preferences: SessionPreferencesStore, selection: Binding<SettingCategory>) {
         self._preferences = ObservedObject(wrappedValue: preferences)
@@ -45,6 +48,7 @@ struct SettingsView: View {
                         .frame(maxWidth: .infinity, alignment: .topLeading)
                         .padding(.horizontal, 16)
                         .padding(.top, 16)
+                        .task { await codexVM.loadAll() }
                 }
             }
         }
@@ -60,6 +64,10 @@ struct SettingsView: View {
             terminalSettings
         case .command:
             commandSettings
+        case .codex:
+            codexSettings
+        case .dialectics:
+            dialecticsSettings
         case .mcpServer:
             mcpServerSettings
         case .about:
@@ -104,6 +112,23 @@ struct SettingsView: View {
 
                         GridRow {
                             VStack(alignment: .leading, spacing: 4) {
+                                Label("Notes Directory", systemImage: "text.book.closed")
+                                    .font(.subheadline).fontWeight(.medium)
+                                Text("Where session titles and comments are saved")
+                                    .font(.caption).foregroundColor(.secondary)
+                            }
+
+                            Text(preferences.notesRoot.path)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                                .frame(maxWidth: .infinity, alignment: .trailing)
+
+                            Button("Change…", action: selectNotesRoot)
+                                .buttonStyle(.bordered)
+                        }
+
+                        GridRow {
+                            VStack(alignment: .leading, spacing: 4) {
                                 Label("Codex CLI Path", systemImage: "terminal")
                                     .font(.subheadline).fontWeight(.medium)
                                 Text("Path to the codex executable")
@@ -121,22 +146,498 @@ struct SettingsView: View {
                     }
                 }
 
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Reset")
-                        .font(.headline)
-                        .foregroundColor(.primary)
+                // Diagnostics (moved to Dialectics page)
+            }
+        }
+    }
 
-                    Button("Reset All Settings to Defaults") { resetToDefaults() }
-                        .buttonStyle(.bordered)
-                        .tint(.red)
+    private var codexSettings: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            // Header for visual consistency with other settings pages
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Codex Settings")
+                        .font(.title2)
+                        .fontWeight(.bold)
                     Text(
-                        "Restores sessions root, CLI path, and command options to factory defaults."
+                        "Configure Codex CLI: providers, runtime defaults, notifications, and privacy."
                     )
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundColor(.secondary)
+                }
+                Spacer(minLength: 8)
+                Link(
+                    destination: URL(
+                        string: "https://github.com/openai/codex/blob/main/docs/config.md")!
+                ) {
+                    Label("Docs", systemImage: "questionmark.circle")
+                        .labelStyle(.iconOnly)
+                }
+                .buttonStyle(.plain)
+            }
+
+            // Tabs
+            TabView {
+                Tab("Providers", systemImage: "server.rack") { providersPane }
+                Tab("Runtime", systemImage: "gearshape.2") { runtimePane }
+                Tab("Notifications", systemImage: "bell") { notificationsPane }
+                Tab("Privacy", systemImage: "lock.shield") { privacyPane }
+                Tab("Raw Config", systemImage: "doc.text") { rawConfigPane }
+            }
+            .controlSize(.regular)
+            .padding(.bottom, 16)
+        }
+    }
+
+    // MARK: - Dialectics
+    private var dialecticsSettings: some View {
+        DialecticsPane(preferences: preferences)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .padding(.bottom, 16)
+    }
+
+    // MARK: - Providers Pane
+    private var providersPane: some View {
+        paneContainer {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Spacer()
+                    Menu {
+                        Button("K2") { codexVM.presentAddProviderPreset(.k2) }
+                        Button("GLM") { codexVM.presentAddProviderPreset(.glm) }
+                        Button("DeepSeek") { codexVM.presentAddProviderPreset(.deepseek) }
+                        Divider()
+                        Button("Other") { codexVM.presentAddProvider() }
+                    } label: {
+                        Label("Add Provider", systemImage: "plus")
+                    }
+                }
+                Divider()
+
+                // Built-in default row (non-editable, index 0)
+                providerRow(
+                    index: 0, id: nil, name: "Codex Default (built-in)", url: "Built‑in",
+                    editable: false)
+                Divider()
+
+                // Custom providers with alternating stripes
+                ForEach(Array(codexVM.providers.enumerated()), id: \.1.id) { idx, p in
+                    let rowIndex = idx + 1
+                    providerRow(
+                        index: rowIndex,
+                        id: p.id,
+                        name: (p.name?.isEmpty == false ? p.name! : p.id),
+                        url: p.baseURL ?? "",
+                        editable: true,
+                        onEdit: { codexVM.presentEditProvider(p) })
+                    if idx < codexVM.providers.count - 1 { Divider() }
                 }
             }
         }
+        .sheet(isPresented: $codexVM.showProviderEditor) {
+            ProviderEditor(
+                draft: $codexVM.providerDraft,
+                isNew: codexVM.editingKindIsNew,
+                apiKeyApplyURL: codexVM.providerKeyApplyURL,
+                onCancel: { codexVM.dismissEditor() },
+                onSave: { Task { await codexVM.saveProviderDraft() } },
+                onDelete: { Task { await codexVM.deleteEditingProviderViaEditor() } }
+            )
+            .frame(minWidth: 560)
+            .padding(16)
+        }
+    }
+
+    // One-line provider list row with radio + name + URL + optional edit button
+    @ViewBuilder
+    private func providerRow(
+        index: Int, id: String?, name: String, url: String, editable: Bool,
+        onEdit: (() -> Void)? = nil
+    ) -> some View {
+        HStack(alignment: .center, spacing: 10) {
+            // Radio
+            Button(action: {
+                codexVM.activeProviderId = id
+                Task { await codexVM.applyActiveProvider() }
+            }) {
+                Image(
+                    systemName: codexVM.activeProviderId == id
+                        ? "largecircle.fill.circle" : "circle")
+            }
+            .buttonStyle(.plain)
+
+            Text(name)
+                .font(.body.weight(.medium))
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Spacer()
+            Text(url.isEmpty ? "" : url)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .frame(maxWidth: 360, alignment: .trailing)
+            if editable, let onEdit {
+                Button(action: onEdit) { Image(systemName: "pencil") }
+                    .buttonStyle(.plain)
+                    .help("Edit")
+            }
+        }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            codexVM.activeProviderId = id
+            Task { await codexVM.applyActiveProvider() }
+        }
+        .padding(.vertical, 6)
+        .padding(.horizontal, 6)
+    }
+
+    // MARK: - Runtime Pane
+    private var runtimePane: some View {
+        paneContainer {
+            Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 18) {
+                GridRow {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Model").font(.subheadline).fontWeight(.medium)
+                        Text("Default model used by Codex CLI.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    TextField("gpt-5-codex", text: $codexVM.model)
+                        .onSubmit { Task { await codexVM.applyModel() } }
+                        .onChange(of: codexVM.model) { _, _ in codexVM.runtimeDirty = true }
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                }
+                GridRow {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Reasoning Effort").font(.subheadline).fontWeight(.medium)
+                        Text("Controls depth of reasoning for supported models.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    Picker("", selection: $codexVM.reasoningEffort) {
+                        ForEach(CodexVM.ReasoningEffort.allCases) { Text($0.rawValue).tag($0) }
+                    }
+                    .labelsHidden()
+                    .onChange(of: codexVM.reasoningEffort) { _, _ in
+                        Task { await codexVM.applyReasoning() }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                }
+                GridRow {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Reasoning Summary").font(.subheadline).fontWeight(.medium)
+                        Text("Summary verbosity for reasoning-capable models.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    Picker("", selection: $codexVM.reasoningSummary) {
+                        ForEach(CodexVM.ReasoningSummary.allCases) { Text($0.rawValue).tag($0) }
+                    }
+                    .labelsHidden()
+                    .onChange(of: codexVM.reasoningSummary) { _, _ in
+                        Task { await codexVM.applyReasoning() }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                }
+                GridRow {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Verbosity").font(.subheadline).fontWeight(.medium)
+                        Text("Text output verbosity for GPT‑5 family (Responses API).")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    Picker("", selection: $codexVM.modelVerbosity) {
+                        ForEach(CodexVM.ModelVerbosity.allCases) { Text($0.rawValue).tag($0) }
+                    }
+                    .labelsHidden()
+                    .onChange(of: codexVM.modelVerbosity) { _, _ in
+                        Task { await codexVM.applyReasoning() }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                }
+                GridRow {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Sandbox").font(.subheadline).fontWeight(.medium)
+                        Text("Default sandbox for sessions launched from CodMate only.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    Picker("", selection: $preferences.defaultResumeSandboxMode) {
+                        ForEach(SandboxMode.allCases) { Text($0.title).tag($0) }
+                    }
+                    .labelsHidden()
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                }
+                GridRow {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Approval Policy").font(.subheadline).fontWeight(.medium)
+                        Text("Default approval prompts for sessions launched from CodMate only.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    Picker("", selection: $preferences.defaultResumeApprovalPolicy) {
+                        ForEach(ApprovalPolicy.allCases) { Text($0.title).tag($0) }
+                    }
+                    .labelsHidden()
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                }
+            }
+        }
+    }
+
+    // MARK: - Notifications Pane
+    private var notificationsPane: some View {
+        paneContainer {
+            Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 18) {
+                GridRow {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("TUI Notifications").font(.subheadline).fontWeight(.medium)
+                        Text(
+                            "Show in-terminal notifications during TUI sessions (supported terminals only)."
+                        )
+                        .font(.caption).foregroundStyle(.secondary)
+                    }
+                    Toggle("", isOn: $codexVM.tuiNotifications)
+                        .labelsHidden()
+                        .onChange(of: codexVM.tuiNotifications) { _, _ in
+                            Task { await codexVM.applyTuiNotifications() }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                }
+                GridRow {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("System Notifications").font(.subheadline).fontWeight(.medium)
+                        Text(
+                            "Forward Codex turn-complete events to macOS notifications via notify."
+                        )
+                        .font(.caption).foregroundStyle(.secondary)
+                    }
+                    Toggle("", isOn: $codexVM.systemNotifications)
+                        .labelsHidden()
+                        .onChange(of: codexVM.systemNotifications) { _, _ in
+                            Task { await codexVM.applySystemNotifications() }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                }
+                if let path = codexVM.notifyBridgePath {
+                    GridRow {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Notify bridge: \(path)").font(.caption).foregroundStyle(
+                                .secondary
+                            )
+                            .frame(alignment: .leading)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: - Privacy Pane
+    private var privacyPane: some View {
+        paneContainer {
+            VStack(alignment: .leading, spacing: 16) {
+                Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 18) {
+                    GridRow {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Inherit").font(.subheadline).fontWeight(.medium)
+                            Text("Start from full, core, or empty environment.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        Picker("", selection: $codexVM.envInherit) {
+                            ForEach(["all", "core", "none"], id: \.self) { Text($0).tag($0) }
+                        }
+                        .labelsHidden()
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                    }
+                    GridRow {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Ignore default excludes").font(.subheadline).fontWeight(.medium)
+                            Text("Keep vars containing KEY/SECRET/TOKEN unless unchecked.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        Toggle("", isOn: $codexVM.envIgnoreDefaults)
+                            .labelsHidden()
+                            .frame(maxWidth: .infinity, alignment: .trailing)
+                    }
+                    GridRow {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Include Only").font(.subheadline).fontWeight(.medium)
+                            Text("Whitelist patterns (comma separated). Example: PATH, HOME")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        TextField("PATH, HOME", text: $codexVM.envIncludeOnly)
+                            .frame(maxWidth: .infinity, alignment: .trailing)
+                    }
+                    GridRow {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Exclude").font(.subheadline).fontWeight(.medium)
+                            Text("Blacklist patterns (comma separated). Example: AWS_*, AZURE_*")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        TextField("AWS_*, AZURE_*", text: $codexVM.envExclude)
+                            .frame(maxWidth: .infinity, alignment: .trailing)
+                    }
+                    GridRow {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Set Variables").font(.subheadline).fontWeight(.medium)
+                            Text("KEY=VALUE per line. These override inherited values.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        TextEditor(text: $codexVM.envSetPairs)
+                            .font(.system(.body, design: .monospaced))
+                            .frame(minHeight: 90)
+                            .frame(maxWidth: .infinity, alignment: .trailing)
+                    }
+                    GridRow {
+                        Text("")
+                        HStack {
+                            Button("Save Environment Policy") {
+                                Task { await codexVM.applyEnvPolicy() }
+                            }
+                            if codexVM.lastError != nil {
+                                Text(codexVM.lastError!).foregroundStyle(.red).font(.caption)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                    }
+                }
+
+                Divider()
+
+                Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 18) {
+                    GridRow {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Hide Agent Reasoning").font(.subheadline).fontWeight(.medium)
+                            Text("Suppress reasoning events in TUI and exec outputs.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        Toggle("", isOn: $codexVM.hideAgentReasoning)
+                            .labelsHidden()
+                            .onChange(of: codexVM.hideAgentReasoning) { _, _ in
+                                Task { await codexVM.applyHideReasoning() }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .trailing)
+                    }
+                    GridRow {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Show Raw Reasoning").font(.subheadline).fontWeight(.medium)
+                            Text(
+                                "Expose raw chain-of-thought when provider supports it (use with caution)."
+                            )
+                            .font(.caption).foregroundStyle(.secondary)
+                        }
+                        Toggle("", isOn: $codexVM.showRawAgentReasoning)
+                            .labelsHidden()
+                            .onChange(of: codexVM.showRawAgentReasoning) { _, _ in
+                                Task { await codexVM.applyShowRawReasoning() }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .trailing)
+                    }
+                    GridRow {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("File Opener").font(.subheadline).fontWeight(.medium)
+                            Text("Editor scheme for clickable file citations.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        Picker("", selection: $codexVM.fileOpener) {
+                            ForEach(
+                                ["vscode", "vscode-insiders", "windsurf", "cursor", "none"],
+                                id: \.self
+                            ) { Text($0).tag($0) }
+                        }
+                        .labelsHidden()
+                        .onChange(of: codexVM.fileOpener) { _, _ in
+                            Task { await codexVM.applyFileOpener() }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                    }
+                }
+
+                Divider()
+
+                Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 18) {
+                    GridRow {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("OpenTelemetry (OTEL)").font(.subheadline).fontWeight(.medium)
+                            Text("Export structured logs to your collector.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        Toggle("Enable", isOn: $codexVM.otelEnabled)
+                            .frame(maxWidth: .infinity, alignment: .trailing)
+                    }
+                    GridRow {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Exporter").font(.subheadline).fontWeight(.medium)
+                            Text("Transport protocol for OTEL logs.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        Picker("", selection: $codexVM.otelKind) {
+                            Text("otlp-http").tag(CodexVM.OtelKind.http)
+                            Text("otlp-grpc").tag(CodexVM.OtelKind.grpc)
+                        }
+                        .labelsHidden()
+                        .disabled(!codexVM.otelEnabled)
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                    }
+                    GridRow {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Endpoint").font(.subheadline).fontWeight(.medium)
+                            Text("Collector endpoint URL.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        TextField("https://otel.example.com/v1/logs", text: $codexVM.otelEndpoint)
+                            .disabled(!codexVM.otelEnabled)
+                            .frame(maxWidth: .infinity, alignment: .trailing)
+                    }
+                    GridRow {
+                        Text("")
+                        Button("Save OTEL") { Task { await codexVM.applyOtel() } }
+                            .frame(maxWidth: .infinity, alignment: .trailing)
+                    }
+                }
+            }
+
+        }
+    }
+
+    // MARK: - Raw Config Pane (read-only preview + open in editor)
+    private var rawConfigPane: some View {
+        paneContainer {
+            ZStack(alignment: .topTrailing) {
+                ScrollView {
+                    Text(
+                        codexVM.rawConfigText.isEmpty
+                            ? "(empty config.toml)" : codexVM.rawConfigText
+                    )
+                    .font(.system(.caption, design: .monospaced))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                }
+                HStack(spacing: 8) {
+                    Button {
+                        Task { await codexVM.reloadRawConfig() }
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                    .help("Reload")
+                    .buttonStyle(.borderless)
+                    Button {
+                        codexVM.openConfigInEditor()
+                    } label: {
+                        Image(systemName: "square.and.pencil")
+                    }
+                    .help("Open in default editor")
+                    .buttonStyle(.borderless)
+                }
+            }
+            .task { await codexVM.reloadRawConfig() }
+        }
+    }
+
+    // Consistent insets for all tabs
+    @ViewBuilder
+    private func paneContainer<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        content()
+            .padding(.top, 16)
+            .padding(.horizontal, 16)
+            .padding(.bottom, 16)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 
     private var terminalSettings: some View {
@@ -305,6 +806,9 @@ struct SettingsView: View {
                     LabeledContent("Project URL") {
                         Link(projectURL.absoluteString, destination: projectURL)
                     }
+                    LabeledContent("Repository") {
+                        Link(repoURL.absoluteString, destination: repoURL)
+                    }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -331,6 +835,7 @@ struct SettingsView: View {
     }
 
     private var projectURL: URL { URL(string: "https://umate.ai/codmate")! }
+    private var repoURL: URL { URL(string: "https://github.com/loocor/CodMate")! }
     private var mcpMateURL: URL { URL(string: "https://mcpmate.io/")! }
     private let mcpMateTagline = "Dedicated MCP orchestration for Codex workflows."
 
@@ -405,7 +910,7 @@ struct SettingsView: View {
 
         panel.begin { response in
             guard response == .OK, let url = panel.url else { return }
-            preferences.sessionsRoot = url
+            Task { await viewModel.updateSessionsRoot(to: url) }
         }
     }
 
@@ -421,6 +926,21 @@ struct SettingsView: View {
         panel.begin { response in
             guard response == .OK, let url = panel.url else { return }
             preferences.codexExecutableURL = url
+        }
+    }
+
+    private func selectNotesRoot() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = true
+        panel.directoryURL = preferences.notesRoot
+        panel.message = "Select the directory where session notes are stored"
+
+        panel.begin { response in
+            guard response == .OK, let url = panel.url else { return }
+            Task { await viewModel.updateNotesRoot(to: url) }
         }
     }
 
@@ -442,15 +962,1053 @@ struct SettingsView: View {
     }
 }
 
-#Preview {
-    let mockPreferences = SessionPreferencesStore()
-    return SettingsView(preferences: mockPreferences, selection: .constant(.general))
+// MARK: - Codex Settings ViewModel (inline to avoid project wiring churn)
+@MainActor
+final class CodexVM: ObservableObject {
+    enum ReasoningEffort: String, CaseIterable, Identifiable {
+        case minimal, low, medium, high
+        var id: String { rawValue }
+    }
+    enum ReasoningSummary: String, CaseIterable, Identifiable {
+        case auto, concise, detailed, none
+        var id: String { rawValue }
+    }
+    enum ModelVerbosity: String, CaseIterable, Identifiable {
+        case low, medium, high
+        var id: String { rawValue }
+    }
+    enum OtelKind: String, Identifiable {
+        case http, grpc
+        var id: String { rawValue }
+    }
+
+    // Providers
+    @Published var providers: [CodexProvider] = []
+    @Published var activeProviderId: String?
+    @Published var showProviderEditor = false
+    @Published var providerDraft: CodexProvider = .init(
+        id: "", name: nil, baseURL: nil, envKey: nil, wireAPI: nil, queryParamsRaw: nil,
+        httpHeadersRaw: nil, envHttpHeadersRaw: nil, requestMaxRetries: nil, streamMaxRetries: nil,
+        streamIdleTimeoutMs: nil, managedByCodMate: true)
+    private var editingExistingId: String? = nil
+    var editingKindIsNew: Bool { editingExistingId == nil }
+    @Published var showDeleteAlert: Bool = false
+    @Published var deleteTargetId: String? = nil
+
+    // Runtime
+    @Published var model: String = ""
+    @Published var reasoningEffort: ReasoningEffort = .medium
+    @Published var reasoningSummary: ReasoningSummary = .auto
+    @Published var modelVerbosity: ModelVerbosity = .medium
+    @Published var sandboxMode: SandboxMode = .workspaceWrite
+    @Published var approvalPolicy: ApprovalPolicy = .onRequest
+    @Published var runtimeDirty = false
+
+    // Notifications
+    @Published var tuiNotifications: Bool = false
+    @Published var systemNotifications: Bool = false
+    @Published var notifyBridgePath: String?
+    @Published var rawConfigText: String = ""
+
+    // Privacy
+    @Published var envInherit: String = "all"
+    @Published var envIgnoreDefaults: Bool = false
+    @Published var envIncludeOnly: String = ""
+    @Published var envExclude: String = ""
+    @Published var envSetPairs: String = ""
+    @Published var hideAgentReasoning: Bool = false
+    @Published var showRawAgentReasoning: Bool = false
+    @Published var fileOpener: String = "vscode"
+    // OTEL
+    @Published var otelEnabled: Bool = false
+    @Published var otelKind: OtelKind = .http
+    @Published var otelEndpoint: String = ""
+
+    @Published var lastError: String?
+
+    private let service = CodexConfigService()
+    // Preset helper
+    enum ProviderPreset { case k2, glm, deepseek }
+    @Published var providerKeyApplyURL: String? = nil
+
+    func loadAll() async {
+        await loadProviders()
+        await loadRuntime()
+        await loadNotifications()
+        await loadPrivacy()
+        await reloadRawConfig()
+    }
+
+    func loadProviders() async {
+        providers = await service.listProviders()
+        activeProviderId = await service.activeProvider()
+    }
+
+    func presentAddProvider() {
+        editingExistingId = nil
+        providerDraft = .init(
+            id: "", name: nil, baseURL: nil, envKey: nil, wireAPI: nil, queryParamsRaw: nil,
+            httpHeadersRaw: nil, envHttpHeadersRaw: nil, requestMaxRetries: nil,
+            streamMaxRetries: nil, streamIdleTimeoutMs: nil, managedByCodMate: true)
+        providerKeyApplyURL = nil
+        showProviderEditor = true
+    }
+
+    func presentAddProviderPreset(_ preset: ProviderPreset) {
+        editingExistingId = nil
+        switch preset {
+        case .k2:
+            providerDraft = .init(
+                id: "", name: "K2", baseURL: "https://api.moonshot.cn/v1", envKey: nil,
+                wireAPI: "responses", queryParamsRaw: nil, httpHeadersRaw: nil, envHttpHeadersRaw: nil,
+                requestMaxRetries: nil, streamMaxRetries: nil, streamIdleTimeoutMs: nil,
+                managedByCodMate: true)
+            providerKeyApplyURL = "https://platform.moonshot.cn/console/api-keys"
+        case .glm:
+            providerDraft = .init(
+                id: "", name: "GLM", baseURL: "https://open.bigmodel.cn/api/paas/v4/", envKey: nil,
+                wireAPI: "responses", queryParamsRaw: nil, httpHeadersRaw: nil, envHttpHeadersRaw: nil,
+                requestMaxRetries: nil, streamMaxRetries: nil, streamIdleTimeoutMs: nil,
+                managedByCodMate: true)
+            providerKeyApplyURL = "https://bigmodel.cn/usercenter/proj-mgmt/apikeys"
+        case .deepseek:
+            providerDraft = .init(
+                id: "", name: "DeepSeek", baseURL: "https://api.deepseek.com/v1", envKey: nil,
+                wireAPI: "responses", queryParamsRaw: nil, httpHeadersRaw: nil, envHttpHeadersRaw: nil,
+                requestMaxRetries: nil, streamMaxRetries: nil, streamIdleTimeoutMs: nil,
+                managedByCodMate: true)
+            providerKeyApplyURL = "https://platform.deepseek.com/api_keys"
+        }
+        showProviderEditor = true
+    }
+
+    func presentEditProvider(_ p: CodexProvider) {
+        editingExistingId = p.id
+        providerDraft = p
+        switch p.id.lowercased() {
+        case "k2": providerKeyApplyURL = "https://platform.moonshot.cn/console/api-keys"
+        case "glm": providerKeyApplyURL = "https://bigmodel.cn/usercenter/proj-mgmt/apikeys"
+        case "deepseek": providerKeyApplyURL = "https://platform.deepseek.com/api_keys"
+        default: providerKeyApplyURL = nil
+        }
+        showProviderEditor = true
+    }
+
+    func dismissEditor() { showProviderEditor = false }
+
+    func saveProviderDraft() async {
+        lastError = nil
+        do {
+            var provider = providerDraft
+            // Trim and normalize
+            func norm(_ s: String?) -> String? {
+                let t = s?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                return t.isEmpty ? nil : t
+            }
+            provider.name = norm(provider.name)
+            provider.baseURL = norm(provider.baseURL)
+            provider.envKey = norm(provider.envKey)
+            // wire_api must be one of: responses, chat. If empty → nil; if invalid → keep as-is (user intent), but presets default to responses.
+            if let w = norm(provider.wireAPI) {
+                let lw = w.lowercased()
+                provider.wireAPI = (lw == "responses" || lw == "chat") ? lw : w
+            } else {
+                provider.wireAPI = nil
+            }
+            provider.queryParamsRaw = norm(provider.queryParamsRaw)
+            provider.httpHeadersRaw = norm(provider.httpHeadersRaw)
+            provider.envHttpHeadersRaw = norm(provider.envHttpHeadersRaw)
+
+            // Basic validation: require at least a base URL or name
+            if provider.baseURL == nil && provider.name == nil {
+                lastError = "Please enter at least a Name or Base URL."
+                return
+            }
+
+            if editingKindIsNew {
+                // Determine id: prefer existing non-empty id, otherwise slugify name/base
+                let proposed = norm(provider.id) ?? provider.name ?? provider.baseURL ?? "provider"
+                let baseSlug = Self.slugify(proposed)
+                var candidate = baseSlug.isEmpty ? "provider" : baseSlug
+                var n = 2
+                while providers.contains(where: { $0.id == candidate }) {
+                    candidate = "\(baseSlug)-\(n)"
+                    n += 1
+                }
+                provider.id = candidate
+            } else {
+                provider.id = editingExistingId ?? provider.id
+            }
+            try await service.upsertProvider(provider)
+            showProviderEditor = false
+            await loadProviders()
+        } catch {
+            lastError = "Failed to save provider: \(error.localizedDescription)"
+        }
+    }
+
+    func deleteProvider(id: String) {
+        Task { [weak self] in
+            do {
+                try await self?.service.deleteProvider(id: id)
+                await self?.loadProviders()
+            } catch {
+                await MainActor.run {
+                    self?.lastError = "Delete failed: \(error.localizedDescription)"
+                }
+            }
+        }
+    }
+
+    func requestDeleteProvider(id: String) {
+        deleteTargetId = id
+        showDeleteAlert = true
+    }
+    func cancelDelete() {
+        showDeleteAlert = false
+        deleteTargetId = nil
+    }
+    func confirmDelete() async {
+        guard let id = deleteTargetId else { return }
+        deleteProvider(id: id)
+        await MainActor.run {
+            self.showDeleteAlert = false
+            self.deleteTargetId = nil
+        }
+    }
+
+    func applyActiveProvider() async {
+        do { try await service.setActiveProvider(activeProviderId) } catch {
+            lastError = "Failed to set active provider"
+        }
+    }
+
+    func deleteEditingProviderViaEditor() async {
+        guard let id = editingExistingId else { return }
+        do {
+            try await service.deleteProvider(id: id)
+            await loadProviders()
+            await MainActor.run { self.showProviderEditor = false }
+        } catch {
+            await MainActor.run { self.lastError = "Delete failed: \(error.localizedDescription)" }
+        }
+    }
+
+    // Runtime
+    func loadRuntime() async {
+        model = await service.getTopLevelString("model") ?? model
+        if let e = await service.getTopLevelString("model_reasoning_effort"),
+            let v = ReasoningEffort(rawValue: e)
+        {
+            reasoningEffort = v
+        }
+        if let s = await service.getTopLevelString("model_reasoning_summary"),
+            let v = ReasoningSummary(rawValue: s)
+        {
+            reasoningSummary = v
+        }
+        if let v = await service.getTopLevelString("model_verbosity"),
+            let mv = ModelVerbosity(rawValue: v)
+        {
+            modelVerbosity = mv
+        }
+        if let s = await service.getTopLevelString("sandbox_mode"),
+            let sm = SandboxMode(rawValue: s)
+        {
+            sandboxMode = sm
+        }
+        if let a = await service.getTopLevelString("approval_policy"),
+            let ap = ApprovalPolicy(rawValue: a)
+        {
+            approvalPolicy = ap
+        }
+    }
+
+    func applyModel() async {
+        do { try await service.setTopLevelString("model", value: model) } catch {
+            lastError = "Save failed"
+        }
+    }
+    func applyReasoning() async {
+        do {
+            try await service.setTopLevelString(
+                "model_reasoning_effort", value: reasoningEffort.rawValue)
+            try await service.setTopLevelString(
+                "model_reasoning_summary", value: reasoningSummary.rawValue)
+            try await service.setTopLevelString("model_verbosity", value: modelVerbosity.rawValue)
+        } catch { lastError = "Save failed" }
+    }
+    func applySandbox() async {
+        do { try await service.setSandboxMode(sandboxMode.rawValue) } catch {
+            lastError = "Save failed"
+        }
+    }
+    func applyApproval() async {
+        do { try await service.setApprovalPolicy(approvalPolicy.rawValue) } catch {
+            lastError = "Save failed"
+        }
+    }
+
+    // Notifications
+    func loadNotifications() async {
+        tuiNotifications = await service.getTuiNotifications()
+        let arr = await service.getNotifyArray()
+        if let bridge = arr.first {
+            systemNotifications = true
+            notifyBridgePath = bridge
+        } else {
+            systemNotifications = false
+            notifyBridgePath = nil
+        }
+    }
+    func applyTuiNotifications() async {
+        do { try await service.setTuiNotifications(tuiNotifications) } catch {
+            lastError = "Failed to save TUI notifications"
+        }
+    }
+    func applySystemNotifications() async {
+        do {
+            if systemNotifications {
+                let url = try await service.ensureNotifyBridgeInstalled()
+                notifyBridgePath = url.path
+                try await service.setNotifyArray([url.path])
+            } else {
+                notifyBridgePath = nil
+                try await service.setNotifyArray(nil)
+            }
+        } catch { lastError = "Failed to configure system notifications" }
+    }
+
+    // Privacy
+    func loadPrivacy() async {
+        _ = await service.sanitizeQuotedBooleans()
+        let p = await service.getShellEnvironmentPolicy()
+        envInherit = p.inherit ?? envInherit
+        envIgnoreDefaults = p.ignoreDefaultExcludes ?? envIgnoreDefaults
+        envIncludeOnly = (p.includeOnly ?? []).joined(separator: ", ")
+        envExclude = (p.exclude ?? []).joined(separator: ", ")
+        envSetPairs = (p.set ?? [:]).map { "\($0.key)=\($0.value)" }.sorted().joined(
+            separator: "\n")
+        hideAgentReasoning = await service.getBool("hide_agent_reasoning")
+        showRawAgentReasoning = await service.getBool("show_raw_agent_reasoning")
+        fileOpener = await service.getTopLevelString("file_opener") ?? fileOpener
+
+        let oc = await service.getOtelConfig()
+        otelEnabled = oc.exporterKind != .none
+        otelKind = (oc.exporterKind == .otlpGrpc) ? .grpc : .http
+        otelEndpoint = oc.endpoint ?? ""
+    }
+
+    func applyEnvPolicy() async {
+        var dict: [String: String] = [:]
+        for line in envSetPairs.split(separator: "\n") {
+            let s = String(line)
+            guard let eq = s.firstIndex(of: "=") else { continue }
+            let k = String(s[..<eq]).trimmingCharacters(in: .whitespaces)
+            let v = String(s[s.index(after: eq)...]).trimmingCharacters(in: .whitespaces)
+            if !k.isEmpty { dict[k] = v }
+        }
+        let policy = CodexConfigService.ShellEnvironmentPolicy(
+            inherit: envInherit,
+            ignoreDefaultExcludes: envIgnoreDefaults,
+            includeOnly: tokens(envIncludeOnly),
+            exclude: tokens(envExclude),
+            set: dict.isEmpty ? nil : dict
+        )
+        do { try await service.setShellEnvironmentPolicy(policy) } catch {
+            lastError = "Failed to save env policy"
+        }
+    }
+    func applyHideReasoning() async {
+        do { try await service.setBool("hide_agent_reasoning", hideAgentReasoning) } catch {
+            lastError = "Failed"
+        }
+    }
+    func applyShowRawReasoning() async {
+        do { try await service.setBool("show_raw_agent_reasoning", showRawAgentReasoning) } catch {
+            lastError = "Failed"
+        }
+    }
+    func applyFileOpener() async {
+        do { try await service.setFileOpener(fileOpener) } catch { lastError = "Failed" }
+    }
+    func applyOtel() async {
+        let kind: CodexConfigService.OtelExporterKind =
+            otelEnabled ? (otelKind == .grpc ? .otlpGrpc : .otlpHttp) : .none
+        let cfg = CodexConfigService.OtelConfig(
+            environment: nil, exporterKind: kind, endpoint: otelEndpoint)
+        do { try await service.setOtelConfig(cfg) } catch { lastError = "Failed to save OTEL" }
+    }
+
+    private func tokens(_ s: String) -> [String]? {
+        let arr = s.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter {
+            !$0.isEmpty
+        }
+        return arr.isEmpty ? nil : arr
+    }
+    // Raw config helpers
+    func reloadRawConfig() async { rawConfigText = await service.readRawConfigText() }
+    func openConfigInEditor() {
+        Task { @MainActor in
+            let url = await service.configFileURL()
+            NSWorkspace.shared.open(url)
+        }
+    }
+    private static func slugify(_ s: String) -> String {
+        let lower = s.lowercased()
+        let mapped = lower.map { c -> Character in
+            if c.isLetter || c.isNumber { return c }
+            return "-"
+        }
+        var collapsed: [Character] = []
+        var lastDash = false
+        for ch in mapped {
+            if ch == "-" {
+                if !lastDash {
+                    collapsed.append(ch)
+                    lastDash = true
+                }
+            } else {
+                collapsed.append(ch)
+                lastDash = false
+            }
+        }
+        while collapsed.first == "-" { collapsed.removeFirst() }
+        while collapsed.last == "-" { collapsed.removeLast() }
+        let s2 = String(collapsed)
+        return s2.isEmpty ? "provider" : s2
+    }
 }
 
-#Preview("With Custom Paths") {
-    let mockPreferences = SessionPreferencesStore()
-    mockPreferences.sessionsRoot = URL(fileURLWithPath: "/Users/developer/.codex/sessions")
-    mockPreferences.codexExecutableURL = URL(fileURLWithPath: "/opt/homebrew/bin/codex")
+// MARK: - Dialectics Pane
+@available(macOS 15.0, *)
+private struct DialecticsPane: View {
+    @ObservedObject var preferences: SessionPreferencesStore
+    @StateObject private var vm = DialecticsVM()
 
-    return SettingsView(preferences: mockPreferences, selection: .constant(.command))
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                HStack(alignment: .firstTextBaseline) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Dialectics")
+                            .font(.title2)
+                            .fontWeight(.bold)
+                        Text("Deep diagnostics for sessions, providers, and environment")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                    }
+                    Spacer(minLength: 8)
+                    Button {
+                        Task { await vm.runAll(preferences: preferences) }
+                    } label: {
+                        Label("Run Diagnostics", systemImage: "stethoscope")
+                    }
+                    .buttonStyle(.bordered)
+                    Button {
+                        vm.saveReport(preferences: preferences)
+                    } label: {
+                        Label("Save Report…", systemImage: "square.and.arrow.down")
+                    }
+                    .buttonStyle(.bordered)
+                }
+
+                // App & OS
+                Group {
+                    Text("Environment").font(.headline)
+                    Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 8) {
+                        GridRow {
+                            Text("App Version").font(.subheadline)
+                            Text(vm.appVersion).frame(maxWidth: .infinity, alignment: .trailing)
+                        }
+                        GridRow {
+                            Text("Build Time").font(.subheadline)
+                            Text(vm.buildTime).frame(maxWidth: .infinity, alignment: .trailing)
+                        }
+                        GridRow {
+                            Text("macOS").font(.subheadline)
+                            Text(vm.osVersion).frame(maxWidth: .infinity, alignment: .trailing)
+                        }
+                    }
+                }
+
+                Divider()
+
+                // Sessions diagnostics
+                Group {
+                    Text("Sessions Root").font(.headline)
+                    if let s = vm.sessions {
+                        DiagnosticsReportView(result: s)
+                    } else {
+                        Text("No data yet. Click Run Diagnostics.").font(.caption).foregroundStyle(
+                            .secondary)
+                    }
+                }
+
+                Divider()
+
+                // Providers diagnostics
+                Group {
+                    Text("Providers").font(.headline)
+                    if let p = vm.providers {
+                        Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 8) {
+                            GridRow {
+                                Text("Config Path").font(.subheadline)
+                                Text(p.configPath).font(.caption).frame(
+                                    maxWidth: .infinity, alignment: .trailing)
+                            }
+                            GridRow {
+                                Text("Providers Count").font(.subheadline)
+                                Text("\(p.providers.count)").frame(
+                                    maxWidth: .infinity, alignment: .trailing)
+                            }
+                            GridRow {
+                                Text("Duplicate IDs").font(.subheadline)
+                                let d = p.duplicateIDs
+                                Text(d.isEmpty ? "(none)" : d.joined(separator: ", "))
+                                    .frame(maxWidth: .infinity, alignment: .trailing)
+                            }
+                            GridRow {
+                                Text("Stray Bodies").font(.subheadline)
+                                Text("\(p.strayManagedBodies)").frame(
+                                    maxWidth: .infinity, alignment: .trailing)
+                            }
+                        }
+                        HStack(spacing: 8) {
+                            Button {
+                                NSPasteboard.general.clearContents()
+                                NSPasteboard.general.setString(p.canonicalRegion, forType: .string)
+                            } label: {
+                                Label("Copy Canonical Region", systemImage: "doc.on.doc")
+                            }
+                            .buttonStyle(.bordered)
+                            Button {
+                                NSWorkspace.shared.open(URL(fileURLWithPath: p.configPath))
+                            } label: {
+                                Label("Open config.toml", systemImage: "square.and.pencil")
+                            }
+                            .buttonStyle(.bordered)
+                        }
+                        ScrollView {
+                            Text(
+                                p.canonicalRegion.isEmpty
+                                    ? "(no providers configured)" : p.canonicalRegion
+                            )
+                            .font(.system(.caption, design: .monospaced))
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .topLeading)
+                            .padding(8)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8).fill(
+                                    Color(nsColor: .textBackgroundColor))
+                            )
+                        }.frame(maxHeight: 220)
+                    } else {
+                        Text("No data yet. Click Run Diagnostics.").font(.caption).foregroundStyle(
+                            .secondary)
+                    }
+                }
+
+                Divider()
+
+                // CLI diagnostics
+                Group {
+                    Text("CLI & PATH").font(.headline)
+                    Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 8) {
+                        GridRow {
+                            Text("Preferred").font(.subheadline)
+                            Text(preferences.codexExecutableURL.path).font(.caption).frame(
+                                maxWidth: .infinity, alignment: .trailing)
+                        }
+                        GridRow {
+                            Text("Resolved").font(.subheadline)
+                            Text(vm.resolvedCodexPath ?? "(not found)").font(.caption).frame(
+                                maxWidth: .infinity, alignment: .trailing)
+                        }
+                        GridRow {
+                            Text("PATH").font(.subheadline)
+                            Text(vm.pathEnv).font(.caption).lineLimit(2).truncationMode(.middle)
+                                .frame(maxWidth: .infinity, alignment: .trailing)
+                        }
+                    }
+                }
+            }
+        }
+        .task { await vm.runAll(preferences: preferences) }
+    }
+}
+
+@available(macOS 15.0, *)
+private final class DialecticsVM: ObservableObject {
+    @Published var sessions: SessionsDiagnostics? = nil
+    @Published var providers: CodexConfigService.ProviderDiagnostics? = nil
+    @Published var resolvedCodexPath: String? = nil
+    @Published var pathEnv: String = ProcessInfo.processInfo.environment["PATH"] ?? ""
+
+    private let sessionsSvc = SessionsDiagnosticsService()
+    private let configSvc = CodexConfigService()
+    private let actions = SessionActions()
+
+    func runAll(preferences: SessionPreferencesStore) async {
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        let defRoot = await SessionPreferencesStore.defaultSessionsRoot(for: home)
+        let s = await sessionsSvc.run(currentRoot: preferences.sessionsRoot, defaultRoot: defRoot)
+        let p = await configSvc.diagnoseProviders()
+        let resolved = await actions.resolveExecutableURL(
+            preferred: preferences.codexExecutableURL)?.path
+        await MainActor.run {
+            self.sessions = s
+            self.providers = p
+            self.resolvedCodexPath = resolved
+            self.pathEnv = ProcessInfo.processInfo.environment["PATH"] ?? ""
+        }
+    }
+
+    var appVersion: String {
+        let info = Bundle.main.infoDictionary
+        let version = info?["CFBundleShortVersionString"] as? String ?? "—"
+        let build = info?["CFBundleVersion"] as? String ?? "—"
+        return "\(version) (\(build))"
+    }
+    var buildTime: String {
+        guard let exe = Bundle.main.executableURL,
+            let attrs = try? FileManager.default.attributesOfItem(atPath: exe.path),
+            let date = attrs[.modificationDate] as? Date
+        else { return "Unavailable" }
+        let df = DateFormatter()
+        df.dateStyle = .medium
+        df.timeStyle = .medium
+        return df.string(from: date)
+    }
+    var osVersion: String {
+        let v = ProcessInfo.processInfo.operatingSystemVersion
+        return "macOS \(v.majorVersion).\(v.minorVersion).\(v.patchVersion)"
+    }
+
+    // MARK: - Report
+    struct ProviderSummary: Codable {
+        let id: String
+        let name: String?
+        let baseURL: String?
+        let managedByCodMate: Bool
+    }
+    struct ProvidersReport: Codable {
+        let configPath: String
+        let providers: [ProviderSummary]
+        let duplicateIDs: [String]
+        let strayManagedBodies: Int
+        let headerCounts: [String: Int]
+        let canonicalRegion: String  // sanitized env_key values
+    }
+    struct CombinedReport: Codable {
+        let timestamp: Date
+        let appVersion: String
+        let buildTime: String
+        let osVersion: String
+        let sessions: SessionsDiagnostics?
+        let providers: ProvidersReport?
+        let cli: [String: String?]
+    }
+
+    func saveReport(preferences: SessionPreferencesStore) {
+        let panel = NSSavePanel()
+        panel.canCreateDirectories = true
+        panel.allowedContentTypes = [.json]
+        let df = DateFormatter()
+        df.dateFormat = "yyyyMMdd-HHmmss"
+        let now = Date()
+        panel.nameFieldStringValue = "CodMate-Diagnostics-\(df.string(from: now)).json"
+        panel.begin { resp in
+            guard resp == .OK, let url = panel.url else { return }
+            Task { @MainActor in
+                let report = self.buildReport(preferences: preferences, now: now)
+                let enc = JSONEncoder()
+                enc.outputFormatting = [.prettyPrinted, .withoutEscapingSlashes]
+                enc.dateEncodingStrategy = .iso8601
+                if let data = try? enc.encode(report) {
+                    try? data.write(to: url, options: .atomic)
+                }
+            }
+        }
+    }
+
+    @MainActor private func buildReport(preferences: SessionPreferencesStore, now: Date)
+        -> CombinedReport
+    {
+        let p = providers
+        let pr: ProvidersReport? = p.map { d in
+            let list = d.providers.map {
+                ProviderSummary(
+                    id: $0.id, name: $0.name, baseURL: $0.baseURL,
+                    managedByCodMate: $0.managedByCodMate)
+            }
+            return ProvidersReport(
+                configPath: d.configPath,
+                providers: list,
+                duplicateIDs: d.duplicateIDs,
+                strayManagedBodies: d.strayManagedBodies,
+                headerCounts: d.headerCounts,
+                canonicalRegion: sanitizeCanonicalRegion(d.canonicalRegion)
+            )
+        }
+        let cli: [String: String?] = [
+            "preferredPath": preferences.codexExecutableURL.path,
+            "resolvedPath": resolvedCodexPath,
+            "PATH": pathEnv,
+        ]
+        return CombinedReport(
+            timestamp: now,
+            appVersion: appVersion,
+            buildTime: buildTime,
+            osVersion: osVersion,
+            sessions: sessions,
+            providers: pr,
+            cli: cli
+        )
+    }
+
+    private func sanitizeCanonicalRegion(_ text: String) -> String {
+        // Redact env_key values to avoid leaking secrets
+        var out: [String] = []
+        for raw in text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init) {
+            let t = raw.trimmingCharacters(in: .whitespaces)
+            if t.hasPrefix("env_key") {
+                out.append("env_key = \"***\"")
+            } else {
+                out.append(raw)
+            }
+        }
+        return out.joined(separator: "\n")
+    }
+}
+
+// MARK: - Provider Editor
+private struct ProviderEditor: View {
+    @Binding var draft: CodexProvider
+    let isNew: Bool
+    var apiKeyApplyURL: String? = nil
+    var onCancel: () -> Void
+    var onSave: () -> Void
+    var onDelete: (() -> Void)? = nil
+    @State private var showDeleteAlert = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text(isNew ? "Add Provider" : "Edit Provider").font(.title2).fontWeight(.semibold)
+            Text("Configure a model provider compatible with OpenAI APIs.")
+                .font(.subheadline).foregroundStyle(.secondary)
+            Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 16) {
+                GridRow {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Name *").font(.subheadline).fontWeight(.medium)
+                        Text("Display name for this provider.").font(.caption).foregroundStyle(
+                            .secondary)
+                    }
+                    TextField(
+                        "OpenAI", text: Binding(get: { draft.name ?? "" }, set: { draft.name = $0 })
+                    )
+                    .frame(maxWidth: .infinity)
+                }
+                GridRow {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Base URL *").font(.subheadline).fontWeight(.medium)
+                        Text("API base URL, e.g., https://api.openai.com/v1").font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    TextField(
+                        "https://api.openai.com/v1",
+                        text: Binding(get: { draft.baseURL ?? "" }, set: { draft.baseURL = $0 })
+                    )
+                    .frame(maxWidth: .infinity)
+                }
+                GridRow {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("API Key").font(.subheadline).fontWeight(.medium)
+                        Text("Environment variable for API key (optional). Example: OPENAI_API_KEY")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    HStack(spacing: 8) {
+                        TextField(
+                            "OPENAI_API_KEY",
+                            text: Binding(get: { draft.envKey ?? "" }, set: { draft.envKey = $0 }))
+                        if let apiKeyApplyURL, let url = URL(string: apiKeyApplyURL) {
+                            Link("Get key", destination: url)
+                                .font(.caption)
+                        }
+                    }
+                }
+                GridRow {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Wire API").font(.subheadline).fontWeight(.medium)
+                        Text("Protocol: chat or responses (optional).").font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    TextField(
+                        "responses",
+                        text: Binding(get: { draft.wireAPI ?? "" }, set: { draft.wireAPI = $0 }))
+                }
+                GridRow {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("query_params").font(.subheadline).fontWeight(.medium)
+                        Text("Inline TOML. Example: { api-version = \"2025-04-01-preview\" }").font(
+                            .caption
+                        ).foregroundStyle(.secondary)
+                    }
+                    TextField(
+                        "{ api-version = \"2025-04-01-preview\" }",
+                        text: Binding(
+                            get: { draft.queryParamsRaw ?? "" }, set: { draft.queryParamsRaw = $0 })
+                    )
+                }
+                GridRow {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("http_headers").font(.subheadline).fontWeight(.medium)
+                        Text("Inline TOML map. Example: { X-Header = \"abc\" }").font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    TextField(
+                        "{ X-Header = \"abc\" }",
+                        text: Binding(
+                            get: { draft.httpHeadersRaw ?? "" }, set: { draft.httpHeadersRaw = $0 })
+                    )
+                }
+                GridRow {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("env_http_headers").font(.subheadline).fontWeight(.medium)
+                        Text("Header values from env. Example: { X-Token = \"MY_ENV\" }").font(
+                            .caption
+                        ).foregroundStyle(.secondary)
+                    }
+                    TextField(
+                        "{ X-Token = \"MY_ENV\" }",
+                        text: Binding(
+                            get: { draft.envHttpHeadersRaw ?? "" },
+                            set: { draft.envHttpHeadersRaw = $0 }))
+                }
+                GridRow {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("request_max_retries").font(.subheadline).fontWeight(.medium)
+                        Text("HTTP retry count (optional).").font(.caption).foregroundStyle(
+                            .secondary)
+                    }
+                    TextField(
+                        "4",
+                        text: Binding(
+                            get: { (draft.requestMaxRetries?.description) ?? "" },
+                            set: { draft.requestMaxRetries = Int($0) }))
+                }
+                GridRow {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("stream_max_retries").font(.subheadline).fontWeight(.medium)
+                        Text("SSE reconnect attempts (optional).").font(.caption).foregroundStyle(
+                            .secondary)
+                    }
+                    TextField(
+                        "5",
+                        text: Binding(
+                            get: { (draft.streamMaxRetries?.description) ?? "" },
+                            set: { draft.streamMaxRetries = Int($0) }))
+                }
+                GridRow {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("stream_idle_timeout_ms").font(.subheadline).fontWeight(.medium)
+                        Text("Idle timeout for streaming (optional).").font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    TextField(
+                        "300000",
+                        text: Binding(
+                            get: { (draft.streamIdleTimeoutMs?.description) ?? "" },
+                            set: { draft.streamIdleTimeoutMs = Int($0) }))
+                }
+            }
+            HStack {
+                if !isNew, onDelete != nil {
+                    Button("Delete", role: .destructive) { showDeleteAlert = true }
+                }
+                Button("Cancel", role: .cancel, action: onCancel)
+                Spacer()
+                Button("Save", action: onSave).buttonStyle(.borderedProminent)
+            }
+        }
+        .alert("Delete provider?", isPresented: $showDeleteAlert) {
+            Button("Cancel", role: .cancel) { showDeleteAlert = false }
+            Button("Delete", role: .destructive) {
+                showDeleteAlert = false
+                onDelete?()
+            }
+        } message: {
+            Text("This will remove the provider from config.toml.")
+        }
+    }
+}
+
+// MARK: - Diagnostics Section
+@available(macOS 15.0, *)
+private struct DiagnosticsSection: View {
+    @ObservedObject var preferences: SessionPreferencesStore
+    @State private var running = false
+    @State private var lastResult: SessionsDiagnostics? = nil
+    @State private var lastError: String? = nil
+    private let service = SessionsDiagnosticsService()
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Diagnostics")
+                .font(.headline)
+                .foregroundColor(.primary)
+
+            HStack(spacing: 8) {
+                Button(action: runDiagnostics) {
+                    if running { ProgressView().controlSize(.small) }
+                    Text(running ? "Diagnosing…" : "Diagnose Sessions Directory")
+                }
+                .disabled(running)
+
+                if let result = lastResult,
+                    result.current.enumeratedJsonlCount == 0,
+                    result.defaultRoot.enumeratedJsonlCount > 0,
+                    preferences.sessionsRoot.path != result.defaultRoot.path
+                {
+                    Button("Switch to Default Path") {
+                        preferences.sessionsRoot = URL(
+                            fileURLWithPath: result.defaultRoot.path, isDirectory: true)
+                    }
+                }
+
+                if lastResult != nil {
+                    Button("Save Report…", action: saveReport)
+                }
+            }
+
+            if let error = lastError { Text(error).foregroundStyle(.red).font(.caption) }
+
+            if let result = lastResult {
+                DiagnosticsReportView(result: result)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(8)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(Color(nsColor: .textBackgroundColor))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .stroke(Color.secondary.opacity(0.2), lineWidth: 1)
+                            )
+                    )
+            }
+        }
+    }
+
+    private func runDiagnostics() {
+        running = true
+        lastError = nil
+        lastResult = nil
+        let current = preferences.sessionsRoot
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        let def = SessionPreferencesStore.defaultSessionsRoot(for: home)
+        Task {
+            let res = await service.run(currentRoot: current, defaultRoot: def)
+            await MainActor.run {
+                self.lastResult = res
+                self.running = false
+            }
+        }
+    }
+
+    private func saveReport() {
+        guard let result = lastResult else { return }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .withoutEscapingSlashes]
+        encoder.dateEncodingStrategy = .iso8601
+        do {
+            let data = try encoder.encode(result)
+            let panel = NSSavePanel()
+            panel.canCreateDirectories = true
+            panel.allowedContentTypes = [.json]
+            let df = DateFormatter()
+            df.dateFormat = "yyyyMMdd-HHmmss"
+            let ts = df.string(from: result.timestamp)
+            panel.nameFieldStringValue = "CodMate-Sessions-Diagnostics-\(ts).json"
+            panel.begin { resp in
+                if resp == .OK, let url = panel.url {
+                    do { try data.write(to: url, options: .atomic) } catch {
+                        self.lastError = "Failed to save report: \(error.localizedDescription)"
+                    }
+                }
+            }
+        } catch {
+            self.lastError = "Failed to prepare report: \(error.localizedDescription)"
+        }
+    }
+}
+
+@available(macOS 15.0, *)
+private struct DiagnosticsReportView: View {
+    let result: SessionsDiagnostics
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Timestamp: \(formatDate(result.timestamp))").font(.caption)
+            let same = result.current.path == result.defaultRoot.path
+            Group {
+                Text(same ? "Sessions Root (= Default)" : "Current Root")
+                    .font(.subheadline).bold()
+                DiagnosticsProbeView(p: result.current)
+            }
+            if !same {
+                Group {
+                    Text("Default Root").font(.subheadline).bold().padding(.top, 4)
+                    DiagnosticsProbeView(p: result.defaultRoot)
+                }
+            }
+
+            if !result.suggestions.isEmpty {
+                Text("Suggestions").font(.subheadline).bold().padding(.top, 4)
+                ForEach(result.suggestions, id: \.self) { s in
+                    Text("• \(s)").font(.caption)
+                }
+            }
+        }
+    }
+
+    private func formatDate(_ d: Date) -> String {
+        let df = DateFormatter()
+        df.dateStyle = .medium
+        df.timeStyle = .medium
+        return df.string(from: d)
+    }
+}
+
+@available(macOS 15.0, *)
+private struct DiagnosticsProbeView: View {
+    let p: SessionsDiagnostics.Probe
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Path: \(p.path)").font(.caption)
+            Text("Exists: \(p.exists ? "yes" : "no")").font(.caption)
+            Text("Directory: \(p.isDirectory ? "yes" : "no")").font(.caption)
+            Text(".jsonl files: \(p.enumeratedJsonlCount)").font(.caption)
+            if !p.sampleFiles.isEmpty {
+                Text("Samples:").font(.caption)
+                ForEach(p.sampleFiles.prefix(5), id: \.self) { s in
+                    Text("• \(s)").font(.caption2)
+                }
+                if p.sampleFiles.count > 5 {
+                    Text("(\(p.sampleFiles.count - 5) more…)").font(.caption2).foregroundStyle(
+                        .secondary)
+                }
+            }
+            if let err = p.enumeratorError {
+                Text("Enumerator Error: \(err)").font(.caption).foregroundStyle(.red)
+            }
+        }
+    }
+}
+@available(macOS 15.0, *)
+struct SettingsView_Previews: PreviewProvider {
+    static var previews: some View {
+        let prefs = SessionPreferencesStore()
+        let vm = SessionListViewModel(preferences: prefs)
+        return SettingsView(preferences: prefs, selection: .constant(.general))
+            .environmentObject(vm)
+    }
 }

@@ -1,0 +1,46 @@
+#!/bin/zsh
+# Lightweight bridge to surface Codex `notify` events as macOS notifications.
+# Usage: codemate-notify '<JSON>'
+
+set -euo pipefail
+
+payload_json=${1:-""}
+if [[ -z "$payload_json" ]]; then
+  exit 0
+fi
+
+# Extract fields with Python (available by default on macOS with Xcode tools)
+python3 - "$payload_json" << 'PY' | while IFS=$'\t' read -r title message group_id; do
+import json, sys
+raw = sys.argv[1]
+try:
+    data = json.loads(raw)
+except Exception:
+    # fallback: raw passthrough
+    print("Codex", raw[:180], "codex-generic", sep='\t')
+    sys.exit(0)
+
+typ = data.get("type", "")
+if typ != "agent-turn-complete":
+    # ignore other types for now
+    sys.exit(0)
+
+assistant = data.get("last-assistant-message") or "Codex turn complete"
+inputs = data.get("input-messages") or []
+msg = assistant
+if not assistant and inputs:
+    msg = " ".join(str(x) for x in inputs)
+
+thread_id = data.get("thread-id", "codex-thread")
+print("Codex", msg[:240], f"codex-{thread_id}", sep='\t')
+PY
+  if command -v terminal-notifier >/dev/null 2>&1; then
+    terminal-notifier -title "$title" -message "$message" -group "$group_id" -ignoreDnD -sender "ai.codemate.app" || true
+  else
+    # Fallback to osascript (less capable, but ubiquitous)
+    /usr/bin/osascript <<OSA || true
+display notification $(printf %q "$message") with title $(printf %q "$title")
+OSA
+  fi
+done
+

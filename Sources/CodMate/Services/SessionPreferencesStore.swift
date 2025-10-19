@@ -8,6 +8,10 @@ final class SessionPreferencesStore: ObservableObject {
         didSet { persist() }
     }
 
+    @Published var notesRoot: URL {
+        didSet { persist() }
+    }
+
     @Published var codexExecutableURL: URL {
         didSet { persist() }
     }
@@ -15,6 +19,7 @@ final class SessionPreferencesStore: ObservableObject {
     private let defaults: UserDefaults
     private struct Keys {
         static let sessionsRootPath = "codex.sessions.rootPath"
+        static let notesRootPath = "codex.notes.rootPath"
         static let executablePath = "codex.sessions.executablePath"
         static let resumeUseEmbedded = "codex.resume.useEmbedded"
         static let resumeCopyClipboard = "codex.resume.copyClipboard"
@@ -32,17 +37,49 @@ final class SessionPreferencesStore: ObservableObject {
         self.defaults = defaults
         let homeURL = fileManager.homeDirectoryForCurrentUser
 
-        if let storedRoot = defaults.string(forKey: Keys.sessionsRootPath) {
-            self.sessionsRoot = URL(fileURLWithPath: storedRoot, isDirectory: true)
-        } else {
-            self.sessionsRoot = SessionPreferencesStore.defaultSessionsRoot(for: homeURL)
-        }
+        // Resolve sessions root without touching self
+        let resolvedSessionsRoot: URL = {
+            if let storedRoot = defaults.string(forKey: Keys.sessionsRootPath) {
+                let url = URL(fileURLWithPath: storedRoot, isDirectory: true)
+                if fileManager.fileExists(atPath: url.path) {
+                    return url
+                } else {
+                    defaults.removeObject(forKey: Keys.sessionsRootPath)
+                }
+            }
+            return SessionPreferencesStore.defaultSessionsRoot(for: homeURL)
+        }()
 
-        if let storedExec = defaults.string(forKey: Keys.executablePath) {
-            self.codexExecutableURL = URL(fileURLWithPath: storedExec)
-        } else {
-            self.codexExecutableURL = SessionPreferencesStore.defaultExecutableURL()
-        }
+        // Resolve notes root (prefer stored path; else sibling of sessions root)
+        let resolvedNotesRoot: URL = {
+            if let storedNotes = defaults.string(forKey: Keys.notesRootPath) {
+                let url = URL(fileURLWithPath: storedNotes, isDirectory: true)
+                if fileManager.fileExists(atPath: url.path) {
+                    return url
+                } else {
+                    defaults.removeObject(forKey: Keys.notesRootPath)
+                }
+            }
+            return SessionPreferencesStore.defaultNotesRoot(for: resolvedSessionsRoot)
+        }()
+
+        // Resolve executable path
+        let resolvedExec: URL = {
+            if let storedExec = defaults.string(forKey: Keys.executablePath) {
+                let url = URL(fileURLWithPath: storedExec)
+                if fileManager.isExecutableFile(atPath: url.path) {
+                    return url
+                } else {
+                    defaults.removeObject(forKey: Keys.executablePath)
+                }
+            }
+            return SessionPreferencesStore.defaultExecutableURL()
+        }()
+
+        // Assign after all are computed to avoid using self before init completes
+        self.sessionsRoot = resolvedSessionsRoot
+        self.notesRoot = resolvedNotesRoot
+        self.codexExecutableURL = resolvedExec
         // Resume defaults
         self.defaultResumeUseEmbeddedTerminal =
             defaults.object(forKey: Keys.resumeUseEmbedded) as? Bool ?? true
@@ -51,14 +88,16 @@ final class SessionPreferencesStore: ObservableObject {
         let appRaw = defaults.string(forKey: Keys.resumeExternalApp) ?? TerminalApp.terminal.rawValue
         self.defaultResumeExternalApp = TerminalApp(rawValue: appRaw) ?? .terminal
 
-        // CLI policy defaults
-        if let s = defaults.string(forKey: Keys.resumeSandboxMode), let val = SandboxMode(rawValue: s) {
+        // CLI policy defaults (with legacy value coercion)
+        if let s = defaults.string(forKey: Keys.resumeSandboxMode), let val = SessionPreferencesStore.coerceSandboxMode(s) {
             self.defaultResumeSandboxMode = val
+            if val.rawValue != s { defaults.set(val.rawValue, forKey: Keys.resumeSandboxMode) }
         } else {
             self.defaultResumeSandboxMode = .workspaceWrite
         }
-        if let a = defaults.string(forKey: Keys.resumeApprovalPolicy), let val = ApprovalPolicy(rawValue: a) {
+        if let a = defaults.string(forKey: Keys.resumeApprovalPolicy), let val = SessionPreferencesStore.coerceApprovalPolicy(a) {
             self.defaultResumeApprovalPolicy = val
+            if val.rawValue != a { defaults.set(val.rawValue, forKey: Keys.resumeApprovalPolicy) }
         } else {
             self.defaultResumeApprovalPolicy = .onRequest
         }
@@ -68,6 +107,7 @@ final class SessionPreferencesStore: ObservableObject {
 
     private func persist() {
         defaults.set(sessionsRoot.path, forKey: Keys.sessionsRootPath)
+        defaults.set(notesRoot.path, forKey: Keys.notesRootPath)
         defaults.set(codexExecutableURL.path, forKey: Keys.executablePath)
     }
 
@@ -81,8 +121,34 @@ final class SessionPreferencesStore: ObservableObject {
             .appendingPathComponent("sessions", isDirectory: true)
     }
 
+    static func defaultNotesRoot(for sessionsRoot: URL) -> URL {
+        sessionsRoot.deletingLastPathComponent().appendingPathComponent("notes", isDirectory: true)
+    }
+
     static func defaultExecutableURL() -> URL {
         URL(fileURLWithPath: "/usr/local/bin/codex")
+    }
+
+    // MARK: - Legacy coercion helpers
+    private static func coerceSandboxMode(_ raw: String) -> SandboxMode? {
+        let v = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if let exact = SandboxMode(rawValue: v) { return exact }
+        switch v {
+        case "full": return SandboxMode.dangerFullAccess
+        case "rw", "write": return SandboxMode.workspaceWrite
+        case "ro", "read": return SandboxMode.readOnly
+        default: return nil
+        }
+    }
+
+    private static func coerceApprovalPolicy(_ raw: String) -> ApprovalPolicy? {
+        let v = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if let exact = ApprovalPolicy(rawValue: v) { return exact }
+        switch v {
+        case "auto": return ApprovalPolicy.onRequest
+        case "fail", "onfail": return ApprovalPolicy.onFailure
+        default: return nil
+        }
     }
 
     // MARK: - Resume Preferences
