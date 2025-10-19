@@ -98,6 +98,16 @@ struct SessionActions {
         return "'" + path.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 
+    private func shellQuoteIfNeeded(_ s: String) -> String {
+        // Only quote when the string contains whitespace or shell‑sensitive characters.
+        // Keep it readable (e.g., codex stays unquoted).
+        let unsafe: Set<Character> = Set(" \t\n\r\"'`$&|;<>*?()[]{}\\")
+        if s.contains(where: { unsafe.contains($0) }) {
+            return shellEscapedPath(s)
+        }
+        return s
+    }
+
     private func flags(from options: ResumeOptions) -> [String] {
         // Highest precedence: dangerously bypass
         if options.dangerouslyBypass { return ["--dangerously-bypass-approvals-and-sandbox"] }
@@ -111,7 +121,7 @@ struct SessionActions {
     }
 
     func buildResumeCLIInvocation(session: SessionSummary, executablePath: String, options: ResumeOptions) -> String {
-        let exe = shellEscapedPath(executablePath)
+        let exe = shellQuoteIfNeeded(executablePath)
         let base = "\(exe) resume \(session.id)"
         let f = flags(from: options).joined(separator: " ")
         return f.isEmpty ? base : base + " " + f
@@ -144,9 +154,9 @@ struct SessionActions {
             ? session.cwd : session.fileURL.deletingLastPathComponent().path
         let cd = "cd " + shellEscapedPath(cwd)
         let injectedPATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:${PATH}"
-        let execPath = resolveExecutableURL(preferred: executableURL)?.path
-            ?? executableURL.path
-        // Embedded terminal path: keep environment exports for robustness
+        // Use bare 'codex' for embedded terminal to respect user's PATH resolution
+        let execPath = "codex"
+        // Embedded terminal: keep environment exports for robustness
         let exports = "export LANG=zh_CN.UTF-8; export LC_ALL=zh_CN.UTF-8; export LC_CTYPE=zh_CN.UTF-8; export TERM=xterm-256color"
         let invocation = buildResumeCLIInvocation(session: session, executablePath: execPath, options: options)
         let resume = "PATH=\(injectedPATH) \(invocation)"

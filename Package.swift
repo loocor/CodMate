@@ -1,12 +1,10 @@
-// swift-tools-version: 5.9
+// swift-tools-version: 6.0
 
 import PackageDescription
 
 let package = Package(
     name: "CodMate",
-    platforms: [
-        .macOS(.v14)
-    ],
+    platforms: [.macOS(.v15)],
     products: [
         .executable(
             name: "CodMate",
