@@ -132,10 +132,24 @@ enum SessionSortOrder: String, CaseIterable, Identifiable {
         case .longestDuration:
             return sessions.sorted { $0.duration > $1.duration }
         case .mostActivity:
-            return sessions.sorted { $0.eventCount > $1.eventCount }
+            return sessions.sorted {
+                if $0.eventCount != $1.eventCount { return $0.eventCount > $1.eventCount }
+                let l0 = $0.lastUpdatedAt ?? $0.startedAt
+                let l1 = $1.lastUpdatedAt ?? $1.startedAt
+                if l0 != l1 { return l0 > l1 }
+                return $0.effectiveTitle
+                    .localizedCaseInsensitiveCompare($1.effectiveTitle) == .orderedAscending
+            }
         case .alphabetical:
             return sessions.sorted {
-                $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
+                let cmp = $0.effectiveTitle.localizedStandardCompare($1.effectiveTitle)
+                if cmp == .orderedSame {
+                    let l0 = $0.lastUpdatedAt ?? $0.startedAt
+                    let l1 = $1.lastUpdatedAt ?? $1.startedAt
+                    if l0 != l1 { return l0 > l1 }
+                    return $0.id < $1.id
+                }
+                return cmp == .orderedAscending
             }
         case .largestSize:
             return sessions.sorted { ($0.fileSizeBytes ?? 0) > ($1.fileSizeBytes ?? 0) }
