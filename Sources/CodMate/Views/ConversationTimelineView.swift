@@ -245,24 +245,27 @@ private struct EventSegmentView: View {
     }
 
     private var roleTitle: String {
+        if isAgentReasoning { return "Reasoning" }
         switch event.actor {
         case .user: return "User"
         case .assistant: return "Codex"
         case .tool: return "Tool"
-        case .info: return "Info"
+        case .info: return "Syncing"
         }
     }
 
     private var roleIcon: String {
+        if isAgentReasoning { return "brain" }
         switch event.actor {
         case .user: return "person.fill"
         case .assistant: return "sparkles"
         case .tool: return "hammer.fill"
-        case .info: return "info.circle.fill"
+        case .info: return "arrow.triangle.2.circlepath"
         }
     }
 
     private var roleColor: Color {
+        if isAgentReasoning { return .purple }
         switch event.actor {
         case .user: return .accentColor
         case .assistant: return .blue
