@@ -285,9 +285,16 @@ struct ProjectEditorSheet: View {
                                 Text("Overview")
                                     .font(.subheadline)
                                     .frame(width: labelColWidth, alignment: .trailing)
-                                TextField("Short description", text: $overview, axis: .vertical)
-                                    .textFieldStyle(.roundedBorder)
-                                    .frame(width: fieldColWidth, alignment: .leading)
+                                VStack(alignment: .leading, spacing: 6) {
+                                    TextEditor(text: $overview)
+                                        .font(.body)
+                                        .frame(minHeight: 88, maxHeight: 120)
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 6)
+                                                .stroke(Color.secondary.opacity(0.2))
+                                        )
+                                }
+                                .frame(width: fieldColWidth, alignment: .leading)
                             }
                         }
                     }
