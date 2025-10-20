@@ -52,6 +52,7 @@ struct SessionListColumnView: View {
                                     awaitingFollowup: isAwaitingFollowup?(session) ?? false
                                 )
                                 .tag(session.id)
+                                .onDrag { NSItemProvider(object: session.id as NSString) }
                                 .listRowInsets(EdgeInsets())
                                 .contextMenu {
                                     Button {

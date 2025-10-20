@@ -213,6 +213,71 @@ struct SessionActions {
         pb.setString(commands, forType: .string)
     }
 
+    // MARK: - Project-level new session helpers
+    private func buildNewProjectArguments(project: Project, options: ResumeOptions) -> [String] {
+        var args: [String] = []
+        // Prefer profile when provided
+        if let profile = project.profileId, !profile.isEmpty { args += ["--profile", profile] }
+        args += flags(from: options)
+        return args
+    }
+
+    func buildNewProjectCLIInvocation(project: Project, options: ResumeOptions) -> String {
+        let exe = "codex"
+        let args = buildNewProjectArguments(project: project, options: options).map { arg -> String in
+            if arg.contains(where: { $0.isWhitespace || $0 == "'" }) { return shellEscapedPath(arg) }
+            return arg
+        }
+        return ([exe] + args).joined(separator: " ")
+    }
+
+    func buildNewProjectCommandLines(project: Project, executableURL: URL, options: ResumeOptions) -> String {
+        _ = executableURL
+        let cd = "cd " + shellEscapedPath(project.directory)
+        let injectedPATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:${PATH}"
+        let exports = "export LANG=zh_CN.UTF-8; export LC_ALL=zh_CN.UTF-8; export LC_CTYPE=zh_CN.UTF-8; export TERM=xterm-256color"
+        let invocation = buildNewProjectCLIInvocation(project: project, options: options)
+        let command = "PATH=\(injectedPATH) \(invocation)"
+        return cd + "\n" + exports + "\n" + command + "\n"
+    }
+
+    func buildExternalNewProjectCommands(project: Project, executableURL: URL, options: ResumeOptions) -> String {
+        _ = executableURL
+        let cd = "cd " + shellEscapedPath(project.directory)
+        let cmd = buildNewProjectCLIInvocation(project: project, options: options)
+        return cd + "\n" + cmd + "\n"
+    }
+
+    func copyNewProjectCommands(project: Project, executableURL: URL, options: ResumeOptions, simplifiedForExternal: Bool = true) {
+        let commands = simplifiedForExternal
+            ? buildExternalNewProjectCommands(project: project, executableURL: executableURL, options: options)
+            : buildNewProjectCommandLines(project: project, executableURL: executableURL, options: options)
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.setString(commands, forType: .string)
+    }
+
+    @discardableResult
+    func openNewProject(project: Project, executableURL: URL, options: ResumeOptions) -> Bool {
+        let scriptText = {
+            let lines = buildNewProjectCommandLines(project: project, executableURL: executableURL, options: options)
+                .replacingOccurrences(of: "\n", with: "; ")
+            return """
+            tell application "Terminal"
+              activate
+              do script "\(lines)"
+            end tell
+            """
+        }()
+
+        if let script = NSAppleScript(source: scriptText) {
+            var errorDict: NSDictionary?
+            script.executeAndReturnError(&errorDict)
+            return errorDict == nil
+        }
+        return false
+    }
+
     func copyRealResumeInvocation(session: SessionSummary, executableURL: URL, options: ResumeOptions) {
         let execPath = resolveExecutableURL(preferred: executableURL)?.path ?? executableURL.path
         let cmd = buildResumeCLIInvocation(session: session, executablePath: execPath, options: options)

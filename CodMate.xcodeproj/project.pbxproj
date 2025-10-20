@@ -45,7 +45,9 @@
 		31B6267B2EA28000008CA40F /* SettingCategory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31B6267C2EA28000008CA40F /* SettingCategory.swift */; };
 		41A001052B00000200000001 /* EnvironmentContextInfo.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41A001042B00000200000001 /* EnvironmentContextInfo.swift */; };
         41A001072B00000300000001 /* DirectoryMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41A001052B00000300000001 /* DirectoryMonitor.swift */; };
-        41A0010D2B00000900000001 /* CodexConfigService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41A0010C2B00000900000001 /* CodexConfigService.swift */; };
+		41A0010D2B00000900000001 /* CodexConfigService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41A0010C2B00000900000001 /* CodexConfigService.swift */; };
+        41A001112B10000B00000002 /* Project.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41A001112B10000B00000001 /* Project.swift */; };
+        41A001132B10000C00000002 /* ProjectsListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41A001132B10000C00000001 /* ProjectsListView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -78,6 +80,8 @@
 		311247A32EA3A51D00D8D33E /* ExecutionPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/CodMate/Models/ExecutionPolicy.swift; sourceTree = SOURCE_ROOT; };
 		311247A92EA3BBCE00D8D33E /* SessionNotesStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SessionNotesStore.swift; path = Sources/CodMate/Services/SessionNotesStore.swift; sourceTree = SOURCE_ROOT; };
 		311247AB2EA3BBED00D8D33E /* EditSessionMetaView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = EditSessionMetaView.swift; path = Sources/CodMate/Views/EditSessionMetaView.swift; sourceTree = SOURCE_ROOT; };
+        41A001112B10000B00000001 /* Project.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = Project.swift; path = Sources/CodMate/Models/Project.swift; sourceTree = SOURCE_ROOT; };
+        41A001132B10000C00000001 /* ProjectsListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ProjectsListView.swift; path = Sources/CodMate/Views/ProjectsListView.swift; sourceTree = SOURCE_ROOT; };
 		31B6266F2EA24A22008CA40F /* TerminalApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = TerminalApp.swift; path = Sources/CodMate/Models/TerminalApp.swift; sourceTree = SOURCE_ROOT; };
 		31B626712EA24A9E008CA40F /* EmbeddedTerminalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = EmbeddedTerminalView.swift; path = Sources/CodMate/Views/EmbeddedTerminalView.swift; sourceTree = SOURCE_ROOT; };
 		31B626732EA24E3B008CA40F /* SystemNotifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SystemNotifier.swift; path = Sources/CodMate/Services/SystemNotifier.swift; sourceTree = SOURCE_ROOT; };
@@ -163,6 +167,7 @@
 				1A0001282A00000100000001 /* SessionLoadScope.swift */,
 				31B6266F2EA24A22008CA40F /* TerminalApp.swift */,
 				31B6267C2EA28000008CA40F /* SettingCategory.swift */,
+                41A001112B10000B00000001 /* Project.swift */,
 			);
 			name = Models;
 			sourceTree = SOURCE_ROOT;
@@ -200,6 +205,7 @@
 				31B626772EA26BEE008CA40F /* TerminalHostView.swift */,
 				311247A12EA38F7600D8D33E /* WindowConfigurator.swift */,
 				311247AB2EA3BBED00D8D33E /* EditSessionMetaView.swift */,
+                41A001132B10000C00000001 /* ProjectsListView.swift */,
 			);
 			name = Views;
 			sourceTree = SOURCE_ROOT;
@@ -308,6 +314,8 @@
                 311247AC2EA3BBED00D8D33E /* EditSessionMetaView.swift in Sources */,
                 41A0010D2B00000900000001 /* CodexConfigService.swift in Sources */,
                 41A0010E2B00000A00000001 /* SessionsDiagnosticsService.swift in Sources */,
+                41A001112B10000B00000002 /* Project.swift in Sources */,
+                41A001132B10000C00000002 /* ProjectsListView.swift in Sources */,
             );
 			runOnlyForDeploymentPostprocessing = 0;
 		};
