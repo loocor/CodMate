@@ -75,6 +75,18 @@ final class SessionListViewModel: ObservableObject {
     @Published private(set) var activeUpdatingIDs: Set<String> = []
     @Published private(set) var awaitingFollowupIDs: Set<String> = []
 
+    // Auto-assign: pending intents created when user clicks New
+    struct PendingAssignIntent: Identifiable, Sendable, Hashable {
+        let id = UUID()
+        let projectId: String
+        let expectedCwd: String // canonical path
+        let t0: Date
+        struct Hints: Sendable, Hashable { var model: String?; var sandbox: String?; var approval: String? }
+        let hints: Hints
+    }
+    private var pendingAssignIntents: [PendingAssignIntent] = []
+    private var intentsCleanupTask: Task<Void, Never>?
+
     // Projects
     private let configService = CodexConfigService()
     private let projectsStore = ProjectsStore()
@@ -119,6 +131,7 @@ final class SessionListViewModel: ObservableObject {
             }
         }
         startActivityPruneTicker()
+        startIntentsCleanupTicker()
     }
 
     // Immediate apply from UI (e.g., pressing Return in search field)
@@ -146,6 +159,7 @@ final class SessionListViewModel: ObservableObject {
             var sessions = try await indexer.refreshSessions(
                 root: preferences.sessionsRoot, scope: scope)
             guard token == activeRefreshToken else { return }
+            let previousIDs = Set(allSessions.map { $0.id })
             let notes = await notesStore.all()
             notesSnapshot = notes
             // Refresh projects/memberships snapshot and import legacy mappings if needed
@@ -154,11 +168,20 @@ final class SessionListViewModel: ObservableObject {
                 await self.importMembershipsFromNotesIfNeeded(notes: notes)
             }
             apply(notes: notes, to: &sessions)
+            // Auto-assign on newly appeared sessions matched with pending intents
+            let newlyAppeared = sessions.filter { !previousIDs.contains($0.id) }
+            if !newlyAppeared.isEmpty {
+                for s in newlyAppeared { self.handleAutoAssignIfMatches(s) }
+            }
             registerActivityHeartbeat(previous: allSessions, current: sessions)
             allSessions = sessions
             rebuildCanonicalCwdCache()
             await computeCalendarCaches()
             applyFilters()
+            // Auto Title/Overview for newly appeared sessions without user notes
+            if !newlyAppeared.isEmpty {
+                for s in newlyAppeared { await self.tryAutoNote(for: s) }
+            }
             startBackgroundEnrichment()
             currentMonthDimension = dateDimension
             currentMonthKey = monthKey(for: selectedDay, dimension: dateDimension)
@@ -198,6 +221,16 @@ final class SessionListViewModel: ObservableObject {
             while !(Task.isCancelled) {
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
                 await MainActor.run { self?.recomputeActiveUpdatingIDs() }
+            }
+        }
+    }
+
+    private func startIntentsCleanupTicker() {
+        intentsCleanupTask?.cancel()
+        intentsCleanupTask = Task { [weak self] in
+            while !(Task.isCancelled) {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                await MainActor.run { self?.pruneExpiredIntents() }
             }
         }
     }
@@ -312,6 +345,8 @@ final class SessionListViewModel: ObservableObject {
         // Respect preferred external app setting
         let app = preferences.defaultResumeExternalApp
         let dirOpt = project.directory
+        // Record auto-assign intent for project-level new
+        recordIntentForProjectNew(project: project)
         switch app {
         case .iterm2:
             let cmd = buildNewProjectCLIInvocation(project: project)
@@ -708,12 +743,20 @@ final class SessionListViewModel: ObservableObject {
     private func startBackgroundEnrichment() {
         enrichmentTask?.cancel()
         guard let cacheKey = dayCacheKey(for: selectedDay) else {
+            // Should not happen; we now return a synthetic key even when day is nil
             isEnriching = false
             enrichmentProgress = 0
             enrichmentTotal = 0
             return
         }
-        let sessions = sessionsForCurrentDay()
+
+        // When a day is selected, enrich that day's sessions; otherwise enrich currently displayed ones
+        let sessions: [SessionSummary]
+        if selectedDay != nil {
+            sessions = sessionsForCurrentDay()
+        } else {
+            sessions = sections.flatMap { $0.sessions }
+        }
         let currentIDs = Set(sessions.map(\.id))
         if let cached = enrichmentSnapshots[cacheKey], cached == currentIDs {
             isEnriching = false
@@ -801,7 +844,7 @@ final class SessionListViewModel: ObservableObject {
                     self.isEnriching = false
                     self.enrichmentProgress = 0
                     self.enrichmentTotal = 0
-                    self.enrichmentSnapshots[cacheKey] = currentIDs
+                        self.enrichmentSnapshots[cacheKey] = currentIDs
                 }
             }
         }
@@ -896,19 +939,17 @@ final class SessionListViewModel: ObservableObject {
     }
 
     private func dayCacheKey(for day: Date?) -> String? {
-        guard let day else { return nil }
-        let calendar = Calendar.current
-        let comps = calendar.dateComponents([.year, .month, .day], from: day)
-        guard let year = comps.year, let month = comps.month, let dayComponent = comps.day else {
-            return nil
+        let pathKey: String = selectedPath.map(Self.canonicalPath) ?? "*"
+        if let day {
+            let calendar = Calendar.current
+            let comps = calendar.dateComponents([.year, .month, .day], from: day)
+            guard let year = comps.year, let month = comps.month, let dayComponent = comps.day else {
+                return nil
+            }
+            return "\(dateDimension.rawValue)|\(year)-\(month)-\(dayComponent)|\(pathKey)"
         }
-        let pathKey: String
-        if let path = selectedPath {
-            pathKey = Self.canonicalPath(path)
-        } else {
-            pathKey = "*"
-        }
-        return "\(dateDimension.rawValue)|\(year)-\(month)-\(dayComponent)|\(pathKey)"
+        // No day selected (All): use synthetic cache key to avoid re-enriching repeatedly
+        return "\(dateDimension.rawValue)|all|\(pathKey)"
     }
 
     private func scheduleFilterRefresh(force: Bool) {
@@ -1186,5 +1227,269 @@ extension SessionListViewModel {
         let df = DateFormatter()
         df.dateFormat = "yyyy-MM"
         return dimension.rawValue + "|" + df.string(from: monthStart)
+    }
+}
+
+// MARK: - Auto assign intents + matcher
+extension SessionListViewModel {
+    private func pruneExpiredIntents() {
+        let now = Date()
+        pendingAssignIntents.removeAll { now.timeIntervalSince($0.t0) > 60 }
+    }
+
+    private func recordIntent(projectId: String, expectedCwd: String, hints: PendingAssignIntent.Hints) {
+        if !preferences.autoAssignNewToSameProject { return }
+        let canonical = Self.canonicalPath(expectedCwd)
+        pendingAssignIntents.append(PendingAssignIntent(projectId: projectId, expectedCwd: canonical, t0: Date(), hints: hints))
+        pruneExpiredIntents()
+    }
+
+    func recordIntentForDetailNew(anchor: SessionSummary) {
+        guard let pid = projectIdForSession(anchor.id) else { return }
+        let hints = PendingAssignIntent.Hints(
+            model: anchor.model,
+            sandbox: preferences.resumeOptions.flagSandboxRaw,
+            approval: preferences.resumeOptions.flagApprovalRaw
+        )
+        recordIntent(projectId: pid, expectedCwd: anchor.cwd, hints: hints)
+    }
+
+    func recordIntentForProjectNew(project: Project) {
+        let expected = (project.directory?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 } ?? NSHomeDirectory()
+        let hints = PendingAssignIntent.Hints(
+            model: project.profile?.model,
+            sandbox: project.profile?.sandbox?.rawValue ?? preferences.resumeOptions.flagSandboxRaw,
+            approval: project.profile?.approval?.rawValue ?? preferences.resumeOptions.flagApprovalRaw
+        )
+        recordIntent(projectId: project.id, expectedCwd: expected, hints: hints)
+    }
+
+    private func handleAutoAssignIfMatches(_ s: SessionSummary) {
+        guard !pendingAssignIntents.isEmpty else { return }
+        let canonical = Self.canonicalPath(s.cwd)
+        let candidates = pendingAssignIntents.filter { intent in
+            guard canonical == intent.expectedCwd else { return false }
+            let windowStart = intent.t0.addingTimeInterval(-2)
+            let windowEnd = intent.t0.addingTimeInterval(60)
+            return s.startedAt >= windowStart && s.startedAt <= windowEnd
+        }
+        guard !candidates.isEmpty else { return }
+        struct Scored { let intent: PendingAssignIntent; let score: Int; let timeAbs: TimeInterval }
+        var scored: [Scored] = []
+        for it in candidates {
+            var score = 0
+            if let m = it.hints.model, let sm = s.model, !m.isEmpty, m == sm { score += 1 }
+            if let a = it.hints.approval, let sa = s.approvalPolicy, !a.isEmpty, a == sa { score += 1 }
+            let timeAbs = abs(s.startedAt.timeIntervalSince(it.t0))
+            scored.append(Scored(intent: it, score: score, timeAbs: timeAbs))
+        }
+        guard let best = scored.max(by: { lhs, rhs in
+            if lhs.score != rhs.score { return lhs.score < rhs.score }
+            return lhs.timeAbs > rhs.timeAbs
+        }) else { return }
+        let topScore = best.score
+        let topTime = best.timeAbs
+        let dupCount = scored.filter { $0.score == topScore && abs($0.timeAbs - topTime) < 0.001 }.count
+        if dupCount > 1 {
+            Task { await SystemNotifier.shared.notify(title: "CodMate", body: "Assign to \(best.intent.projectId)?") }
+            return
+        }
+        Task {
+            await projectsStore.assign(sessionIds: [s.id], to: best.intent.projectId)
+            let counts = await projectsStore.counts()
+            let memberships = await projectsStore.membershipsSnapshot()
+            await MainActor.run {
+                self.projectCounts = counts
+                self.projectMemberships = memberships
+                self.applyFilters()
+            }
+            await SystemNotifier.shared.notify(title: "CodMate", body: "Assigned to \(best.intent.projectId)")
+        }
+        pendingAssignIntents.removeAll { $0.id == best.intent.id }
+    }
+}
+
+// MARK: - Auto Title / Overview
+extension SessionListViewModel {
+    private func tryAutoNote(for s: SessionSummary) async {
+        if let note = notesSnapshot[s.id] { if (note.title?.isEmpty == false) || (note.comment?.isEmpty == false) { return } }
+        // Only for very recent sessions to avoid mass backfill on first load
+        if Date().timeIntervalSince(s.startedAt) > 120 { return }
+        let title = AutoText.suggestTitle(from: s.fileURL, cwdFallback: s.cwd)
+        let overview = AutoText.suggestOverview(from: s.fileURL, cwdFallback: s.cwd)
+        if title == nil && overview == nil { return }
+        await notesStore.upsert(id: s.id, title: title, comment: overview)
+        notesSnapshot[s.id] = SessionNote(id: s.id, title: title, comment: overview, projectId: nil, profileId: nil, updatedAt: Date())
+        var map = Dictionary(uniqueKeysWithValues: allSessions.map { ($0.id, $0) })
+        if var ex = map[s.id] {
+            if ex.userTitle == nil { ex.userTitle = title }
+            if ex.userComment == nil { ex.userComment = overview }
+            map[s.id] = ex
+        }
+        allSessions = Array(map.values)
+        applyFilters()
+    }
+
+    func regenerateAutoTitleAndOverview(for s: SessionSummary, overwrite: Bool = false) async {
+        let existing = await notesStore.note(for: s.id)
+        if !overwrite {
+            if let e = existing, (e.title?.isEmpty == false || e.comment?.isEmpty == false) { return }
+        }
+        let title = AutoText.suggestTitle(from: s.fileURL, cwdFallback: s.cwd)
+        let overview = AutoText.suggestOverview(from: s.fileURL, cwdFallback: s.cwd)
+        if title == nil && overview == nil { return }
+        await notesStore.upsert(id: s.id, title: title, comment: overview)
+        notesSnapshot[s.id] = SessionNote(id: s.id, title: title, comment: overview, projectId: existing?.projectId, profileId: existing?.profileId, updatedAt: Date())
+        var map = Dictionary(uniqueKeysWithValues: allSessions.map { ($0.id, $0) })
+        if var ex = map[s.id] { ex.userTitle = title; ex.userComment = overview; map[s.id] = ex }
+        allSessions = Array(map.values)
+        applyFilters()
+    }
+}
+
+// MARK: - AutoText (pure helpers)
+fileprivate enum AutoText {
+    static func suggestTitle(from url: URL, cwdFallback: String) -> String? {
+        guard let head = fastHeadUserText(url: url) ?? fastHeadAnyNaturalSentence(url: url) else {
+            let base = URL(fileURLWithPath: cwdFallback, isDirectory: true).lastPathComponent
+            let df = DateFormatter(); df.dateFormat = "yyyy-MM-dd"
+            return base.isEmpty ? nil : base + "-" + df.string(from: Date())
+        }
+        let cleaned = cleanInline(head)
+        let trimmed = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        return clampTitle(trimmed)
+    }
+
+    static func suggestOverview(from url: URL, cwdFallback: String) -> String? {
+        guard let text = fastHeadUserText(url: url) ?? fastHeadAnyNaturalSentence(url: url) else {
+            return nil
+        }
+        let cleaned = cleanBlock(text)
+        let para = firstParagraph(from: cleaned)
+        let trimmed = para.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        return clampOverview(trimmed)
+    }
+
+    // MARK: Fast head extraction (~400 lines)
+    private static func fastHeadUserText(url: URL) -> String? {
+        guard let data = try? Data(contentsOf: url, options: [.mappedIfSafe]), !data.isEmpty else { return nil }
+        let newline: UInt8 = 0x0A, cr: UInt8 = 0x0D
+        var count = 0
+        let dec = JSONDecoder(); dec.dateDecodingStrategy = .iso8601
+        for var slice in data.split(separator: newline, omittingEmptySubsequences: true) {
+            if slice.last == cr { slice = slice.dropLast() }
+            if slice.isEmpty { continue }
+            if count >= 400 { break }
+            if let row = try? dec.decode(SessionRow.self, from: Data(slice)) {
+                switch row.kind {
+                case .eventMessage(let p):
+                    if p.type.lowercased() == "user_message" {
+                        let t = (p.message ?? p.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                        if !t.isEmpty { return t }
+                    }
+                case .responseItem(let p):
+                    if p.type.lowercased() == "message", (p.role?.lowercased() == "user") == true {
+                        if let blocks = p.content { return blocks.compactMap { $0.text }.joined(separator: "\n\n") }
+                    }
+                default: break
+                }
+            }
+            count += 1
+        }
+        return nil
+    }
+
+    private static func fastHeadAnyNaturalSentence(url: URL) -> String? {
+        guard let data = try? Data(contentsOf: url, options: [.mappedIfSafe]), !data.isEmpty else { return nil }
+        let newline: UInt8 = 0x0A, cr: UInt8 = 0x0D
+        var count = 0
+        let dec = JSONDecoder(); dec.dateDecodingStrategy = .iso8601
+        for var slice in data.split(separator: newline, omittingEmptySubsequences: true) {
+            if slice.last == cr { slice = slice.dropLast() }
+            if slice.isEmpty { continue }
+            if count >= 400 { break }
+            if let row = try? dec.decode(SessionRow.self, from: Data(slice)) {
+                switch row.kind {
+                case .eventMessage(let p):
+                    let raw = (p.message ?? p.text ?? "")
+                    let t = cleanBlock(raw)
+                    if let sent = firstNaturalSentence(from: t) { return sent }
+                case .responseItem(let p):
+                    if p.type.lowercased() == "message" {
+                        let raw = (p.content ?? []).compactMap { $0.text }.joined(separator: "\n\n")
+                        let t = cleanBlock(raw)
+                        if let sent = firstNaturalSentence(from: t) { return sent }
+                    }
+                default: break
+                }
+            }
+            count += 1
+        }
+        return nil
+    }
+
+    // MARK: Cleaners
+    private static func cleanBlock(_ s: String) -> String {
+        guard !s.isEmpty else { return s }
+        var out = s
+        out = out.replacingOccurrences(of: #"```[\s\S]*?```"#, with: " ", options: .regularExpression)
+        out = out.replacingOccurrences(of: #"`[^`]+`"#, with: " ", options: .regularExpression)
+        out = out.replacingOccurrences(of: #"\[([^\]]+)\]\(([^\)]+)\)"#, with: "$1", options: .regularExpression)
+        out = out.replacingOccurrences(of: #"https?://\S+"#, with: " ", options: .regularExpression)
+        out = out.replacingOccurrences(of: "\n---\n", with: " ")
+        return out
+    }
+
+    private static func cleanInline(_ s: String) -> String {
+        let loweredPrefixes = ["please", "could you", "can you", "how to", "need to", "i need", "help "]
+        let chinesePrefixes = ["请", "需要", "能否", "如何", "麻烦", "把", "帮我"]
+        var text = cleanBlock(s).trimmingCharacters(in: .whitespacesAndNewlines)
+        let lower = text.lowercased()
+        for p in loweredPrefixes {
+            if lower.hasPrefix(p + " ") || lower == p {
+                text = String(text.dropFirst(p.count)).trimmingCharacters(in: .whitespaces)
+                break
+            }
+        }
+        for p in chinesePrefixes {
+            if text.hasPrefix(p) {
+                text = String(text.dropFirst(p.count)).trimmingCharacters(in: .whitespaces)
+                break
+            }
+        }
+        return text
+    }
+
+    private static func firstParagraph(from s: String) -> String {
+        let parts = s.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n\n")
+        return parts.first { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } ?? s
+    }
+
+    private static func firstNaturalSentence(from s: String) -> String? {
+        let cleaned = cleanBlock(s)
+        let separators = CharacterSet(charactersIn: ".!?。！？\n")
+        let parts = cleaned.components(separatedBy: separators)
+        for part in parts {
+            let t = part.trimmingCharacters(in: .whitespacesAndNewlines)
+            if t.count >= 4 { return t }
+        }
+        return nil
+    }
+
+    private static func clampTitle(_ s: String) -> String {
+        let isCJK = s.unicodeScalars.contains { ($0.value >= 0x4E00 && $0.value <= 0x9FFF) || ($0.value >= 0x3400 && $0.value <= 0x4DBF) }
+        let maxLen = isCJK ? 16 : 28
+        if s.count <= maxLen { return s }
+        let idx = s.index(s.startIndex, offsetBy: maxLen)
+        return String(s[..<idx]) + "…"
+    }
+
+    private static func clampOverview(_ s: String) -> String {
+        let maxLen = 200
+        if s.count <= maxLen { return s }
+        let idx = s.index(s.startIndex, offsetBy: maxLen)
+        return String(s[..<idx]) + "…"
     }
 }

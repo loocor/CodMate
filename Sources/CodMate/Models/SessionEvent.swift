@@ -287,6 +287,7 @@ struct SessionSummaryBuilder {
             fileSizeBytes: fileSizeBytes,
             startedAt: startedAt,
             endedAt: lastUpdatedAt,
+            activeDuration: nil,
             cliVersion: cliVersion,
             cwd: cwd,
             originator: originator,

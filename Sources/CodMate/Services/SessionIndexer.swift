@@ -531,7 +531,61 @@ actor SessionIndexer {
         if let size = values.fileSize { builder.setFileSize(UInt64(size)) }
         if let m = values.contentModificationDate { builder.seedLastUpdated(m) }
         if let tailDate = readTailTimestamp(url: url) { builder.seedLastUpdated(tailDate) }
-        return try buildSummaryFull(for: url, builder: &builder)
+        guard let base = try buildSummaryFull(for: url, builder: &builder) else { return nil }
+
+        // Compute accurate active duration from grouped turns
+        let active = computeActiveDuration(url: url)
+        let enriched = SessionSummary(
+            id: base.id,
+            fileURL: base.fileURL,
+            fileSizeBytes: base.fileSizeBytes,
+            startedAt: base.startedAt,
+            endedAt: base.endedAt,
+            activeDuration: active,
+            cliVersion: base.cliVersion,
+            cwd: base.cwd,
+            originator: base.originator,
+            instructions: base.instructions,
+            model: base.model,
+            approvalPolicy: base.approvalPolicy,
+            userMessageCount: base.userMessageCount,
+            assistantMessageCount: base.assistantMessageCount,
+            toolInvocationCount: base.toolInvocationCount,
+            responseCounts: base.responseCounts,
+            turnContextCount: base.turnContextCount,
+            eventCount: base.eventCount,
+            lineCount: base.lineCount,
+            lastUpdatedAt: base.lastUpdatedAt,
+            userTitle: base.userTitle,
+            userComment: base.userComment
+        )
+
+        // Persist to in-memory and disk caches keyed by mtime
+        await store(summary: enriched, for: url as NSURL, modificationDate: values.contentModificationDate)
+        await diskCache.set(path: url.path, modificationDate: values.contentModificationDate, summary: enriched)
+        return enriched
+    }
+
+    // Compute sum of turn durations: for each turn, duration = (last output timestamp - user message timestamp).
+    // If a turn has no user message, start from first output. If no outputs exist, contributes 0.
+    nonisolated private func computeActiveDuration(url: URL) -> TimeInterval? {
+        let loader = SessionTimelineLoader()
+        guard let turns = try? loader.load(url: url) else { return nil }
+        let filtered = turns.removingEnvironmentContext()
+        var total: TimeInterval = 0
+        for turn in filtered {
+            let start: Date?
+            if let u = turn.userMessage?.timestamp {
+                start = u
+            } else {
+                start = turn.outputs.first?.timestamp
+            }
+            guard let s = start, let end = turn.outputs.last?.timestamp else { continue }
+            let dt = end.timeIntervalSince(s)
+            if dt > 0 { total += dt }
+            if Task.isCancelled { return total }
+        }
+        return total
     }
 
     // MARK: - Fulltext scanning

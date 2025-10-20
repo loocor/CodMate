@@ -6,6 +6,10 @@ struct SessionSummary: Identifiable, Hashable, Sendable, Codable {
     let fileSizeBytes: UInt64?
     let startedAt: Date
     let endedAt: Date?
+    // Sum of actual active conversation segments (user → Codex),
+    // computed from grouped timeline turns during enrichment.
+    // Nil until enriched; falls back to (endedAt - startedAt) in UI when nil.
+    let activeDuration: TimeInterval?
     let cliVersion: String
     let cwd: String
     let originator: String
@@ -26,9 +30,8 @@ struct SessionSummary: Identifiable, Hashable, Sendable, Codable {
     var userComment: String? = nil
 
     var duration: TimeInterval {
-        guard let end = endedAt ?? lastUpdatedAt else {
-            return 0
-        }
+        if let activeDuration { return activeDuration }
+        guard let end = endedAt ?? lastUpdatedAt else { return 0 }
         return end.timeIntervalSince(startedAt)
     }
 
