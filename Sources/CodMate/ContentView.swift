@@ -450,6 +450,8 @@ struct ContentView: View {
     }
 
     private func openPreferredExternalForNew(session: SessionSummary) {
+        // Record pending intent for auto-assign before launching
+        viewModel.recordIntentForDetailNew(anchor: session)
         let app = viewModel.preferences.defaultResumeExternalApp
         let dir = FileManager.default.fileExists(atPath: session.cwd)
             ? session.cwd

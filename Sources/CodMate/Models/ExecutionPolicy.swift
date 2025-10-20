@@ -38,3 +38,8 @@ struct ResumeOptions {
     var fullAuto: Bool
     var dangerouslyBypass: Bool
 }
+
+extension ResumeOptions {
+    var flagSandboxRaw: String? { sandbox?.rawValue }
+    var flagApprovalRaw: String? { approval?.rawValue }
+}
