@@ -1,38 +1,42 @@
 # CodMate
 
+![CodMate Screenshot](screenshot.png)
+
 macOS SwiftUI app to browse, search, and resume Codex CLI sessions. It indexes `~/.codex/sessions` `.jsonl` logs, shows a fast, compact UI, and integrates with the Codex CLI to resume or start new sessions.
 
 Status: macOS 15+, Swift 6, Xcode 16. Universal binary (arm64 + x86_64).
 
-![CodMate Screenshot](screenshot.png)
-
 ## Features
-- Sidebar navigation
-  - All Sessions row (fixed top) with total count.
-  - Path tree (scrollable middle) built from `cwd` counts; compact rows; single‑click selects/expands, double‑click filters to the directory.
-  - Calendar month view (fixed bottom, ~280pt) with per‑day counts and Created/Updated toggle; always pinned.
+- Sidebar (Projects + Calendar)
+  - Projects list with counts and a fixed “All” row; “New Project” sheet for name, directory, overview/instructions, and optional profile.
+  - Assign sessions to projects from the list row context menu; memberships are stored under `~/.codex/projects/`.
+  - Auto‑assign: sessions launched via New inside a project are auto‑assigned when `cwd` and start‑time match.
+  - Calendar month view (fixed bottom, ~280pt) with per‑day counts and Created/Updated toggle.
 - List + search
-  - Loads Today by default; segmented sort (recency, duration, etc.).
-  - Toolbar search field and a right‑most Refresh button.
-  - Rows show title, timestamps/duration, snippet, and compact metrics (user/assistant/tool/reasoning).
+  - Loads Today by default; segmented sort (Most Recent, Duration, Activity, etc.).
+  - Quick search field for title/comment; Refresh button in the toolbar (pinned far right).
+  - Rows show title, timestamps/duration, snippet, and compact metrics (user/assistant/tool/reasoning). Badges/indicators show: updating (live tail activity), running (currently resumed), awaiting follow‑up (agent completed).
 - Detail pane
-  - Sticky action bar with: Resume menu, New (start fresh with same cwd/model), Reveal in Finder, Delete, Export Markdown, Copy real command (when embedded terminal is active).
-  - Task Instructions via DisclosureGroup (lazy loaded in the detail view).
+  - Sticky action bar: Resume (Terminal/iTerm2/Warp or Embedded), Reveal in Finder, Delete, Export Markdown.
+  - “New” starts a fresh session using the focused session’s working directory and (when available) its Project Profile.
+  - “New With Context” builds slim Markdown from selected sessions and starts a new session with that content as the initial prompt.
+  - Copy real command button appears when the embedded terminal is active.
+  - Task Instructions via DisclosureGroup (lazy loaded). Environment Context panel parses and renders `<environment_context>` entries.
   - Conversation timeline uses LazyVStack and differentiates user/assistant/tool/info bubbles.
 - Session metadata (rename/comment)
   - Click the title to edit name/comment.
-  - Stored per session under `~/.codex/notes/<sessionId-sanitized>.json` with first‑run migration from legacy Application Support JSON.
-- Codex Settings (dedicated settings page)
-  - Providers, Model & Reasoning, Sandbox & Approvals, Notifications, Privacy, Raw Config.
-  - Provider presets include K2, GLM, DeepSeek with “Get key” links and base URLs.
-  - System notifications bridge via a built‑in `codemate-notify` helper.
+  - Stored per session under `~/.codex/notes/<sessionId-sanitized>.json`; first‑run migration from the legacy Application Support JSON.
+- Codex Settings
+  - Dedicated Settings › Codex page with tabs: Providers, Runtime, Notifications, Privacy, Raw Config.
+  - Provider presets include K2, GLM, DeepSeek with “Get key” links and prefilled base URLs.
+  - System notifications bridge via a managed `codemate-notify` helper; TUI notifications toggle.
 - Dialectics (Diagnostics)
   - Sessions root probe (current vs default), counts/samples/errors with “Save Report…”.
-  - Providers diagnostics: counts, duplicate IDs, stray managed bodies, canonical region preview (copy only).
+  - Providers diagnostics: counts, duplicate IDs, stray managed bodies, canonical providers region preview (copy‑only).
   - CLI environment: preferred and resolved `codex` paths and a PATH snapshot.
 
 ## Performance
-- Fast path indexing: memory‑mapped reads; scan first lines plus tail (up to ~1 MB) to fix `lastUpdatedAt`.
+- Fast path indexing: memory‑mapped reads; parse the first ~64 lines plus tail sampling (up to ~1 MB) to fix `lastUpdatedAt`.
 - Background enrichment: full parse in constrained task groups; batched UI updates.
 - Full‑text search: chunked scan (128 KB), case‑insensitive; avoids lowercasing the whole file.
 - Caching: in‑memory NSCache + disk cache at `~/Library/Caches/CodMate/sessionIndex-v2.json` keyed by path+mtime.
@@ -109,6 +113,10 @@ xcrun stapler staple build/DerivedData/Build/Products/Release/CodMate.app
 - Executable resolution: user‑preferred path, then `/opt/homebrew/bin/codex`, `/usr/local/bin/codex`, then `env which codex`.
 - Ensures PATH includes `/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin` when launching.
 - Resume uses the original session `cwd` if it exists; otherwise falls back to the log file’s directory.
+- New (detail): reuses the focused session’s working directory and, when a Project Profile is present, applies its model/sandbox/approval defaults (inline temporary profile injection if needed).
+- New With Context: composes a slim Markdown prompt from selected sessions and starts a new Codex session with that content.
+- External terminals: open in Apple Terminal, iTerm2 (direct), or Warp (path). Embedded terminal is available as an option.
+- Copy real command: when embedded, a toolbar button copies the exact `codex resume <id>` invocation used.
 - Flags supported by the UI when building commands:
   - Sandbox policy (`-s`): `read-only`, `workspace-write`, `danger-full-access`.
   - Approval policy (`-a`): `untrusted`, `on-failure`, `on-request`, `never`.
