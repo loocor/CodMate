@@ -11,7 +11,7 @@ struct ProjectsListView: View {
     @State private var showDeleteConfirm = false
 
     var body: some View {
-        let counts = viewModel.projectCountsFromStore()
+        let countsDisplay = viewModel.projectCountsDisplay()
         let tree = buildProjectTree(viewModel.projects)
         let selectionBinding: Binding<String?> = Binding<String?>(
             get: { viewModel.selectedProjectId },
@@ -24,10 +24,12 @@ struct ProjectsListView: View {
             } else {
                 OutlineGroup(tree, children: \.children) { node in
                     let p = node.project
+                    let pair = countsDisplay[p.id] ?? (visible: 0, total: 0)
                     ProjectRow(
                         project: p,
                         displayName: displayName(p),
-                        count: counts[p.id] ?? 0,
+                        visible: pair.visible,
+                        total: pair.total,
                         onNewSession: { viewModel.openNewSession(project: p) },
                         onEdit: { editingProject = p; showEdit = true },
                         onDelete: { pendingDelete = p; showDeleteConfirm = true }
@@ -132,7 +134,8 @@ struct ProjectsListView: View {
 private struct ProjectRow: View {
     let project: Project
     let displayName: String
-    let count: Int
+    let visible: Int
+    let total: Int
     var onNewSession: () -> Void
     var onEdit: () -> Void
     var onDelete: () -> Void
@@ -146,8 +149,9 @@ private struct ProjectRow: View {
                 .font(.caption)
                 .lineLimit(1)
             Spacer(minLength: 4)
-            if count > 0 {
-                Text("\(count)")
+            let showCount = (visible > 0) || (total > 0)
+            if showCount {
+                Text("\(visible)/\(total)")
                     .font(.caption2.monospacedDigit())
                     .foregroundStyle(.tertiary)
             }
@@ -275,7 +279,7 @@ struct ProjectEditorSheet: View {
                                 }
                                 .labelsHidden()
                                 .pickerStyle(.segmented)
-                                .frame(width: fieldColWidth, alignment: .leading)
+                                .frame(maxWidth: .infinity, alignment: .leading)
                             }
                             GridRow(alignment: .top) {
                                 Text("Overview")
@@ -290,25 +294,22 @@ struct ProjectEditorSheet: View {
                     .padding(16)
                 }
                 Tab("Instructions", systemImage: "text.alignleft") {
-                    Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 10) {
-                        GridRow(alignment: .top) {
-                            Text("Instructions")
-                                .font(.subheadline)
-                                .frame(width: labelColWidth, alignment: .trailing)
-                            VStack(alignment: .leading, spacing: 6) {
-                                TextEditor(text: $instructions)
-                                    .font(.body)
-                                    .frame(minHeight: 120, maxHeight: 220)
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 6)
-                                            .stroke(Color.secondary.opacity(0.2))
-                                    )
-                                Text("Default instructions for new sessions")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            .frame(width: fieldColWidth, alignment: .leading)
+                    HStack {
+                        Spacer(minLength: 0)
+                        VStack(alignment: .leading, spacing: 6) {
+                            TextEditor(text: $instructions)
+                                .font(.body)
+                                .frame(minHeight: 120, maxHeight: 220)
+                                .frame(width: fieldColWidth)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 6)
+                                        .stroke(Color.secondary.opacity(0.2))
+                                )
+                            Text("Default instructions for new sessions")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
                         }
+                        Spacer(minLength: 0)
                     }
                     .padding(16)
                 }
@@ -340,7 +341,7 @@ struct ProjectEditorSheet: View {
                                 }
                                 .labelsHidden()
                                 .pickerStyle(.segmented)
-                                .frame(width: fieldColWidth, alignment: .leading)
+                                .frame(maxWidth: .infinity, alignment: .leading)
                             }
                             GridRow {
                                 Text("Approval")
@@ -351,7 +352,7 @@ struct ProjectEditorSheet: View {
                                 }
                                 .labelsHidden()
                                 .pickerStyle(.segmented)
-                                .frame(width: fieldColWidth, alignment: .leading)
+                                .frame(maxWidth: .infinity, alignment: .leading)
                             }
                             GridRow {
                                 Text("Presets")
