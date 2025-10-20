@@ -54,10 +54,16 @@ struct SessionListColumnView: View {
                                     isRunning: isRunning?(session) ?? false,
                                     isSelected: selectionContains(session.id),
                                     isUpdating: isUpdating?(session) ?? false,
-                                    awaitingFollowup: isAwaitingFollowup?(session) ?? false
+                                    awaitingFollowup: isAwaitingFollowup?(session) ?? false,
+                                    inProject: viewModel.projectIdForSession(session.id) != nil,
+                                    projectTip: projectTip(for: session)
                                 )
                                 .tag(session.id)
                                 .contentShape(Rectangle())
+                                .onTapGesture(count: 2) {
+                                    selection = [session.id]
+                                    Task { await viewModel.beginEditing(session: session) }
+                                }
                                 .onTapGesture { handleClick(on: session) }
                                 .onDrag {
                                     let ids: [String]
@@ -192,6 +198,18 @@ extension SessionListColumnView {
         selection.contains(id)
     }
 
+    private func projectTip(for session: SessionSummary) -> String? {
+        guard let pid = viewModel.projectIdForSession(session.id),
+              let p = viewModel.projects.first(where: { $0.id == pid })
+        else { return nil }
+        let name = p.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let display = name.isEmpty ? p.id : name
+        let raw = (p.overview ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !raw.isEmpty else { return display }
+        let snippet = raw.count > 20 ? String(raw.prefix(20)) + "…" : raw
+        return display + "\n" + snippet
+    }
+
     private func prefillForProject(from session: SessionSummary) -> ProjectEditorSheet.Prefill {
         let dir = FileManager.default.fileExists(atPath: session.cwd)
         ? session.cwd
@@ -266,6 +284,12 @@ private struct SearchField: NSViewRepresentable {
         // Avoid premature submit during IME composition; we handle Return/Escape in delegate instead
         field.sendsSearchStringImmediately = false
         field.sendsWholeSearchString = true
+        // Do not steal initial focus; if the system puts focus here, drop it back to window
+        DispatchQueue.main.async {
+            if let win = field.window, win.firstResponder === field || win.firstResponder === field.currentEditor() {
+                win.makeFirstResponder(nil)
+            }
+        }
         return field
     }
 
