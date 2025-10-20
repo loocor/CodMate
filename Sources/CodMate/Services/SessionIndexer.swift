@@ -561,7 +561,7 @@ actor SessionIndexer {
         )
 
         // Persist to in-memory and disk caches keyed by mtime
-        await store(summary: enriched, for: url as NSURL, modificationDate: values.contentModificationDate)
+        store(summary: enriched, for: url as NSURL, modificationDate: values.contentModificationDate)
         await diskCache.set(path: url.path, modificationDate: values.contentModificationDate, summary: enriched)
         return enriched
     }
