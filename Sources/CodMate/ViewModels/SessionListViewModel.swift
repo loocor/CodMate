@@ -55,6 +55,10 @@ final class SessionListViewModel: ObservableObject {
     private var scheduledFilterRefresh: Task<Void, Never>?
     private var currentMonthKey: String?
     private var currentMonthDimension: DateDimension = .updated
+    // Quick pulse (cheap file mtime scan) state
+    private var quickPulseTask: Task<Void, Never>?
+    private var lastQuickPulseAt: Date = .distantPast
+    private var fileMTimeCache: [String: Date] = [:]  // session.id -> mtime
     @Published var editingSession: SessionSummary? = nil
     @Published var editTitle: String = ""
     @Published var editComment: String = ""
@@ -271,6 +275,35 @@ final class SessionListViewModel: ObservableObject {
         )
     }
 
+    // MARK: - Project-level new session
+    func buildNewProjectCLIInvocation(project: Project) -> String {
+        actions.buildNewProjectCLIInvocation(project: project, options: preferences.resumeOptions)
+    }
+
+    func copyNewProjectCommands(project: Project) {
+        actions.copyNewProjectCommands(project: project, executableURL: preferences.codexExecutableURL, options: preferences.resumeOptions)
+    }
+
+    func openNewSession(project: Project) {
+        // Respect preferred external app setting
+        let app = preferences.defaultResumeExternalApp
+        let dir = project.directory
+        switch app {
+        case .iterm2:
+            let cmd = buildNewProjectCLIInvocation(project: project)
+            actions.openTerminalViaScheme(.iterm2, directory: dir, command: cmd)
+        case .warp:
+            actions.openTerminalViaScheme(.warp, directory: dir)
+            copyNewProjectCommands(project: project)
+        case .terminal:
+            _ = actions.openNewProject(project: project, executableURL: preferences.codexExecutableURL, options: preferences.resumeOptions)
+        case .none:
+            _ = actions.openAppleTerminal(at: dir)
+            copyNewProjectCommands(project: project)
+        }
+        Task { await SystemNotifier.shared.notify(title: "CodMate", body: "命令已拷贝，请粘贴到打开的终端") }
+    }
+
     func copyRealResumeCommand(session: SessionSummary) {
         actions.copyRealResumeInvocation(
             session: session,
@@ -462,10 +495,16 @@ final class SessionListViewModel: ObservableObject {
             }
         }
 
-        // 2. 项目过滤（基于 notes 中的 projectId）
-        if let pid = selectedProjectId {
+        // 2. 项目过滤（优先显式映射；其次目录推断）
+        if let pid = selectedProjectId, let project = projects.first(where: { $0.id == pid }) {
+            let projPath = Self.canonicalPath(project.directory)
+            let prefix = projPath == "/" ? "/" : projPath + "/"
             filtered = filtered.filter { summary in
-                notesSnapshot[summary.id]?.projectId == pid
+                // explicit mapping wins
+                if notesSnapshot[summary.id]?.projectId == pid { return true }
+                // directory inference when under project directory
+                let canonical = canonicalCwdCache[summary.id] ?? Self.canonicalPath(summary.cwd)
+                return canonical == projPath || canonical.hasPrefix(prefix)
             }
         }
 
@@ -739,6 +778,7 @@ final class SessionListViewModel: ObservableObject {
         }
         directoryMonitor = DirectoryMonitor(url: root) { [weak self] in
             Task { @MainActor in
+                self?.quickPulse()
                 self?.scheduleDirectoryRefresh()
             }
         }
@@ -788,6 +828,40 @@ final class SessionListViewModel: ObservableObject {
             guard let self, !Task.isCancelled else { return }
             await self.refreshSessions(force: force)
             self.scheduledFilterRefresh = nil
+        }
+    }
+
+    // MARK: - Quick pulse: cheap, low-latency activity tracking via file mtime
+    private func quickPulse() {
+        let now = Date()
+        guard now.timeIntervalSince(lastQuickPulseAt) > 0.4 else { return }
+        lastQuickPulseAt = now
+        quickPulseTask?.cancel()
+        // Take a snapshot of currently displayed sessions (limit for safety)
+        let displayed = self.sections.flatMap { $0.sessions }.prefix(200)
+        quickPulseTask = Task.detached { [weak self] in
+            guard let self else { return }
+            let fm = FileManager.default
+            var modified: [String: Date] = [:]
+            for s in displayed {
+                let path = s.fileURL.path
+                if let attrs = try? fm.attributesOfItem(atPath: path),
+                   let m = attrs[.modificationDate] as? Date
+                {
+                    modified[s.id] = m
+                }
+            }
+            await MainActor.run {
+                let now = Date()
+                for (id, m) in modified {
+                    let previous = self.fileMTimeCache[id]
+                    self.fileMTimeCache[id] = m
+                    if let previous, m > previous {
+                        self.activityHeartbeat[id] = now
+                    }
+                }
+                self.recomputeActiveUpdatingIDs()
+            }
         }
     }
 
