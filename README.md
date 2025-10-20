@@ -4,6 +4,8 @@ macOS SwiftUI app to browse, search, and resume Codex CLI sessions. It indexes `
 
 Status: macOS 15+, Swift 6, Xcode 16. Universal binary (arm64 + x86_64).
 
+![CodMate Screenshot](screenshot.png)
+
 ## Features
 - Sidebar navigation
   - All Sessions row (fixed top) with total count.
