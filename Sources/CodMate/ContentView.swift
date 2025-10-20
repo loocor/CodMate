@@ -16,6 +16,7 @@ struct ContentView: View {
     // Track which sessions are running in embedded terminal
     @State private var runningSessionIDs = Set<SessionSummary.ID>()
     @State private var isDetailMaximized = false
+    @State private var showNewWithContext = false
     // Provide a simple font chooser that prefers CJK-capable monospace
     private func makeTerminalFont(size: CGFloat) -> NSFont {
         #if canImport(SwiftTerm)
@@ -139,6 +140,12 @@ struct ContentView: View {
         .sheet(item: $viewModel.editingSession, onDismiss: { viewModel.cancelEdits() }) { _ in
             EditSessionMetaView(viewModel: viewModel)
         }
+        .sheet(isPresented: $showNewWithContext) {
+            if let focused = focusedSummary {
+                NewWithContextSheet(isPresented: $showNewWithContext, anchor: focused)
+                    .environmentObject(viewModel)
+            }
+        }
     }
     
     private var refreshToolbarContent: some View {
@@ -239,13 +246,19 @@ struct ContentView: View {
 
            HStack(spacing: 8) {
                 if let focused = focusedSummary {
-                    Button {
-                        startNewSession(for: focused)
+                    Menu {
+                        Button { showNewWithContext = true } label: {
+                            Label("New With Context…", systemImage: "text.append")
+                        }
                     } label: {
                         Label("New", systemImage: "plus")
+                    } primaryAction: {
+                        startNewSession(for: focused)
                     }
                     .disabled(isPerformingAction)
-                    .help("Start a new Codex session with the same directory and model")
+                    .help("Start a new Codex session (use project profile when available)")
+                    .menuStyle(.borderedButton)
+                    .controlSize(.small)
                 }
 
                 Menu {
@@ -444,12 +457,13 @@ struct ContentView: View {
             : session.fileURL.deletingLastPathComponent().path
         switch app {
         case .iterm2:
-            let cmd = viewModel.buildNewSessionCLIInvocation(session: session)
+            let cmd = viewModel.buildNewSessionCLIInvocationRespectingProject(session: session)
             viewModel.openPreferredTerminalViaScheme(app: .iterm2, directory: dir, command: cmd)
         case .warp:
+            // Warp scheme cannot run a command; open path only and rely on clipboard
             viewModel.openPreferredTerminalViaScheme(app: .warp, directory: dir)
         case .terminal:
-            viewModel.openNewSession(session: session)
+            viewModel.openNewSessionRespectingProject(session: session)
         case .none:
             break
         }
@@ -457,7 +471,7 @@ struct ContentView: View {
     }
 
     private func startNewSession(for session: SessionSummary) {
-        viewModel.copyNewSessionCommands(session: session)
+        viewModel.copyNewSessionCommandsRespectingProject(session: session)
         openPreferredExternalForNew(session: session)
     }
 

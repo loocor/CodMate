@@ -122,9 +122,8 @@ struct SessionActions {
 
     func buildResumeCLIInvocation(session: SessionSummary, executablePath: String, options: ResumeOptions) -> String {
         let exe = shellQuoteIfNeeded(executablePath)
-        let base = "\(exe) resume \(session.id)"
-        let f = flags(from: options).joined(separator: " ")
-        return f.isEmpty ? base : base + " " + f
+        // Resume should preserve original session semantics; do not override sandbox/approval/model via flags.
+        return "\(exe) resume \(session.id)"
     }
 
     private func buildNewSessionArguments(session: SessionSummary, options: ResumeOptions) -> [String] {
@@ -134,19 +133,25 @@ struct SessionActions {
         return args
     }
 
-    func buildNewSessionCLIInvocation(session: SessionSummary, options: ResumeOptions) -> String {
+    func buildNewSessionCLIInvocation(session: SessionSummary, options: ResumeOptions, initialPrompt: String? = nil) -> String {
         let exe = "codex"
+        var parts: [String] = [exe]
         let args = buildNewSessionArguments(session: session, options: options).map { arg -> String in
             if arg.contains(where: { $0.isWhitespace || $0 == "'" }) {
                 return shellEscapedPath(arg)
             }
             return arg
         }
-        return ([exe] + args).joined(separator: " ")
+        parts.append(contentsOf: args)
+        if let prompt = initialPrompt, !prompt.isEmpty {
+            parts.append(shellSingleQuoted(prompt))
+        }
+        return parts.joined(separator: " ")
     }
 
     func buildResumeArguments(session: SessionSummary, options: ResumeOptions) -> [String] {
-        ["resume", session.id] + flags(from: options)
+        // Do not append flags; resume should restore original semantics.
+        ["resume", session.id]
     }
 
     func buildResumeCommandLines(session: SessionSummary, executableURL: URL, options: ResumeOptions) -> String {
@@ -330,6 +335,111 @@ struct SessionActions {
     func openNewProject(project: Project, executableURL: URL, options: ResumeOptions) -> Bool {
         let scriptText = {
             let lines = buildNewProjectCommandLines(project: project, executableURL: executableURL, options: options)
+                .replacingOccurrences(of: "\n", with: "; ")
+            return """
+            tell application "Terminal"
+              activate
+              do script "\(lines)"
+            end tell
+            """
+        }()
+
+        if let script = NSAppleScript(source: scriptText) {
+            var errorDict: NSDictionary?
+            script.executeAndReturnError(&errorDict)
+            return errorDict == nil
+        }
+        return false
+    }
+
+    // MARK: - Detail New using Project Profile (cd = session.cwd)
+    private func buildNewSessionArguments(using project: Project, fallbackModel: String?, options: ResumeOptions) -> [String] {
+        var args: [String] = []
+        // Model precedence: project.profile.model -> fallback (session.model) -> none
+        if let pm = project.profile?.model, !pm.isEmpty {
+            args += ["--model", pm]
+        } else if let fm = fallbackModel, !fm.isEmpty {
+            args += ["--model", fm]
+        }
+        // Flags precedence: danger -> full-auto -> explicit -s/-a only when present in project profile
+        if project.profile?.dangerouslyBypass == true {
+            args += ["--dangerously-bypass-approvals-and-sandbox"]
+        } else if project.profile?.fullAuto == true {
+            args += ["--full-auto"]
+        } else {
+            if let s = project.profile?.sandbox { args += ["-s", s.rawValue] }
+            if let a = project.profile?.approval { args += ["-a", a.rawValue] }
+        }
+        // Keep named profile id if provided (coexist with inline flags)
+        if let profile = project.profileId, !profile.isEmpty { args += ["--profile", profile] }
+        return args
+    }
+
+    func buildNewSessionUsingProjectProfileCLIInvocation(session: SessionSummary, project: Project, options: ResumeOptions, initialPrompt: String? = nil) -> String {
+        let exe = "codex"
+        var parts: [String] = [exe]
+        let args = buildNewSessionArguments(using: project, fallbackModel: session.model, options: options).map { arg -> String in
+            if arg.contains(where: { $0.isWhitespace || $0 == "'" }) { return shellEscapedPath(arg) }
+            return arg
+        }
+        parts.append(contentsOf: args)
+        if let prompt = initialPrompt, !prompt.isEmpty {
+            parts.append(shellSingleQuoted(prompt))
+        }
+        return parts.joined(separator: " ")
+    }
+
+    func buildNewSessionUsingProjectProfileCommandLines(session: SessionSummary, project: Project, executableURL: URL, options: ResumeOptions, initialPrompt: String? = nil) -> String {
+        _ = executableURL
+        let cwd = FileManager.default.fileExists(atPath: session.cwd)
+            ? session.cwd : session.fileURL.deletingLastPathComponent().path
+        let cd = "cd " + shellEscapedPath(cwd)
+        // PATH/env injection comes from project profile only (no global env here)
+        let prepend = project.profile?.pathPrepend ?? []
+        let prependString = prepend.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }.joined(separator: ":")
+        let defaultPATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+        let injectedPATH = (prependString.isEmpty ? defaultPATH : prependString + ":" + defaultPATH) + ":${PATH}"
+        var exportLines: [String] = [
+            "export LANG=zh_CN.UTF-8",
+            "export LC_ALL=zh_CN.UTF-8",
+            "export LC_CTYPE=zh_CN.UTF-8",
+            "export TERM=xterm-256color",
+        ]
+        if let env = project.profile?.env {
+            for (k, v) in env {
+                let key = k.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !key.isEmpty else { continue }
+                exportLines.append("export \(key)=\(shellSingleQuoted(v))")
+            }
+        }
+        let exports = exportLines.joined(separator: "; ")
+        let invocation = buildNewSessionUsingProjectProfileCLIInvocation(session: session, project: project, options: options, initialPrompt: initialPrompt)
+        let command = "PATH=\(injectedPATH) \(invocation)"
+        return cd + "\n" + exports + "\n" + command + "\n"
+    }
+
+    func buildExternalNewSessionUsingProjectProfileCommands(session: SessionSummary, project: Project, executableURL: URL, options: ResumeOptions, initialPrompt: String? = nil) -> String {
+        _ = executableURL
+        let cwd = FileManager.default.fileExists(atPath: session.cwd)
+            ? session.cwd : session.fileURL.deletingLastPathComponent().path
+        let cd = "cd " + shellEscapedPath(cwd)
+        let cmd = buildNewSessionUsingProjectProfileCLIInvocation(session: session, project: project, options: options, initialPrompt: initialPrompt)
+        return cd + "\n" + cmd + "\n"
+    }
+
+    func copyNewSessionUsingProjectProfileCommands(session: SessionSummary, project: Project, executableURL: URL, options: ResumeOptions, simplifiedForExternal: Bool = true, initialPrompt: String? = nil) {
+        let commands = simplifiedForExternal
+            ? buildExternalNewSessionUsingProjectProfileCommands(session: session, project: project, executableURL: executableURL, options: options, initialPrompt: initialPrompt)
+            : buildNewSessionUsingProjectProfileCommandLines(session: session, project: project, executableURL: executableURL, options: options, initialPrompt: initialPrompt)
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.setString(commands, forType: .string)
+    }
+
+    @discardableResult
+    func openNewSessionUsingProjectProfile(session: SessionSummary, project: Project, executableURL: URL, options: ResumeOptions, initialPrompt: String? = nil) -> Bool {
+        let scriptText = {
+            let lines = buildNewSessionUsingProjectProfileCommandLines(session: session, project: project, executableURL: executableURL, options: options, initialPrompt: initialPrompt)
                 .replacingOccurrences(of: "\n", with: "; ")
             return """
             tell application "Terminal"

@@ -1,4 +1,5 @@
 import Foundation
+import AppKit
 
 @MainActor
 final class SessionListViewModel: ObservableObject {
@@ -209,6 +210,18 @@ final class SessionListViewModel: ObservableObject {
     func isActivelyUpdating(_ id: String) -> Bool { activeUpdatingIDs.contains(id) }
     func isAwaitingFollowup(_ id: String) -> Bool { awaitingFollowupIDs.contains(id) }
 
+    // Cancel ongoing background tasks (fulltext, enrichment, scheduled refreshes, quick pulses).
+    // Useful when a heavy modal/sheet is presented and the UI should stay responsive.
+    func cancelHeavyWork() {
+        fulltextTask?.cancel(); fulltextTask = nil
+        enrichmentTask?.cancel(); enrichmentTask = nil
+        scheduledFilterRefresh?.cancel(); scheduledFilterRefresh = nil
+        directoryRefreshTask?.cancel(); directoryRefreshTask = nil
+        quickPulseTask?.cancel(); quickPulseTask = nil
+        isEnriching = false
+        isLoading = false
+    }
+
     func resume(session: SessionSummary) async -> Result<ProcessResult, Error> {
         do {
             let result = try await actions.resume(
@@ -314,6 +327,65 @@ final class SessionListViewModel: ObservableObject {
             copyNewProjectCommands(project: project)
         }
         Task { await SystemNotifier.shared.notify(title: "CodMate", body: "Command copied. Paste it in the opened terminal.") }
+    }
+
+    // MARK: - New (detail) respecting Project Profile
+    func buildNewSessionCLIInvocationRespectingProject(session: SessionSummary) -> String {
+        if let pid = projectIdForSession(session.id), let p = projects.first(where: { $0.id == pid }), (p.profile != nil || (p.profileId?.isEmpty == false)) {
+            return actions.buildNewSessionUsingProjectProfileCLIInvocation(session: session, project: p, options: preferences.resumeOptions)
+        }
+        return actions.buildNewSessionCLIInvocation(session: session, options: preferences.resumeOptions)
+    }
+
+    func buildNewSessionCLIInvocationRespectingProject(session: SessionSummary, initialPrompt: String) -> String {
+        if let pid = projectIdForSession(session.id), let p = projects.first(where: { $0.id == pid }), (p.profile != nil || (p.profileId?.isEmpty == false)) {
+            return actions.buildNewSessionUsingProjectProfileCLIInvocation(session: session, project: p, options: preferences.resumeOptions, initialPrompt: initialPrompt)
+        }
+        return actions.buildNewSessionCLIInvocation(session: session, options: preferences.resumeOptions, initialPrompt: initialPrompt)
+    }
+
+    func copyNewSessionCommandsRespectingProject(session: SessionSummary) {
+        if let pid = projectIdForSession(session.id), let p = projects.first(where: { $0.id == pid }), (p.profile != nil || (p.profileId?.isEmpty == false)) {
+            actions.copyNewSessionUsingProjectProfileCommands(session: session, project: p, executableURL: preferences.codexExecutableURL, options: preferences.resumeOptions)
+        } else {
+            actions.copyNewSessionCommands(session: session, executableURL: preferences.codexExecutableURL, options: preferences.resumeOptions)
+        }
+    }
+
+    func copyNewSessionCommandsRespectingProject(session: SessionSummary, initialPrompt: String) {
+        if let pid = projectIdForSession(session.id), let p = projects.first(where: { $0.id == pid }), (p.profile != nil || (p.profileId?.isEmpty == false)) {
+            actions.copyNewSessionUsingProjectProfileCommands(session: session, project: p, executableURL: preferences.codexExecutableURL, options: preferences.resumeOptions, initialPrompt: initialPrompt)
+        } else {
+            let cmd = actions.buildNewSessionCLIInvocation(session: session, options: preferences.resumeOptions, initialPrompt: initialPrompt)
+            let pb = NSPasteboard.general
+            pb.clearContents(); pb.setString(cmd + "\n", forType: .string)
+        }
+    }
+
+    func openNewSessionRespectingProject(session: SessionSummary) {
+        if let pid = projectIdForSession(session.id), let p = projects.first(where: { $0.id == pid }), (p.profile != nil || (p.profileId?.isEmpty == false)) {
+            _ = actions.openNewSessionUsingProjectProfile(session: session, project: p, executableURL: preferences.codexExecutableURL, options: preferences.resumeOptions)
+        } else {
+            _ = actions.openNewSession(session: session, executableURL: preferences.codexExecutableURL, options: preferences.resumeOptions)
+        }
+    }
+
+    func openNewSessionRespectingProject(session: SessionSummary, initialPrompt: String) {
+        if let pid = projectIdForSession(session.id), let p = projects.first(where: { $0.id == pid }), (p.profile != nil || (p.profileId?.isEmpty == false)) {
+            _ = actions.openNewSessionUsingProjectProfile(session: session, project: p, executableURL: preferences.codexExecutableURL, options: preferences.resumeOptions, initialPrompt: initialPrompt)
+        } else {
+            // Terminal-only variant is not implemented for non-project case; open generic new then user pastes.
+            _ = actions.openNewSession(session: session, executableURL: preferences.codexExecutableURL, options: preferences.resumeOptions)
+        }
+    }
+
+    // MARK: - Project lookup helpers
+    func projectIdForSession(_ id: String) -> String? {
+        projectMemberships[id]
+    }
+
+    func projectForId(_ id: String) async -> Project? {
+        await projectsStore.getProject(id: id)
     }
 
     func copyRealResumeCommand(session: SessionSummary) {
