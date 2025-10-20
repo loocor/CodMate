@@ -137,3 +137,7 @@ Tests/                      # XCTest (light coverage)
 - Formatting: follow existing code style; keep changes minimal and focused.
 - Performance: measure large trees; first paint should be fast; enrichment is incremental.
 
+## License
+- Apache License 2.0. See `LICENSE` for full text.
+- `NOTICE` includes project attribution. SPDX: `Apache-2.0`.
+- Third-party attributions and license texts: see `THIRD-PARTY-NOTICES.md`.

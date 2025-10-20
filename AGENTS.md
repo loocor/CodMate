@@ -78,6 +78,7 @@ Session Metadata (Rename/Comment)
 About Surface
 - Settings › About shows app version, build timestamp (derived from the app executable’s modification date), and project URL.
 - “About CodMate” menu item should open Settings pre-selecting the About tab.
+ - Include an “Open Source Licenses” entry that displays `THIRD-PARTY-NOTICES.md` (bundled if present; falls back to repository URL if missing).
 
 Diagnostics
 - Settings › General adds “Diagnose Sessions Directory” to probe the current sessions root and the default `~/.codex/sessions` path: existence, `.jsonl` count, sample files, and enumerator errors.

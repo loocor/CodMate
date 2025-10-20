@@ -2,10 +2,10 @@ import Foundation
 import UserNotifications
 
 final class SystemNotifier: NSObject {
-    static let shared = SystemNotifier()
+    @MainActor static let shared = SystemNotifier()
     private var bootstrapped = false
 
-    func bootstrap() {
+    @MainActor func bootstrap() {
         guard !bootstrapped else { return }
         bootstrapped = true
         let center = UNUserNotificationCenter.current()
@@ -13,19 +13,20 @@ final class SystemNotifier: NSObject {
         Task { _ = try? await center.requestAuthorization(options: [.alert, .sound, .badge]) }
     }
 
-    func notify(title: String, body: String) async {
+    @MainActor func notify(title: String, body: String) async {
         let center = UNUserNotificationCenter.current()
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body
         let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 0.2, repeats: false)
-        let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: trigger)
+        let request = UNNotificationRequest(
+            identifier: UUID().uuidString, content: content, trigger: trigger)
         try? await center.add(request)
     }
 
     // Specialized helper: agent completed and awaits user follow-up.
     // Also posts an in-app notification to update list indicators.
-    func notifyAgentCompleted(sessionID: String, message: String) async {
+    @MainActor func notifyAgentCompleted(sessionID: String, message: String) async {
         await notify(title: "CodMate", body: message)
         NotificationCenter.default.post(
             name: .codMateAgentCompleted,
@@ -35,12 +36,14 @@ final class SystemNotifier: NSObject {
     }
 }
 
-extension SystemNotifier: UNUserNotificationCenterDelegate {
+nonisolated extension SystemNotifier: UNUserNotificationCenterDelegate {
     func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification,
-        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+        withCompletionHandler completionHandler:
+            @escaping (UNNotificationPresentationOptions) -> Void
     ) {
+        // Call completion handler directly without actor hop to avoid sending non-Sendable closure
         completionHandler([.banner, .list, .sound])
     }
 }

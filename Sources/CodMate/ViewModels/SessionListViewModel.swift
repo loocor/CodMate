@@ -106,7 +106,7 @@ final class SessionListViewModel: ObservableObject {
         self.selectedDay = cal.startOfDay(for: today)
         suppressFilterNotifications = false
         configureDirectoryMonitor()
-        Task { await loadProjects() }
+            Task { await loadProjects() }
         // Observe agent completion notifications to surface in list
         NotificationCenter.default.addObserver(
             forName: .codMateAgentCompleted,
@@ -149,7 +149,7 @@ final class SessionListViewModel: ObservableObject {
             let notes = await notesStore.all()
             notesSnapshot = notes
             // Refresh projects/memberships snapshot and import legacy mappings if needed
-            Task {
+            Task { @MainActor in
                 await self.loadProjects()
                 await self.importMembershipsFromNotesIfNeeded(notes: notes)
             }
