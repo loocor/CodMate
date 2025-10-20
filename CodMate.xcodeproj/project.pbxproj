@@ -50,6 +50,8 @@
         41A001132B10000C00000002 /* ProjectsListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41A001132B10000C00000001 /* ProjectsListView.swift */; };
         41A001162B20010E00000002 /* ProjectsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41A001162B20010E00000001 /* ProjectsStore.swift */; };
         41A0011C2B20026000000003 /* SandboxApprovalEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41A0011B2B20026000000002 /* SandboxApprovalEditor.swift */; };
+        41A0011D2B2002A000000002 /* NewWithContextSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41A0011C2B2002A000000001 /* NewWithContextSheet.swift */; };
+        41A0011F2B2002A000000004 /* ContextTreeshaker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41A0011E2B2002A000000003 /* ContextTreeshaker.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -95,6 +97,8 @@
 		41A001042B00000200000001 /* EnvironmentContextInfo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = EnvironmentContextInfo.swift; path = Sources/CodMate/Models/EnvironmentContextInfo.swift; sourceTree = SOURCE_ROOT; };
 		41A001052B00000300000001 /* DirectoryMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = DirectoryMonitor.swift; path = Sources/CodMate/Services/DirectoryMonitor.swift; sourceTree = SOURCE_ROOT; };
         41A0010C2B00000900000001 /* CodexConfigService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CodexConfigService.swift; path = Sources/CodMate/Services/CodexConfigService.swift; sourceTree = SOURCE_ROOT; };
+        41A0011C2B2002A000000001 /* NewWithContextSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NewWithContextSheet.swift; path = Sources/CodMate/Views/NewWithContextSheet.swift; sourceTree = SOURCE_ROOT; };
+        41A0011E2B2002A000000003 /* ContextTreeshaker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ContextTreeshaker.swift; path = Sources/CodMate/Services/ContextTreeshaker.swift; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -175,9 +179,9 @@
 			name = Models;
 			sourceTree = SOURCE_ROOT;
 		};
-		1A00020C2A00000100000001 /* Services */ = {
-			isa = PBXGroup;
-            children = (
+			1A00020C2A00000100000001 /* Services */ = {
+				isa = PBXGroup;
+	            children = (
                 1A0000842A00000100000001 /* SessionIndexer.swift */,
                 1A0000852A00000100000001 /* SessionActions.swift */,
                 1A0000862A00000100000001 /* SessionPreferencesStore.swift */,
@@ -190,31 +194,33 @@
                 311247A32EA3A51D00D8D33E /* ResumeOptions.swift */,
                 41A0010C2B00000900000001 /* CodexConfigService.swift */,
                 41A001162B20010E00000001 /* ProjectsStore.swift */,
+                41A0011E2B2002A000000003 /* ContextTreeshaker.swift */,
             );
             name = Services;
             sourceTree = SOURCE_ROOT;
         };
-		1A00020D2A00000100000001 /* Views */ = {
-			isa = PBXGroup;
-			children = (
+			1A00020D2A00000100000001 /* Views */ = {
+				isa = PBXGroup;
+				children = (
                 41A0011A2B20026000000001 /* Components */,
-				1A00008A2A00000100000001 /* SessionNavigationView.swift */,
-				1A0001222A00000100000001 /* CalendarMonthView.swift */,
-				1A0001232A00000100000001 /* PathTreeView.swift */,
-				1A00008B2A00000100000001 /* SessionListColumnView.swift */,
-				1A00008C2A00000100000001 /* SessionListRowView.swift */,
-				1A00008D2A00000100000001 /* SessionDetailView.swift */,
-				1A0001262A00000100000001 /* ConversationTimelineView.swift */,
-				1A0001272A00000100000001 /* SettingsView.swift */,
-				31B626712EA24A9E008CA40F /* EmbeddedTerminalView.swift */,
-				31B626772EA26BEE008CA40F /* TerminalHostView.swift */,
-				311247A12EA38F7600D8D33E /* WindowConfigurator.swift */,
-				311247AB2EA3BBED00D8D33E /* EditSessionMetaView.swift */,
+					1A00008A2A00000100000001 /* SessionNavigationView.swift */,
+					1A0001222A00000100000001 /* CalendarMonthView.swift */,
+					1A0001232A00000100000001 /* PathTreeView.swift */,
+					1A00008B2A00000100000001 /* SessionListColumnView.swift */,
+					1A00008C2A00000100000001 /* SessionListRowView.swift */,
+					1A00008D2A00000100000001 /* SessionDetailView.swift */,
+					1A0001262A00000100000001 /* ConversationTimelineView.swift */,
+					1A0001272A00000100000001 /* SettingsView.swift */,
+					31B626712EA24A9E008CA40F /* EmbeddedTerminalView.swift */,
+					31B626772EA26BEE008CA40F /* TerminalHostView.swift */,
+					311247A12EA38F7600D8D33E /* WindowConfigurator.swift */,
+					311247AB2EA3BBED00D8D33E /* EditSessionMetaView.swift */,
                 41A001132B10000C00000001 /* ProjectsListView.swift */,
-			);
-			name = Views;
-			sourceTree = SOURCE_ROOT;
-		};
+                41A0011C2B2002A000000001 /* NewWithContextSheet.swift */,
+				);
+				name = Views;
+				sourceTree = SOURCE_ROOT;
+			};
         41A0011A2B20026000000001 /* Components */ = {
             isa = PBXGroup;
             children = (
@@ -331,6 +337,8 @@
                 41A001132B10000C00000002 /* ProjectsListView.swift in Sources */,
                 41A001162B20010E00000002 /* ProjectsStore.swift in Sources */,
                 41A0011C2B20026000000003 /* SandboxApprovalEditor.swift in Sources */,
+                41A0011D2B2002A000000002 /* NewWithContextSheet.swift in Sources */,
+                41A0011F2B2002A000000004 /* ContextTreeshaker.swift in Sources */,
             );
 			runOnlyForDeploymentPostprocessing = 0;
 		};
