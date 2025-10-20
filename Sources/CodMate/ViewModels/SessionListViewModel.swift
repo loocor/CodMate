@@ -15,6 +15,11 @@ final class SessionListViewModel: ObservableObject {
     @Published var enrichmentTotal: Int = 0
     @Published var errorMessage: String?
 
+    // Title/Comment quick search for the middle list only
+    @Published var quickSearchText: String = "" {
+        didSet { applyFilters() }
+    }
+
     // New filter state: supports combined filters
     @Published var selectedPath: String? = nil {
         didSet {
@@ -107,13 +112,16 @@ final class SessionListViewModel: ObservableObject {
             object: nil,
             queue: .main
         ) { [weak self] note in
-            guard let self else { return }
-            if let id = note.userInfo?["sessionID"] as? String {
-                self.awaitingFollowupIDs.insert(id)
+            guard let id = note.userInfo?["sessionID"] as? String else { return }
+            Task { @MainActor in
+                self?.awaitingFollowupIDs.insert(id)
             }
         }
         startActivityPruneTicker()
     }
+
+    // Immediate apply from UI (e.g., pressing Return in search field)
+    func immediateApplyQuickSearch(_ text: String) { quickSearchText = text }
 
     private var activeRefreshToken = UUID()
 
@@ -290,18 +298,19 @@ final class SessionListViewModel: ObservableObject {
     func openNewSession(project: Project) {
         // Respect preferred external app setting
         let app = preferences.defaultResumeExternalApp
-        let dir = project.directory
+        let dirOpt = project.directory
         switch app {
         case .iterm2:
             let cmd = buildNewProjectCLIInvocation(project: project)
-            actions.openTerminalViaScheme(.iterm2, directory: dir, command: cmd)
+            actions.openTerminalViaScheme(.iterm2, directory: dirOpt, command: cmd)
         case .warp:
-            actions.openTerminalViaScheme(.warp, directory: dir)
+            actions.openTerminalViaScheme(.warp, directory: dirOpt)
             copyNewProjectCommands(project: project)
         case .terminal:
             _ = actions.openNewProject(project: project, executableURL: preferences.codexExecutableURL, options: preferences.resumeOptions)
         case .none:
-            _ = actions.openAppleTerminal(at: dir)
+            let fallback = dirOpt ?? NSHomeDirectory()
+            _ = actions.openAppleTerminal(at: fallback)
             copyNewProjectCommands(project: project)
         }
         Task { await SystemNotifier.shared.notify(title: "CodMate", body: "Command copied. Paste it in the opened terminal.") }
@@ -510,8 +519,11 @@ final class SessionListViewModel: ObservableObject {
         // 2. Project filter (based on ProjectsStore explicit mapping)
         if let pid = selectedProjectId {
             let memberships = projectMemberships
+            // include descendants of selected project
+            let descendants = Set(self.collectDescendants(of: pid, in: self.projects))
             filtered = filtered.filter { summary in
-                memberships[summary.id] == pid
+                guard let assigned = memberships[summary.id] else { return false }
+                return assigned == pid || descendants.contains(assigned)
             }
         }
 
@@ -531,11 +543,14 @@ final class SessionListViewModel: ObservableObject {
             }
         }
 
-        // 4. Search filter
-        let term = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !term.isEmpty {
-            filtered = filtered.filter { summary in
-                summary.matches(search: term) || fulltextMatches.contains(summary.id)
+        // 4. Quick search (title/comment only, lightweight)
+        let q = quickSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !q.isEmpty {
+            let needle = q.lowercased()
+            filtered = filtered.filter { s in
+                if s.effectiveTitle.lowercased().contains(needle) { return true }
+                if let c = s.userComment?.lowercased(), c.contains(needle) { return true }
+                return false
             }
         }
 
@@ -858,9 +873,10 @@ final class SessionListViewModel: ObservableObject {
                     modified[s.id] = m
                 }
             }
+            let snapshot = modified
             await MainActor.run {
                 let now = Date()
-                for (id, m) in modified {
+                for (id, m) in snapshot {
                     let previous = self.fileMTimeCache[id]
                     self.fileMTimeCache[id] = m
                     if let previous, m > previous {
@@ -960,6 +976,73 @@ extension SessionListViewModel {
 
     func projectCountsFromStore() -> [String: Int] { projectCounts }
 
+    // Visible counts per project considering only current dateDimension/selectedDay.
+    // Ignores search text and project selection to give a global sense under the date scope.
+    func visibleProjectCountsForDateScope() -> [String: Int] {
+        var visible: [String: Int] = [:]
+        let cal = Calendar.current
+        for s in allSessions {
+            // Date filter
+            if let day = selectedDay {
+                let refDate: Date = {
+                    switch dateDimension {
+                    case .created: return s.startedAt
+                    case .updated: return s.lastUpdatedAt ?? s.startedAt
+                    }
+                }()
+                if !cal.isDate(refDate, inSameDayAs: day) { continue }
+            }
+            if let pid = projectMemberships[s.id] {
+                visible[pid, default: 0] += 1
+            }
+        }
+        return visible
+    }
+
+    // Aggregated counts including subtree for display (visible/total)
+    func projectCountsDisplay() -> [String: (visible: Int, total: Int)] {
+        let directVisible = visibleProjectCountsForDateScope()
+        let directTotal = projectCounts
+        // Build children index
+        var children: [String: [String]] = [:]
+        for p in projects {
+            if let parent = p.parentId { children[parent, default: []].append(p.id) }
+        }
+        // DFS to sum subtree counts
+        func aggregate(for id: String, using map: inout [String: (Int, Int)]) -> (Int, Int) {
+            if let cached = map[id] { return cached }
+            var v = directVisible[id] ?? 0
+            var t = directTotal[id] ?? 0
+            for c in (children[id] ?? []) {
+                let (cv, ct) = aggregate(for: c, using: &map)
+                v += cv; t += ct
+            }
+            map[id] = (v, t)
+            return (v, t)
+        }
+        var memo: [String: (Int, Int)] = [:]
+        var out: [String: (visible: Int, total: Int)] = [:]
+        for p in projects {
+            let (v, t) = aggregate(for: p.id, using: &memo)
+            out[p.id] = (v, t)
+        }
+        return out
+    }
+
+    // All-row visible count under current date scope (ignores project/path/search filters)
+    func visibleAllCountForDateScope() -> Int {
+        let cal = Calendar.current
+        var count = 0
+        for s in allSessions {
+            if let day = selectedDay {
+                let ref: Date = (dateDimension == .created) ? s.startedAt : (s.lastUpdatedAt ?? s.startedAt)
+                if !cal.isDate(ref, inSameDayAs: day) { continue }
+            }
+            count += 1
+        }
+        return count
+    }
+
     // Project upsert/delete with config sync
     func createOrUpdateProject(_ project: Project) async {
         await projectsStore.upsertProject(project)
@@ -971,6 +1054,42 @@ extension SessionListViewModel {
         await loadProjects()
         if selectedProjectId == id { selectedProjectId = nil }
         applyFilters()
+    }
+
+    // Delete project and all descendants
+    func deleteProjectCascade(id: String) async {
+        let list = await projectsStore.listProjects()
+        let ids = collectDescendants(of: id, in: list) + [id]
+        for pid in ids { await projectsStore.deleteProject(id: pid) }
+        await loadProjects()
+        if let sel = selectedProjectId, ids.contains(sel) { selectedProjectId = nil }
+        applyFilters()
+    }
+
+    // Delete project and move its direct children to top level (keep grandchildren nested)
+    func deleteProjectMoveChildrenUp(id: String) async {
+        let list = await projectsStore.listProjects()
+        for p in list where p.parentId == id {
+            var moved = p
+            moved.parentId = nil
+            await projectsStore.upsertProject(moved)
+        }
+        await projectsStore.deleteProject(id: id)
+        await loadProjects()
+        if selectedProjectId == id { selectedProjectId = nil }
+        applyFilters()
+    }
+
+    private func collectDescendants(of id: String, in list: [Project]) -> [String] {
+        var result: [String] = []
+        func dfs(_ pid: String) {
+            for p in list where p.parentId == pid {
+                result.append(p.id)
+                dfs(p.id)
+            }
+        }
+        dfs(id)
+        return result
     }
 
     // Import memberships from notes.projectId one-time when store is empty

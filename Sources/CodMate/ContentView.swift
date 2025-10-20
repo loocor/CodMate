@@ -69,7 +69,7 @@ struct ContentView: View {
         }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                toolbarContent
+                refreshToolbarContent
             }
         }
         .alert(item: $alertState) { state in
@@ -141,12 +141,8 @@ struct ContentView: View {
         }
     }
     
-    private var toolbarContent: some View {
+    private var refreshToolbarContent: some View {
         HStack(spacing: 12) {
-            TextField("Search Sessions", text: $viewModel.searchText)
-                .textFieldStyle(.roundedBorder)
-                .frame(width: 360)
-
             Button {
                 Task { await viewModel.refreshSessions(force: true) }
             } label: {

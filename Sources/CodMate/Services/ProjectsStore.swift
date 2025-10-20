@@ -8,12 +8,13 @@ import Foundation
 struct ProjectMeta: Codable, Hashable, Sendable {
     var id: String
     var name: String
-    var directory: String
+    var directory: String?
     var trustLevel: String?
     var overview: String?
     var instructions: String?
     var profileId: String?
     var profile: ProjectProfile?
+    var parentId: String?
     var createdAt: Date
     var updatedAt: Date
 
@@ -26,12 +27,13 @@ struct ProjectMeta: Codable, Hashable, Sendable {
         self.instructions = project.instructions
         self.profileId = project.profileId
         self.profile = project.profile
+        self.parentId = project.parentId
         self.createdAt = Date()
         self.updatedAt = Date()
     }
 
     func asProject() -> Project {
-        Project(id: id, name: name, directory: directory, trustLevel: trustLevel, overview: overview, instructions: instructions, profileId: profileId, profile: profile)
+        Project(id: id, name: name, directory: directory, trustLevel: trustLevel, overview: overview, instructions: instructions, profileId: profileId, profile: profile, parentId: parentId)
     }
 }
 
@@ -73,10 +75,11 @@ actor ProjectsStore {
         }
         // Load metadata
         if let en = fm.enumerator(at: paths.metadataDir, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles]) {
+            let dec = JSONDecoder(); dec.dateDecodingStrategy = .iso8601
             for case let url as URL in en {
                 if url.pathExtension.lowercased() != "json" { continue }
                 if let data = try? Data(contentsOf: url),
-                   let meta = try? JSONDecoder().decode(ProjectMeta.self, from: data)
+                   let meta = try? dec.decode(ProjectMeta.self, from: data)
                 {
                     self.projects[meta.id] = meta
                 }
@@ -97,6 +100,7 @@ actor ProjectsStore {
         meta.instructions = p.instructions
         meta.profileId = p.profileId
         meta.profile = p.profile
+        meta.parentId = p.parentId
         meta.updatedAt = Date()
         projects[p.id] = meta
         saveProjectMeta(meta)
