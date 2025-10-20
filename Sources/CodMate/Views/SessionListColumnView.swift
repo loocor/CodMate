@@ -92,6 +92,11 @@ struct SessionListColumnView: View {
                                     }
                                     Divider()
                                     Button {
+                                        Task { await viewModel.regenerateAutoTitleAndOverview(for: session) }
+                                    } label: {
+                                        Label("Regenerate Auto Title & Overview", systemImage: "sparkles")
+                                    }
+                                    Button {
                                         Task { await viewModel.beginEditing(session: session) }
                                     } label: {
                                         Label("Edit Title & Comment", systemImage: "pencil")
@@ -374,6 +379,7 @@ extension TimeInterval {
                     fileSizeBytes: 12340,
                     startedAt: Date().addingTimeInterval(-7200),
                     endedAt: Date().addingTimeInterval(-3600),
+                    activeDuration: nil,
                     cliVersion: "1.2.3",
                     cwd: "/Users/developer/projects/codmate",
                     originator: "developer",
@@ -396,6 +402,7 @@ extension TimeInterval {
                     fileSizeBytes: 8900,
                     startedAt: Date().addingTimeInterval(-10800),
                     endedAt: Date().addingTimeInterval(-9000),
+                    activeDuration: nil,
                     cliVersion: "1.2.3",
                     cwd: "/Users/developer/projects/test",
                     originator: "developer",
@@ -426,6 +433,7 @@ extension TimeInterval {
                     fileSizeBytes: 15600,
                     startedAt: Date().addingTimeInterval(-172800),
                     endedAt: Date().addingTimeInterval(-158400),
+                    activeDuration: nil,
                     cliVersion: "1.2.2",
                     cwd: "/Users/developer/documents",
                     originator: "developer",

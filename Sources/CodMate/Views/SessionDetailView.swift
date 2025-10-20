@@ -444,6 +444,7 @@ extension SessionDetailView {
         fileSizeBytes: 15420,
         startedAt: Date().addingTimeInterval(-3600),  // 1 hour ago
         endedAt: Date().addingTimeInterval(-1800),  // 30 minutes ago
+        activeDuration: nil,
         cliVersion: "1.2.3",
         cwd: "/Users/developer/projects/codmate",
         originator: "developer",
@@ -478,6 +479,7 @@ extension SessionDetailView {
         fileSizeBytes: 8200,
         startedAt: Date().addingTimeInterval(-7200),
         endedAt: nil,
+        activeDuration: nil,
         cliVersion: "1.2.3",
         cwd: "/Users/developer/projects/test",
         originator: "developer",
