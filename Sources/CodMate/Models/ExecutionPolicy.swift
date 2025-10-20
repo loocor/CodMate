@@ -1,6 +1,6 @@
 import Foundation
 
-enum SandboxMode: String, CaseIterable, Identifiable {
+enum SandboxMode: String, CaseIterable, Identifiable, Codable {
     case readOnly = "read-only"
     case workspaceWrite = "workspace-write"
     case dangerFullAccess = "danger-full-access"
@@ -15,7 +15,7 @@ enum SandboxMode: String, CaseIterable, Identifiable {
     }
 }
 
-enum ApprovalPolicy: String, CaseIterable, Identifiable {
+enum ApprovalPolicy: String, CaseIterable, Identifiable, Codable {
     case untrusted
     case onFailure = "on-failure"
     case onRequest = "on-request"
@@ -38,4 +38,3 @@ struct ResumeOptions {
     var fullAuto: Bool
     var dangerouslyBypass: Bool
 }
-

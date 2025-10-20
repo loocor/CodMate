@@ -74,6 +74,7 @@ struct CalendarMonthView: View {
         }
         .buttonStyle(.plain)
         .frame(width: columnWidth, height: 38)
+        .help(day > 0 ? helpText(for: day, isSelected: isSelected) : "")
     }
     
     private func dayCellContent(day: Int, isSelected: Bool) -> some View {
@@ -119,6 +120,15 @@ struct CalendarMonthView: View {
         guard day > 0, let selectedDay = selectedDay else { return false }
         let cellDate = calendar.date(bySetting: .day, value: day, of: monthStart)!
         return calendar.isDate(calendar.startOfDay(for: cellDate), inSameDayAs: selectedDay)
+    }
+    
+    private func helpText(for day: Int, isSelected: Bool) -> String {
+        let count = counts[day] ?? 0
+        if isSelected {
+            return "\(count) sessions • Click again to clear day filter"
+        } else {
+            return "\(count) sessions • Click to filter by this day"
+        }
     }
     
     private func monthGrid() -> [[Int]] {

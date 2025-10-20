@@ -10,62 +10,43 @@ struct SessionNavigationView: View {
     @State private var dimension: DateDimension = .updated
     @State private var showNewProject = false
 
-    @State private var sidebarMode: SidebarMode = .directories
-
     var body: some View {
         VStack(spacing: 0) {
-            // 顶部固定：All Sessions
-            allSessionsRow
-                .padding(.horizontal, 8)
-                .padding(.vertical, 8)
-
-            Divider()
-
-            // 中部可滚动：目录/项目 切换
+            // Projects list only (clean, simplified)
             VStack(spacing: 8) {
                 HStack(spacing: 8) {
-                    Picker("", selection: $sidebarMode) {
-                        Text("Directories").tag(SidebarMode.directories)
-                        Text("Projects").tag(SidebarMode.projects)
-                    }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
+                    Text("Projects").font(.caption).foregroundStyle(.secondary)
                     Spacer(minLength: 4)
-                    if sidebarMode == .projects {
-                        Button {
-                            showNewProject = true
-                        } label: {
-                            Image(systemName: "plus")
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                        .help("New Project")
+                    Button {
+                        showNewProject = true
+                    } label: {
+                        Image(systemName: "plus")
                     }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .help("New Project")
                 }
 
-                Group {
-                    switch sidebarMode {
-                    case .directories:
-                        PathTreeView(
-                            root: viewModel.pathTreeRoot,
-                            selectedPath: $viewModel.selectedPath
-                        )
-                    case .projects:
-                        ProjectsListView()
-                    }
+                VStack(spacing: 8) {
+                    scopeAllRow(
+                        title: "All",
+                        isSelected: viewModel.selectedProjectId == nil,
+                        icon: "square.grid.2x2",
+                        action: { viewModel.setSelectedProject(nil) }
+                    )
+                    ProjectsListView()
                 }
             }
             .padding(.horizontal, 8)
             .padding(.top, 8)
             .frame(maxHeight: .infinity)
 
-            // 底部固定：日历区域（与目录树间隔 8pt）
+            // Bottom (fixed): calendar section (8pt spacing from middle)
             calendarSection
                 .padding(.top, 8)
         }
         .frame(idealWidth: 260)
         .task {
-            viewModel.ensurePathTree()
             _ = viewModel.calendarCounts(for: monthStart, dimension: dimension)
             // Ensure dimension is synced on startup
             viewModel.dateDimension = dimension
@@ -82,36 +63,22 @@ struct SessionNavigationView: View {
         }
     }
 
-    private var allSessionsRow: some View {
-        let isSelected = viewModel.selectedPath == nil
-
-        return HStack(spacing: 8) {
-            Image(systemName: "tray.full")
+    private func scopeAllRow(title: String, isSelected: Bool, icon: String, action: @escaping () -> Void) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: icon)
                 .foregroundStyle(isSelected ? Color.white : Color.secondary)
                 .font(.caption)
-
-            Text("All Sessions")
+            Text(title)
                 .font(.caption)
                 .foregroundStyle(isSelected ? Color.white : Color.primary)
-
             Spacer(minLength: 8)
-
-            if isLoading {
-                ProgressView().controlSize(.small)
-            } else {
-                Text(totalCount > 0 ? "\(totalCount)" : "—")
-                    .font(.caption2.monospacedDigit())
-                    .foregroundStyle(isSelected ? Color.white.opacity(0.9) : Color.secondary.opacity(0.5))
-            }
         }
         .frame(height: 16)
         .padding(8)
         .background(isSelected ? Color.accentColor : Color.clear)
         .cornerRadius(8)
         .contentShape(Rectangle())
-        .onTapGesture {
-            viewModel.clearAllFilters()
-        }
+        .onTapGesture { action() }
     }
 
     private var calendarSection: some View {
@@ -134,7 +101,13 @@ struct SessionNavigationView: View {
                 counts: viewModel.calendarCounts(for: monthStart, dimension: dimension),
                 selectedDay: viewModel.selectedDay
             ) { picked in
-                viewModel.setSelectedDay(picked)
+                // Toggle behavior: clicking the same selected day clears the date filter
+                if let current = viewModel.selectedDay,
+                   Calendar.current.isDate(current, inSameDayAs: picked) {
+                    viewModel.setSelectedDay(nil)
+                } else {
+                    viewModel.setSelectedDay(picked)
+                }
             }
         }
         .frame(height: 280)

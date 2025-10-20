@@ -204,7 +204,7 @@ struct SessionDetailView: View {
 
             Spacer()
 
-            // 搜索（内嵌放大镜与清除按钮，自绘样式以兼容性为先）
+            // Search (inline magnifier and clear button, custom style for compatibility)
             conversationSearchField
 
             // Sort order toggle
@@ -290,7 +290,7 @@ struct SessionDetailView: View {
 
 // MARK: - Export
 extension SessionDetailView {
-    // 自定义搜索框，保证 macOS 兼容性
+    // Custom search field to ensure macOS compatibility
     private var conversationSearchField: some View {
         HStack(spacing: 6) {
             Image(systemName: "magnifyingglass")

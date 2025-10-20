@@ -48,6 +48,8 @@
 		41A0010D2B00000900000001 /* CodexConfigService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41A0010C2B00000900000001 /* CodexConfigService.swift */; };
         41A001112B10000B00000002 /* Project.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41A001112B10000B00000001 /* Project.swift */; };
         41A001132B10000C00000002 /* ProjectsListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41A001132B10000C00000001 /* ProjectsListView.swift */; };
+        41A001162B20010E00000002 /* ProjectsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41A001162B20010E00000001 /* ProjectsStore.swift */; };
+        41A0011C2B20026000000003 /* SandboxApprovalEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41A0011B2B20026000000002 /* SandboxApprovalEditor.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -88,6 +90,7 @@
 		31B626752EA26B6D008CA40F /* TerminalSessionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = TerminalSessionManager.swift; path = Sources/CodMate/Services/TerminalSessionManager.swift; sourceTree = SOURCE_ROOT; };
 		31B626772EA26BEE008CA40F /* TerminalHostView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = TerminalHostView.swift; path = Sources/CodMate/Views/TerminalHostView.swift; sourceTree = SOURCE_ROOT; };
 		31B626792EA279CC008CA40F /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; name = Assets.xcassets; path = CodMate/Assets.xcassets; sourceTree = SOURCE_ROOT; };
+        41A001162B20010E00000001 /* ProjectsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ProjectsStore.swift; path = Sources/CodMate/Services/ProjectsStore.swift; sourceTree = SOURCE_ROOT; };
 		31B6267C2EA28000008CA40F /* SettingCategory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SettingCategory.swift; path = Sources/CodMate/Models/SettingCategory.swift; sourceTree = SOURCE_ROOT; };
 		41A001042B00000200000001 /* EnvironmentContextInfo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = EnvironmentContextInfo.swift; path = Sources/CodMate/Models/EnvironmentContextInfo.swift; sourceTree = SOURCE_ROOT; };
 		41A001052B00000300000001 /* DirectoryMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = DirectoryMonitor.swift; path = Sources/CodMate/Services/DirectoryMonitor.swift; sourceTree = SOURCE_ROOT; };
@@ -186,6 +189,7 @@
                 31B626752EA26B6D008CA40F /* TerminalSessionManager.swift */,
                 311247A32EA3A51D00D8D33E /* ResumeOptions.swift */,
                 41A0010C2B00000900000001 /* CodexConfigService.swift */,
+                41A001162B20010E00000001 /* ProjectsStore.swift */,
             );
             name = Services;
             sourceTree = SOURCE_ROOT;
@@ -193,6 +197,7 @@
 		1A00020D2A00000100000001 /* Views */ = {
 			isa = PBXGroup;
 			children = (
+                41A0011A2B20026000000001 /* Components */,
 				1A00008A2A00000100000001 /* SessionNavigationView.swift */,
 				1A0001222A00000100000001 /* CalendarMonthView.swift */,
 				1A0001232A00000100000001 /* PathTreeView.swift */,
@@ -210,6 +215,14 @@
 			name = Views;
 			sourceTree = SOURCE_ROOT;
 		};
+        41A0011A2B20026000000001 /* Components */ = {
+            isa = PBXGroup;
+            children = (
+                41A0011B2B20026000000002 /* SandboxApprovalEditor.swift */,
+            );
+            name = Components;
+            sourceTree = SOURCE_ROOT;
+        };
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -316,6 +329,8 @@
                 41A0010E2B00000A00000001 /* SessionsDiagnosticsService.swift in Sources */,
                 41A001112B10000B00000002 /* Project.swift in Sources */,
                 41A001132B10000C00000002 /* ProjectsListView.swift in Sources */,
+                41A001162B20010E00000002 /* ProjectsStore.swift in Sources */,
+                41A0011C2B20026000000003 /* SandboxApprovalEditor.swift in Sources */,
             );
 			runOnlyForDeploymentPostprocessing = 0;
 		};

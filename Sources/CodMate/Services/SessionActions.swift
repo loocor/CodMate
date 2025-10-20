@@ -216,9 +216,23 @@ struct SessionActions {
     // MARK: - Project-level new session helpers
     private func buildNewProjectArguments(project: Project, options: ResumeOptions) -> [String] {
         var args: [String] = []
-        // Prefer profile when provided
+        // Embedded per-project profile config (preferred)
+        if let pp = project.profile {
+            if let model = pp.model, !model.isEmpty { args += ["--model", model] }
+            if pp.dangerouslyBypass == true {
+                args += ["--dangerously-bypass-approvals-and-sandbox"]
+            } else if pp.fullAuto == true {
+                args += ["--full-auto"]
+            } else {
+                if let s = pp.sandbox { args += ["-s", s.rawValue] }
+                if let a = pp.approval { args += ["-a", a.rawValue] }
+            }
+        } else {
+            // Fallback to explicit flags + model from session
+            args += flags(from: options)
+        }
+        // If a named profile id is provided, keep it to let CLI load in-file configs too.
         if let profile = project.profileId, !profile.isEmpty { args += ["--profile", profile] }
-        args += flags(from: options)
         return args
     }
 
@@ -234,8 +248,26 @@ struct SessionActions {
     func buildNewProjectCommandLines(project: Project, executableURL: URL, options: ResumeOptions) -> String {
         _ = executableURL
         let cd = "cd " + shellEscapedPath(project.directory)
-        let injectedPATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:${PATH}"
-        let exports = "export LANG=zh_CN.UTF-8; export LC_ALL=zh_CN.UTF-8; export LC_CTYPE=zh_CN.UTF-8; export TERM=xterm-256color"
+        // PATH injection: prepend project-specific paths if any
+        let prepend = project.profile?.pathPrepend ?? []
+        let prependString = prepend.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }.joined(separator: ":")
+        let defaultPATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+        let injectedPATH = (prependString.isEmpty ? defaultPATH : prependString + ":" + defaultPATH) + ":${PATH}"
+        // Exports: locale defaults + project env
+        var exportLines: [String] = [
+            "export LANG=zh_CN.UTF-8",
+            "export LC_ALL=zh_CN.UTF-8",
+            "export LC_CTYPE=zh_CN.UTF-8",
+            "export TERM=xterm-256color",
+        ]
+        if let env = project.profile?.env {
+            for (k, v) in env {
+                let key = k.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !key.isEmpty else { continue }
+                exportLines.append("export \(key)=\(shellSingleQuoted(v))")
+            }
+        }
+        let exports = exportLines.joined(separator: "; ")
         let invocation = buildNewProjectCLIInvocation(project: project, options: options)
         let command = "PATH=\(injectedPATH) \(invocation)"
         return cd + "\n" + exports + "\n" + command + "\n"
@@ -244,8 +276,27 @@ struct SessionActions {
     func buildExternalNewProjectCommands(project: Project, executableURL: URL, options: ResumeOptions) -> String {
         _ = executableURL
         let cd = "cd " + shellEscapedPath(project.directory)
+        // Build exports similarly to embedded version so users can paste easily
+        let prepend = project.profile?.pathPrepend ?? []
+        let prependString = prepend.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }.joined(separator: ":")
+        let defaultPATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+        let injectedPATH = (prependString.isEmpty ? defaultPATH : prependString + ":" + defaultPATH) + ":${PATH}"
+        var exportLines: [String] = [
+            "export LANG=zh_CN.UTF-8",
+            "export LC_ALL=zh_CN.UTF-8",
+            "export LC_CTYPE=zh_CN.UTF-8",
+            "export TERM=xterm-256color",
+        ]
+        if let env = project.profile?.env {
+            for (k, v) in env {
+                let key = k.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !key.isEmpty else { continue }
+                exportLines.append("export \(key)=\(shellSingleQuoted(v))")
+            }
+        }
+        let exports = exportLines.joined(separator: "; ")
         let cmd = buildNewProjectCLIInvocation(project: project, options: options)
-        return cd + "\n" + cmd + "\n"
+        return cd + "\n" + exports + "\n" + "PATH=\(injectedPATH) \(cmd)\n"
     }
 
     func copyNewProjectCommands(project: Project, executableURL: URL, options: ResumeOptions, simplifiedForExternal: Bool = true) {
@@ -276,6 +327,11 @@ struct SessionActions {
             return errorDict == nil
         }
         return false
+    }
+
+    // MARK: - Helpers
+    private func shellSingleQuoted(_ v: String) -> String {
+        "'" + v.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 
     func copyRealResumeInvocation(session: SessionSummary, executableURL: URL, options: ResumeOptions) {

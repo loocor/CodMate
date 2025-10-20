@@ -1,7 +1,7 @@
 import Foundation
 import OSLog
 
-// 轻量级磁盘缓存
+// Lightweight disk cache
 fileprivate actor DiskCache {
     private struct Entry: Codable {
         let path: String
@@ -18,7 +18,7 @@ fileprivate actor DiskCache {
         try? fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
         url = dir.appendingPathComponent("sessionIndex-v2.json")
 
-        // 加载缓存
+        // Load cache on init
         if let data = try? Data(contentsOf: url),
             let entries = try? JSONDecoder().decode([Entry].self, from: data)
         {
@@ -38,7 +38,7 @@ fileprivate actor DiskCache {
     func set(path: String, modificationDate: Date?, summary: SessionSummary) {
         let mt = modificationDate?.timeIntervalSince1970
         map[path] = Entry(path: path, modificationTime: mt, summary: summary)
-        // 简单的保存逻辑
+        // Simple save logic
         let entries = Array(map.values)
         if let data = try? JSONEncoder().encode(entries) {
             try? data.write(to: url, options: .atomic)
@@ -231,7 +231,7 @@ actor SessionIndexer {
         let comps = cal.dateComponents([.year, .month], from: monthStart)
         guard let year = comps.year, let month = comps.month else { return [:] }
 
-        // Updated 维度需要扫描所有文件，因为跨月更新的会话可能在任何月份的目录中
+        // For the Updated dimension we must scan all files, since cross-month updates can land in any month folder
         let scanURL: URL
         if dimension == .updated {
             scanURL = root
@@ -275,10 +275,10 @@ actor SessionIndexer {
 
     // MARK: - Updated dimension index
 
-    /// 快速索引：记录每个文件的最后更新日期，避免重复扫描
+    /// Fast index: record the last update timestamp per file to avoid repeated scans
     private var updatedDateIndex: [String: Date] = [:]
 
-    /// 构建 Updated 维度的日期索引（后台异步进行）
+    /// Build the date index for the Updated dimension (async in the background)
     func buildUpdatedIndex(root: URL) async -> [String: Date] {
         var index: [String: Date] = [:]
         guard
@@ -296,7 +296,7 @@ actor SessionIndexer {
                 guard url.pathExtension.lowercased() == "jsonl" else { continue }
                 group.addTask { [weak self] in
                     guard let self else { return nil }
-                    // 先尝试从磁盘缓存读取
+                    // Try disk cache first
                     let values = try? url.resourceValues(forKeys: [.contentModificationDateKey])
                     if let cached = await self.diskCache.get(
                         path: url.path,
@@ -304,7 +304,7 @@ actor SessionIndexer {
                     ), let updated = cached.lastUpdatedAt {
                         return (url.path, updated)
                     }
-                    // 否则快速读取尾部时间戳
+                    // Otherwise read tail timestamp quickly
                     if let tailDate = self.readTailTimestamp(url: url) {
                         return (url.path, tailDate)
                     }
@@ -320,7 +320,7 @@ actor SessionIndexer {
         return index
     }
 
-    /// 根据 Updated 索引快速筛选需要加载的文件
+    /// Quickly filter files to load based on the Updated index
     func sessionFileURLsForUpdatedDay(root: URL, day: Date, index: [String: Date]) -> [URL] {
         let cal = Calendar.current
         let dayStart = cal.startOfDay(for: day)

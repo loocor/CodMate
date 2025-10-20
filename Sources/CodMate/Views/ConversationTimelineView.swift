@@ -293,7 +293,7 @@ private struct ConversationTimelinePreview: View {
             timestamp: now,
             actor: .user,
             title: nil,
-            text: "请帮我梳理 MCP Mate 项目的多租户设计思路。",
+            text: "Please outline a multi-tenant design for the MCP Mate project.",
             metadata: nil
         )
         let infoEvent = TimelineEvent(
@@ -310,7 +310,7 @@ private struct ConversationTimelinePreview: View {
             timestamp: now.addingTimeInterval(12),
             actor: .assistant,
             title: nil,
-            text: "当然可以，以下是多租户设计需要考虑的关键要点……",
+            text: "Certainly. Here are the key considerations for a multi-tenant design...",
             metadata: nil
         )
         return ConversationTurn(
@@ -331,7 +331,7 @@ private struct ConversationTimelinePreview: View {
     }
 }
 
-// 本文件内提供小手指针扩展，确保可点击区域光标一致
+// Provide a handy pointer extension to keep cursor behavior consistent on clickable areas
 extension View {
     func hoverHand() -> some View {
         self.onHover { inside in

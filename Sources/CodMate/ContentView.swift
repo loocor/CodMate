@@ -197,7 +197,7 @@ struct ContentView: View {
                                         .stroke(Color.white.opacity(0.08), lineWidth: 1)
                                 )
 
-                            // NOTE: 终端最大化/还原按钮暂时隐藏，待折叠逻辑完善后恢复显示
+                            // NOTE: Temporarily hide maximize/restore; re-enable after fold logic is refined
                             // maximizeToggleButton()
                             //     .padding(.top, 18)
                             //     .padding(.trailing, 18)
@@ -259,7 +259,7 @@ struct ContentView: View {
                             let dir = FileManager.default.fileExists(atPath: f.cwd) ? f.cwd : f.fileURL.deletingLastPathComponent().path
                             viewModel.copyResumeCommands(session: f)
                             _ = viewModel.openAppleTerminal(at: dir)
-                            Task { await SystemNotifier.shared.notify(title: "CodMate", body: "命令已拷贝，请粘贴到打开的终端") }
+                            Task { await SystemNotifier.shared.notify(title: "CodMate", body: "Command copied. Paste it in the opened terminal.") }
                         }
                     } label: { Label("Open in Terminal", systemImage: "terminal") }
 
@@ -278,7 +278,7 @@ struct ContentView: View {
                             let dir = FileManager.default.fileExists(atPath: f.cwd) ? f.cwd : f.fileURL.deletingLastPathComponent().path
                             viewModel.copyResumeCommands(session: f)
                             viewModel.openPreferredTerminalViaScheme(app: .warp, directory: dir)
-                            Task { await SystemNotifier.shared.notify(title: "CodMate", body: "命令已拷贝，请粘贴到打开的终端") }
+                            Task { await SystemNotifier.shared.notify(title: "CodMate", body: "Command copied. Paste it in the opened terminal.") }
                         }
                     } label: { Label("Open in Warp (Path)", systemImage: "app.gift.fill") }
 
@@ -316,7 +316,7 @@ struct ContentView: View {
 
                     Button {
                         viewModel.copyRealResumeCommand(session: focused)
-                        Task { await SystemNotifier.shared.notify(title: "CodMate", body: "真实命令已拷贝") }
+                        Task { await SystemNotifier.shared.notify(title: "CodMate", body: "Real command copied") }
                     } label: {
                         Image(systemName: "doc.on.doc")
                     }
@@ -438,7 +438,7 @@ struct ContentView: View {
         case .none:
             break
         }
-        Task { await SystemNotifier.shared.notify(title: "CodMate", body: "命令已拷贝，请粘贴到打开的终端") }
+        Task { await SystemNotifier.shared.notify(title: "CodMate", body: "Command copied. Paste it in the opened terminal.") }
     }
 
     private func openPreferredExternalForNew(session: SessionSummary) {
@@ -457,7 +457,7 @@ struct ContentView: View {
         case .none:
             break
         }
-        Task { await SystemNotifier.shared.notify(title: "CodMate", body: "命令已拷贝，请粘贴到打开的终端") }
+        Task { await SystemNotifier.shared.notify(title: "CodMate", body: "Command copied. Paste it in the opened terminal.") }
     }
 
     private func startNewSession(for session: SessionSummary) {
