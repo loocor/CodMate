@@ -561,25 +561,16 @@ actor CodexConfigService {
         return parseProjects(from: text)
     }
 
+    // Deprecated: CodMate no longer writes projects to config.toml.
+    // Kept for API compatibility; acts as a no-op.
     func upsertProject(_ project: Project) throws {
-        let text = (try? String(contentsOf: paths.configURL, encoding: .utf8)) ?? ""
-        var current = parseProjects(from: text)
-        if let idx = current.firstIndex(where: { $0.id == project.id }) {
-            current[idx] = project
-        } else {
-            current.append(project)
-        }
-        let rewritten = rewriteProjectsRegion(in: text, with: current)
-        try writeConfig(rewritten)
+        _ = project
+        return
     }
 
-    func deleteProject(id: String) throws {
-        let text = (try? String(contentsOf: paths.configURL, encoding: .utf8)) ?? ""
-        var current = parseProjects(from: text)
-        current.removeAll { $0.id == id }
-        let rewritten = rewriteProjectsRegion(in: text, with: current)
-        try writeConfig(rewritten)
-    }
+    // Deprecated: CodMate no longer writes projects to config.toml.
+    // Kept for API compatibility; acts as a no-op.
+    func deleteProject(id: String) throws { _ = id }
 
     // MARK: - Canonical providers region rewriter
     private func rewriteProvidersRegion(in text: String, with providers: [CodexProvider]) -> String {
@@ -695,7 +686,7 @@ actor CodexConfigService {
 
     private func parseProjectBody(id: String, body: [String]) -> Project {
         var name: String = id
-        var directory: String = ""
+        var directory: String? = nil
         var trust: String? = nil
         var overview: String? = nil
         var instructions: String? = nil
@@ -708,7 +699,7 @@ actor CodexConfigService {
             switch key {
             case "name": name = unquote(value)
             case "directory": directory = unquote(value)
-            case "path": if directory.isEmpty { directory = unquote(value) }
+            case "path": if directory == nil || directory == "" { directory = unquote(value) }
             case "trust_level": trust = unquote(value)
             case "overview": overview = unquote(value)
             case "instructions": instructions = unquote(value)
@@ -716,14 +707,21 @@ actor CodexConfigService {
             default: break
             }
         }
-        return Project(id: id, name: name, directory: directory, trustLevel: trust, overview: overview, instructions: instructions, profileId: profile)
+        // Normalize directory: treat empty string as nil
+        let dirNorm: String? = {
+            guard let d = directory?.trimmingCharacters(in: .whitespacesAndNewlines) else { return nil }
+            return d.isEmpty ? nil : d
+        }()
+        return Project(id: id, name: name, directory: dirNorm, trustLevel: trust, overview: overview, instructions: instructions, profileId: profile)
     }
 
     private func renderProjectBody(_ p: Project) -> String {
         var out: [String] = []
         out.append("# managed-by=codmate")
         if !p.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { out.append("name = \"\(p.name)\"") }
-        out.append("directory = \"\(p.directory)\"")
+        if let dir = p.directory, !dir.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            out.append("directory = \"\(dir)\"")
+        }
         if let v = p.trustLevel, !v.isEmpty { out.append("trust_level = \"\(v)\"") }
         if let v = p.overview, !v.isEmpty { out.append("overview = \"\(v)\"") }
         if let v = p.instructions, !v.isEmpty { out.append("instructions = \"\(v)\"") }

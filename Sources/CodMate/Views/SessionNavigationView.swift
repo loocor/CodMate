@@ -28,10 +28,13 @@ struct SessionNavigationView: View {
                 }
 
                 VStack(spacing: 8) {
+                    let visibleAll = viewModel.visibleAllCountForDateScope()
+                    let totalAll = viewModel.totalSessionCount
                     scopeAllRow(
                         title: "All",
                         isSelected: viewModel.selectedProjectId == nil,
                         icon: "square.grid.2x2",
+                        count: (visibleAll, totalAll),
                         action: { viewModel.setSelectedProject(nil) }
                     )
                     ProjectsListView()
@@ -63,7 +66,7 @@ struct SessionNavigationView: View {
         }
     }
 
-    private func scopeAllRow(title: String, isSelected: Bool, icon: String, action: @escaping () -> Void) -> some View {
+    private func scopeAllRow(title: String, isSelected: Bool, icon: String, count: (visible: Int, total: Int)? = nil, action: @escaping () -> Void) -> some View {
         HStack(spacing: 8) {
             Image(systemName: icon)
                 .foregroundStyle(isSelected ? Color.white : Color.secondary)
@@ -72,6 +75,11 @@ struct SessionNavigationView: View {
                 .font(.caption)
                 .foregroundStyle(isSelected ? Color.white : Color.primary)
             Spacer(minLength: 8)
+            if let pair = count {
+                Text("\(pair.visible)/\(pair.total)")
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(isSelected ? Color.white.opacity(0.9) : Color.secondary)
+            }
         }
         .frame(height: 16)
         .padding(8)

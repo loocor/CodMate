@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 struct SessionListColumnView: View {
     let sections: [SessionDaySection]
@@ -29,7 +30,7 @@ struct SessionListColumnView: View {
     var body: some View {
         VStack(spacing: 0) {
             header
-                .padding(.horizontal, 16)
+                .padding(.horizontal, 8)
                 .padding(.top, 0)
                 .padding(.bottom, 8)
 
@@ -142,10 +143,10 @@ struct SessionListColumnView: View {
                     }
                 }
             }
-            .listStyle(.plain)
-            .padding(.horizontal, 16)
+            .listStyle(.inset)
         }
         .padding(.vertical, 16)
+        .padding(.horizontal, 8)
         .sheet(isPresented: $showNewProjectSheet) {
             ProjectEditorSheet(
                 isPresented: $showNewProjectSheet,
@@ -158,17 +159,28 @@ struct SessionListColumnView: View {
     }
 
     private var header: some View {
-        HStack(alignment: .center, spacing: 12) {
-            Picker("", selection: $sortOrder) {
-                ForEach(SessionSortOrder.allCases) { order in
-                    Text(order.title)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                        .tag(order)
+        VStack(alignment: .leading, spacing: 8) {
+            // Full-width quick search (title/comment) using native SearchField for unified chrome
+            SearchField(
+                "Search title or comment",
+                text: $viewModel.quickSearchText,
+                onSubmit: { text in viewModel.immediateApplyQuickSearch(text) }
+            )
+                .frame(maxWidth: .infinity)
+
+            HStack(alignment: .center, spacing: 12) {
+                Picker("", selection: $sortOrder) {
+                    ForEach(SessionSortOrder.allCases) { order in
+                        Text(order.title)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                            .tag(order)
+                    }
                 }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(maxWidth: .infinity)
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
             .frame(maxWidth: .infinity)
         }
         .frame(maxWidth: .infinity)
@@ -229,6 +241,77 @@ extension SessionListColumnView {
         } else {
             selection = [id]
             lastClickedID = id
+        }
+    }
+}
+
+// Native NSSearchField wrapper to get unified macOS search field chrome
+private struct SearchField: NSViewRepresentable {
+    let placeholder: String
+    @Binding var text: String
+    var onSubmit: ((String) -> Void)? = nil
+
+    init(_ placeholder: String, text: Binding<String>, onSubmit: ((String) -> Void)? = nil) {
+        self.placeholder = placeholder
+        self._text = text
+        self.onSubmit = onSubmit
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    func makeNSView(context: Context) -> NSSearchField {
+        let field = NSSearchField(frame: .zero)
+        field.placeholderString = placeholder
+        field.delegate = context.coordinator
+        // Avoid premature submit during IME composition; we handle Return/Escape in delegate instead
+        field.sendsSearchStringImmediately = false
+        field.sendsWholeSearchString = true
+        return field
+    }
+
+    func updateNSView(_ nsView: NSSearchField, context: Context) {
+        // Avoid programmatic writes while user is editing (prevents breaking IME composition)
+        if let editor = nsView.currentEditor(), nsView.window?.firstResponder === editor { return }
+        if nsView.stringValue != text { nsView.stringValue = text }
+        if nsView.placeholderString != placeholder { nsView.placeholderString = placeholder }
+    }
+
+    class Coordinator: NSObject, NSSearchFieldDelegate {
+        var parent: SearchField
+        init(_ parent: SearchField) { self.parent = parent }
+
+        @MainActor
+        func controlTextDidChange(_ notification: Notification) {
+            guard let field = notification.object as? NSSearchField else { return }
+            // Skip updates while IME is composing (marked text present)
+            if let editor = field.currentEditor() as? NSTextView, editor.hasMarkedText() { return }
+            parent.text = field.stringValue
+        }
+
+        @MainActor
+        func searchFieldDidEndSearching(_ sender: NSSearchField) {
+            let value = sender.stringValue
+            parent.text = value
+            parent.onSubmit?(value)
+        }
+
+        // Intercept Return/Escape; respect IME composition
+        @MainActor
+        func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+            // If composing with IME, let the editor handle the key (do not submit)
+            if textView.hasMarkedText() { return false }
+            if commandSelector == #selector(NSResponder.insertNewline(_:)) {
+                let value = textView.string
+                parent.text = value
+                parent.onSubmit?(value)
+                return true
+            }
+            if commandSelector == #selector(NSResponder.cancelOperation(_:)) {
+                parent.text = ""
+                parent.onSubmit?("")
+                return true
+            }
+            return false
         }
     }
 }

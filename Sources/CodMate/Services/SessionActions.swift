@@ -247,7 +247,12 @@ struct SessionActions {
 
     func buildNewProjectCommandLines(project: Project, executableURL: URL, options: ResumeOptions) -> String {
         _ = executableURL
-        let cd = "cd " + shellEscapedPath(project.directory)
+        let cdLine: String? = {
+            if let dir = project.directory, !dir.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return "cd " + shellEscapedPath(dir)
+            }
+            return nil
+        }()
         // PATH injection: prepend project-specific paths if any
         let prepend = project.profile?.pathPrepend ?? []
         let prependString = prepend.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }.joined(separator: ":")
@@ -270,12 +275,21 @@ struct SessionActions {
         let exports = exportLines.joined(separator: "; ")
         let invocation = buildNewProjectCLIInvocation(project: project, options: options)
         let command = "PATH=\(injectedPATH) \(invocation)"
-        return cd + "\n" + exports + "\n" + command + "\n"
+        if let cd = cdLine {
+            return cd + "\n" + exports + "\n" + command + "\n"
+        } else {
+            return exports + "\n" + command + "\n"
+        }
     }
 
     func buildExternalNewProjectCommands(project: Project, executableURL: URL, options: ResumeOptions) -> String {
         _ = executableURL
-        let cd = "cd " + shellEscapedPath(project.directory)
+        let cdLine: String? = {
+            if let dir = project.directory, !dir.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return "cd " + shellEscapedPath(dir)
+            }
+            return nil
+        }()
         // Build exports similarly to embedded version so users can paste easily
         let prepend = project.profile?.pathPrepend ?? []
         let prependString = prepend.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }.joined(separator: ":")
@@ -296,7 +310,11 @@ struct SessionActions {
         }
         let exports = exportLines.joined(separator: "; ")
         let cmd = buildNewProjectCLIInvocation(project: project, options: options)
-        return cd + "\n" + exports + "\n" + "PATH=\(injectedPATH) \(cmd)\n"
+        if let cd = cdLine {
+            return cd + "\n" + exports + "\n" + "PATH=\(injectedPATH) \(cmd)\n"
+        } else {
+            return exports + "\n" + "PATH=\(injectedPATH) \(cmd)\n"
+        }
     }
 
     func copyNewProjectCommands(project: Project, executableURL: URL, options: ResumeOptions, simplifiedForExternal: Bool = true) {
