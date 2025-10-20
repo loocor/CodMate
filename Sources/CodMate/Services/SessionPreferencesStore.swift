@@ -28,6 +28,7 @@ final class SessionPreferencesStore: ObservableObject {
         static let resumeApprovalPolicy = "codex.resume.approvalPolicy"
         static let resumeFullAuto = "codex.resume.fullAuto"
         static let resumeDangerBypass = "codex.resume.dangerBypass"
+        static let autoAssignNewToSameProject = "codex.projects.autoAssignNewToSame"
     }
 
     init(
@@ -103,6 +104,8 @@ final class SessionPreferencesStore: ObservableObject {
         }
         self.defaultResumeFullAuto = defaults.object(forKey: Keys.resumeFullAuto) as? Bool ?? false
         self.defaultResumeDangerBypass = defaults.object(forKey: Keys.resumeDangerBypass) as? Bool ?? false
+        // Projects behaviors
+        self.autoAssignNewToSameProject = defaults.object(forKey: Keys.autoAssignNewToSameProject) as? Bool ?? true
     }
 
     private func persist() {
@@ -173,6 +176,11 @@ final class SessionPreferencesStore: ObservableObject {
     }
     @Published var defaultResumeDangerBypass: Bool {
         didSet { defaults.set(defaultResumeDangerBypass, forKey: Keys.resumeDangerBypass) }
+    }
+
+    // Projects: auto-assign new sessions from detail to same project (default ON)
+    @Published var autoAssignNewToSameProject: Bool {
+        didSet { defaults.set(autoAssignNewToSameProject, forKey: Keys.autoAssignNewToSameProject) }
     }
 
     var resumeOptions: ResumeOptions {

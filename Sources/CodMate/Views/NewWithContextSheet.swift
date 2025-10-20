@@ -198,14 +198,18 @@ struct NewWithContextSheet: View {
     }
 
     private func filteredSessions() -> [SessionSummary] {
-        let all = viewModel.sections.flatMap { $0.sessions }
-        let pid = viewModel.projectIdForSession(anchor.id)
+        // Source from the full project set, not the middle-list sections (which are date-scoped)
+        let all = viewModel.allSessionsInSameProject(as: anchor)
+        let q = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         let filtered = all.filter { s in
-            if let pid, viewModel.projectIdForSession(s.id) != pid { return false }
-            if searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return true }
-            return s.matches(search: searchText)
+            if q.isEmpty { return true }
+            return s.matches(search: q)
         }
-        return filtered.sorted { ($0.startedAt) < ($1.startedAt) }
+        return filtered.sorted { a, b in
+            let da = a.lastUpdatedAt ?? a.startedAt
+            let db = b.lastUpdatedAt ?? b.startedAt
+            return da > db  // recent first
+        }
     }
 
     private func toggleSelection(_ id: String) {
@@ -241,6 +245,8 @@ struct NewWithContextSheet: View {
     }
 
     private func copyOpenNew() {
+        // Record pending intent for auto-assign
+        viewModel.recordIntentForDetailNew(anchor: anchor)
         let prompt = previewText
         let dir = FileManager.default.fileExists(atPath: anchor.cwd) ? anchor.cwd : anchor.fileURL.deletingLastPathComponent().path
         let app = viewModel.preferences.defaultResumeExternalApp

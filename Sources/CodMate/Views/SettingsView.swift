@@ -377,6 +377,16 @@ struct SettingsView: View {
                     .labelsHidden()
                     .frame(maxWidth: .infinity, alignment: .trailing)
                 }
+                GridRow {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Auto-assign new sessions to same project").font(.subheadline).fontWeight(.medium)
+                        Text("When starting New from detail, auto-assign the created session to that project.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    Toggle("", isOn: $preferences.autoAssignNewToSameProject)
+                        .labelsHidden()
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                }
             }
         }
     }

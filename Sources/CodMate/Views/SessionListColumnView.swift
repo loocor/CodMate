@@ -92,11 +92,6 @@ struct SessionListColumnView: View {
                                     }
                                     Divider()
                                     Button {
-                                        Task { await viewModel.regenerateAutoTitleAndOverview(for: session) }
-                                    } label: {
-                                        Label("Regenerate Auto Title & Overview", systemImage: "sparkles")
-                                    }
-                                    Button {
                                         Task { await viewModel.beginEditing(session: session) }
                                     } label: {
                                         Label("Edit Title & Comment", systemImage: "pencil")
