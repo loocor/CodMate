@@ -12,11 +12,11 @@ enum SessionActionError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case let .executableNotFound(url):
+        case .executableNotFound(let url):
             return "Executable codex CLI not found: \(url.path)"
-        case let .resumeFailed(output):
+        case .resumeFailed(let output):
             return "Failed to resume session: \(output)"
-        case let .deletionFailed(url):
+        case .deletionFailed(let url):
             return "Failed to move file to Trash: \(url.path)"
         }
     }
@@ -28,8 +28,12 @@ struct SessionActions {
     func resolveExecutableURL(preferred: URL?) -> URL? {
         if let preferred, fileManager.isExecutableFile(atPath: preferred.path) { return preferred }
         // Try /opt/homebrew/bin, /usr/local/bin, PATH via /usr/bin/which
-        let candidates = ["/opt/homebrew/bin/codex", "/usr/local/bin/codex", "/usr/bin/codex", "/bin/codex"]
-        for path in candidates { if fileManager.isExecutableFile(atPath: path) { return URL(fileURLWithPath: path) } }
+        let candidates = [
+            "/opt/homebrew/bin/codex", "/usr/local/bin/codex", "/usr/bin/codex", "/bin/codex",
+        ]
+        for path in candidates {
+            if fileManager.isExecutableFile(atPath: path) { return URL(fileURLWithPath: path) }
+        }
         // which codex
         let which = Process()
         which.executableURL = URL(fileURLWithPath: "/usr/bin/env")
@@ -40,27 +44,39 @@ struct SessionActions {
         try? which.run()
         which.waitUntilExit()
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        if which.terminationStatus == 0, let str = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines), !str.isEmpty {
+        if which.terminationStatus == 0,
+            let str = String(data: data, encoding: .utf8)?.trimmingCharacters(
+                in: .whitespacesAndNewlines), !str.isEmpty
+        {
             if fileManager.isExecutableFile(atPath: str) { return URL(fileURLWithPath: str) }
         }
         return nil
     }
 
-    func resume(session: SessionSummary, executableURL: URL, options: ResumeOptions) async throws -> ProcessResult {
-        guard let exec = resolveExecutableURL(preferred: executableURL) else { throw SessionActionError.executableNotFound(executableURL) }
-
+    @MainActor
+    func resume(session: SessionSummary, executableURL: URL, options: ResumeOptions) async throws
+        -> ProcessResult
+    {
+        guard let exec = resolveExecutableURL(preferred: executableURL) else {
+            throw SessionActionError.executableNotFound(executableURL)
+        }
         return try await withCheckedThrowingContinuation { continuation in
+            // Run process work off the main actor without capturing self across concurrency boundaries
+            let args = buildResumeArguments(session: session, options: options)
+            let cwd: URL = {
+                if FileManager.default.fileExists(atPath: session.cwd) {
+                    return URL(fileURLWithPath: session.cwd, isDirectory: true)
+                } else {
+                    return session.fileURL.deletingLastPathComponent()
+                }
+            }()
             Task.detached {
                 do {
                     let process = Process()
                     process.executableURL = exec
-                    process.arguments = self.buildResumeArguments(session: session, options: options)
+                    process.arguments = args
                     // Prefer original session cwd if exists
-                    if FileManager.default.fileExists(atPath: session.cwd) {
-                        process.currentDirectoryURL = URL(fileURLWithPath: session.cwd, isDirectory: true)
-                    } else {
-                        process.currentDirectoryURL = session.fileURL.deletingLastPathComponent()
-                    }
+                    process.currentDirectoryURL = cwd
 
                     let pipe = Pipe()
                     process.standardOutput = pipe
@@ -83,7 +99,8 @@ struct SessionActions {
                     if process.terminationStatus == 0 {
                         continuation.resume(returning: ProcessResult(output: output))
                     } else {
-                        continuation.resume(throwing: SessionActionError.resumeFailed(output: output))
+                        continuation.resume(
+                            throwing: SessionActionError.resumeFailed(output: output))
                     }
                 } catch {
                     continuation.resume(throwing: error)
@@ -120,23 +137,30 @@ struct SessionActions {
         return f
     }
 
-    func buildResumeCLIInvocation(session: SessionSummary, executablePath: String, options: ResumeOptions) -> String {
+    func buildResumeCLIInvocation(
+        session: SessionSummary, executablePath: String, options: ResumeOptions
+    ) -> String {
         let exe = shellQuoteIfNeeded(executablePath)
         // Resume should preserve original session semantics; do not override sandbox/approval/model via flags.
         return "\(exe) resume \(session.id)"
     }
 
-    private func buildNewSessionArguments(session: SessionSummary, options: ResumeOptions) -> [String] {
+    private func buildNewSessionArguments(session: SessionSummary, options: ResumeOptions)
+        -> [String]
+    {
         var args: [String] = []
         if let model = session.model, !model.isEmpty { args += ["--model", model] }
         args += flags(from: options)
         return args
     }
 
-    func buildNewSessionCLIInvocation(session: SessionSummary, options: ResumeOptions, initialPrompt: String? = nil) -> String {
+    func buildNewSessionCLIInvocation(
+        session: SessionSummary, options: ResumeOptions, initialPrompt: String? = nil
+    ) -> String {
         let exe = "codex"
         var parts: [String] = [exe]
-        let args = buildNewSessionArguments(session: session, options: options).map { arg -> String in
+        let args = buildNewSessionArguments(session: session, options: options).map {
+            arg -> String in
             if arg.contains(where: { $0.isWhitespace || $0 == "'" }) {
                 return shellEscapedPath(arg)
             }
@@ -154,35 +178,47 @@ struct SessionActions {
         ["resume", session.id]
     }
 
-    func buildResumeCommandLines(session: SessionSummary, executableURL: URL, options: ResumeOptions) -> String {
-        let cwd = FileManager.default.fileExists(atPath: session.cwd)
+    func buildResumeCommandLines(
+        session: SessionSummary, executableURL: URL, options: ResumeOptions
+    ) -> String {
+        let cwd =
+            FileManager.default.fileExists(atPath: session.cwd)
             ? session.cwd : session.fileURL.deletingLastPathComponent().path
         let cd = "cd " + shellEscapedPath(cwd)
         let injectedPATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:${PATH}"
         // Use bare 'codex' for embedded terminal to respect user's PATH resolution
         let execPath = "codex"
         // Embedded terminal: keep environment exports for robustness
-        let exports = "export LANG=zh_CN.UTF-8; export LC_ALL=zh_CN.UTF-8; export LC_CTYPE=zh_CN.UTF-8; export TERM=xterm-256color"
-        let invocation = buildResumeCLIInvocation(session: session, executablePath: execPath, options: options)
+        let exports =
+            "export LANG=zh_CN.UTF-8; export LC_ALL=zh_CN.UTF-8; export LC_CTYPE=zh_CN.UTF-8; export TERM=xterm-256color"
+        let invocation = buildResumeCLIInvocation(
+            session: session, executablePath: execPath, options: options)
         let resume = "PATH=\(injectedPATH) \(invocation)"
         return cd + "\n" + exports + "\n" + resume + "\n"
     }
 
-    func buildNewSessionCommandLines(session: SessionSummary, executableURL: URL, options: ResumeOptions) -> String {
-        _ = executableURL // retained for API symmetry; PATH handles resolution
-        let cwd = FileManager.default.fileExists(atPath: session.cwd)
+    func buildNewSessionCommandLines(
+        session: SessionSummary, executableURL: URL, options: ResumeOptions
+    ) -> String {
+        _ = executableURL  // retained for API symmetry; PATH handles resolution
+        let cwd =
+            FileManager.default.fileExists(atPath: session.cwd)
             ? session.cwd : session.fileURL.deletingLastPathComponent().path
         let cd = "cd " + shellEscapedPath(cwd)
         let injectedPATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:${PATH}"
-        let exports = "export LANG=zh_CN.UTF-8; export LC_ALL=zh_CN.UTF-8; export LC_CTYPE=zh_CN.UTF-8; export TERM=xterm-256color"
+        let exports =
+            "export LANG=zh_CN.UTF-8; export LC_ALL=zh_CN.UTF-8; export LC_CTYPE=zh_CN.UTF-8; export TERM=xterm-256color"
         let invocation = buildNewSessionCLIInvocation(session: session, options: options)
         let command = "PATH=\(injectedPATH) \(invocation)"
         return cd + "\n" + exports + "\n" + command + "\n"
     }
 
-    func buildExternalNewSessionCommands(session: SessionSummary, executableURL: URL, options: ResumeOptions) -> String {
+    func buildExternalNewSessionCommands(
+        session: SessionSummary, executableURL: URL, options: ResumeOptions
+    ) -> String {
         _ = executableURL
-        let cwd = FileManager.default.fileExists(atPath: session.cwd)
+        let cwd =
+            FileManager.default.fileExists(atPath: session.cwd)
             ? session.cwd : session.fileURL.deletingLastPathComponent().path
         let cd = "cd " + shellEscapedPath(cwd)
         let newCommand = buildNewSessionCLIInvocation(session: session, options: options)
@@ -190,29 +226,45 @@ struct SessionActions {
     }
 
     // Simplified two-line command for external terminals
-    func buildExternalResumeCommands(session: SessionSummary, executableURL: URL, options: ResumeOptions) -> String {
-        let cwd = FileManager.default.fileExists(atPath: session.cwd)
+    func buildExternalResumeCommands(
+        session: SessionSummary, executableURL: URL, options: ResumeOptions
+    ) -> String {
+        let cwd =
+            FileManager.default.fileExists(atPath: session.cwd)
             ? session.cwd : session.fileURL.deletingLastPathComponent().path
         let cd = "cd " + shellEscapedPath(cwd)
         let execPath = resolveExecutableURL(preferred: executableURL)?.path ?? "codex"
-        let resume = buildResumeCLIInvocation(session: session, executablePath: execPath, options: options)
+        let resume = buildResumeCLIInvocation(
+            session: session, executablePath: execPath, options: options)
         return cd + "\n" + resume + "\n"
     }
 
-    func copyResumeCommands(session: SessionSummary, executableURL: URL, options: ResumeOptions, simplifiedForExternal: Bool = true) {
-        let commands = simplifiedForExternal
-            ? buildExternalResumeCommands(session: session, executableURL: executableURL, options: options)
-            : buildResumeCommandLines(session: session, executableURL: executableURL, options: options)
+    func copyResumeCommands(
+        session: SessionSummary, executableURL: URL, options: ResumeOptions,
+        simplifiedForExternal: Bool = true
+    ) {
+        let commands =
+            simplifiedForExternal
+            ? buildExternalResumeCommands(
+                session: session, executableURL: executableURL, options: options)
+            : buildResumeCommandLines(
+                session: session, executableURL: executableURL, options: options)
         let pb = NSPasteboard.general
         pb.clearContents()
         pb.setString(commands, forType: .string)
     }
 
-    func copyNewSessionCommands(session: SessionSummary, executableURL: URL, options: ResumeOptions, simplifiedForExternal: Bool = true) {
+    func copyNewSessionCommands(
+        session: SessionSummary, executableURL: URL, options: ResumeOptions,
+        simplifiedForExternal: Bool = true
+    ) {
         _ = executableURL
-        let commands = simplifiedForExternal
-            ? buildExternalNewSessionCommands(session: session, executableURL: executableURL, options: options)
-            : buildNewSessionCommandLines(session: session, executableURL: executableURL, options: options)
+        let commands =
+            simplifiedForExternal
+            ? buildExternalNewSessionCommands(
+                session: session, executableURL: executableURL, options: options)
+            : buildNewSessionCommandLines(
+                session: session, executableURL: executableURL, options: options)
         let pb = NSPasteboard.general
         pb.clearContents()
         pb.setString(commands, forType: .string)
@@ -243,26 +295,36 @@ struct SessionActions {
 
     func buildNewProjectCLIInvocation(project: Project, options: ResumeOptions) -> String {
         let exe = "codex"
-        let args = buildNewProjectArguments(project: project, options: options).map { arg -> String in
-            if arg.contains(where: { $0.isWhitespace || $0 == "'" }) { return shellEscapedPath(arg) }
+        let args = buildNewProjectArguments(project: project, options: options).map {
+            arg -> String in
+            if arg.contains(where: { $0.isWhitespace || $0 == "'" }) {
+                return shellEscapedPath(arg)
+            }
             return arg
         }
         return ([exe] + args).joined(separator: " ")
     }
 
-    func buildNewProjectCommandLines(project: Project, executableURL: URL, options: ResumeOptions) -> String {
+    func buildNewProjectCommandLines(project: Project, executableURL: URL, options: ResumeOptions)
+        -> String
+    {
         _ = executableURL
         let cdLine: String? = {
-            if let dir = project.directory, !dir.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            if let dir = project.directory,
+                !dir.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            {
                 return "cd " + shellEscapedPath(dir)
             }
             return nil
         }()
         // PATH injection: prepend project-specific paths if any
         let prepend = project.profile?.pathPrepend ?? []
-        let prependString = prepend.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }.joined(separator: ":")
+        let prependString = prepend.filter {
+            !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }.joined(separator: ":")
         let defaultPATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
-        let injectedPATH = (prependString.isEmpty ? defaultPATH : prependString + ":" + defaultPATH) + ":${PATH}"
+        let injectedPATH =
+            (prependString.isEmpty ? defaultPATH : prependString + ":" + defaultPATH) + ":${PATH}"
         // Exports: locale defaults + project env
         var exportLines: [String] = [
             "export LANG=zh_CN.UTF-8",
@@ -287,19 +349,26 @@ struct SessionActions {
         }
     }
 
-    func buildExternalNewProjectCommands(project: Project, executableURL: URL, options: ResumeOptions) -> String {
+    func buildExternalNewProjectCommands(
+        project: Project, executableURL: URL, options: ResumeOptions
+    ) -> String {
         _ = executableURL
         let cdLine: String? = {
-            if let dir = project.directory, !dir.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            if let dir = project.directory,
+                !dir.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            {
                 return "cd " + shellEscapedPath(dir)
             }
             return nil
         }()
         // Build exports similarly to embedded version so users can paste easily
         let prepend = project.profile?.pathPrepend ?? []
-        let prependString = prepend.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }.joined(separator: ":")
+        let prependString = prepend.filter {
+            !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }.joined(separator: ":")
         let defaultPATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
-        let injectedPATH = (prependString.isEmpty ? defaultPATH : prependString + ":" + defaultPATH) + ":${PATH}"
+        let injectedPATH =
+            (prependString.isEmpty ? defaultPATH : prependString + ":" + defaultPATH) + ":${PATH}"
         var exportLines: [String] = [
             "export LANG=zh_CN.UTF-8",
             "export LC_ALL=zh_CN.UTF-8",
@@ -322,10 +391,16 @@ struct SessionActions {
         }
     }
 
-    func copyNewProjectCommands(project: Project, executableURL: URL, options: ResumeOptions, simplifiedForExternal: Bool = true) {
-        let commands = simplifiedForExternal
-            ? buildExternalNewProjectCommands(project: project, executableURL: executableURL, options: options)
-            : buildNewProjectCommandLines(project: project, executableURL: executableURL, options: options)
+    func copyNewProjectCommands(
+        project: Project, executableURL: URL, options: ResumeOptions,
+        simplifiedForExternal: Bool = true
+    ) {
+        let commands =
+            simplifiedForExternal
+            ? buildExternalNewProjectCommands(
+                project: project, executableURL: executableURL, options: options)
+            : buildNewProjectCommandLines(
+                project: project, executableURL: executableURL, options: options)
         let pb = NSPasteboard.general
         pb.clearContents()
         pb.setString(commands, forType: .string)
@@ -334,14 +409,16 @@ struct SessionActions {
     @discardableResult
     func openNewProject(project: Project, executableURL: URL, options: ResumeOptions) -> Bool {
         let scriptText = {
-            let lines = buildNewProjectCommandLines(project: project, executableURL: executableURL, options: options)
-                .replacingOccurrences(of: "\n", with: "; ")
+            let lines = buildNewProjectCommandLines(
+                project: project, executableURL: executableURL, options: options
+            )
+            .replacingOccurrences(of: "\n", with: "; ")
             return """
-            tell application "Terminal"
-              activate
-              do script "\(lines)"
-            end tell
-            """
+                tell application "Terminal"
+                  activate
+                  do script "\(lines)"
+                end tell
+                """
         }()
 
         if let script = NSAppleScript(source: scriptText) {
@@ -353,7 +430,9 @@ struct SessionActions {
     }
 
     // MARK: - Detail New using Project Profile (cd = session.cwd)
-    private func buildNewSessionArguments(using project: Project, fallbackModel: String?, options: ResumeOptions) -> [String] {
+    private func buildNewSessionArguments(
+        using project: Project, fallbackModel: String?, options: ResumeOptions
+    ) -> [String] {
         var args: [String] = []
         // Model precedence: project.profile.model -> fallback (session.model) -> none
         if let pm = project.profile?.model, !pm.isEmpty {
@@ -375,11 +454,18 @@ struct SessionActions {
         return args
     }
 
-    func buildNewSessionUsingProjectProfileCLIInvocation(session: SessionSummary, project: Project, options: ResumeOptions, initialPrompt: String? = nil) -> String {
+    func buildNewSessionUsingProjectProfileCLIInvocation(
+        session: SessionSummary, project: Project, options: ResumeOptions,
+        initialPrompt: String? = nil
+    ) -> String {
         let exe = "codex"
         var parts: [String] = [exe]
-        let args = buildNewSessionArguments(using: project, fallbackModel: session.model, options: options).map { arg -> String in
-            if arg.contains(where: { $0.isWhitespace || $0 == "'" }) { return shellEscapedPath(arg) }
+        let args = buildNewSessionArguments(
+            using: project, fallbackModel: session.model, options: options
+        ).map { arg -> String in
+            if arg.contains(where: { $0.isWhitespace || $0 == "'" }) {
+                return shellEscapedPath(arg)
+            }
             return arg
         }
         parts.append(contentsOf: args)
@@ -389,16 +475,23 @@ struct SessionActions {
         return parts.joined(separator: " ")
     }
 
-    func buildNewSessionUsingProjectProfileCommandLines(session: SessionSummary, project: Project, executableURL: URL, options: ResumeOptions, initialPrompt: String? = nil) -> String {
+    func buildNewSessionUsingProjectProfileCommandLines(
+        session: SessionSummary, project: Project, executableURL: URL, options: ResumeOptions,
+        initialPrompt: String? = nil
+    ) -> String {
         _ = executableURL
-        let cwd = FileManager.default.fileExists(atPath: session.cwd)
+        let cwd =
+            FileManager.default.fileExists(atPath: session.cwd)
             ? session.cwd : session.fileURL.deletingLastPathComponent().path
         let cd = "cd " + shellEscapedPath(cwd)
         // PATH/env injection comes from project profile only (no global env here)
         let prepend = project.profile?.pathPrepend ?? []
-        let prependString = prepend.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }.joined(separator: ":")
+        let prependString = prepend.filter {
+            !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }.joined(separator: ":")
         let defaultPATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
-        let injectedPATH = (prependString.isEmpty ? defaultPATH : prependString + ":" + defaultPATH) + ":${PATH}"
+        let injectedPATH =
+            (prependString.isEmpty ? defaultPATH : prependString + ":" + defaultPATH) + ":${PATH}"
         var exportLines: [String] = [
             "export LANG=zh_CN.UTF-8",
             "export LC_ALL=zh_CN.UTF-8",
@@ -413,40 +506,60 @@ struct SessionActions {
             }
         }
         let exports = exportLines.joined(separator: "; ")
-        let invocation = buildNewSessionUsingProjectProfileCLIInvocation(session: session, project: project, options: options, initialPrompt: initialPrompt)
+        let invocation = buildNewSessionUsingProjectProfileCLIInvocation(
+            session: session, project: project, options: options, initialPrompt: initialPrompt)
         let command = "PATH=\(injectedPATH) \(invocation)"
         return cd + "\n" + exports + "\n" + command + "\n"
     }
 
-    func buildExternalNewSessionUsingProjectProfileCommands(session: SessionSummary, project: Project, executableURL: URL, options: ResumeOptions, initialPrompt: String? = nil) -> String {
+    func buildExternalNewSessionUsingProjectProfileCommands(
+        session: SessionSummary, project: Project, executableURL: URL, options: ResumeOptions,
+        initialPrompt: String? = nil
+    ) -> String {
         _ = executableURL
-        let cwd = FileManager.default.fileExists(atPath: session.cwd)
+        let cwd =
+            FileManager.default.fileExists(atPath: session.cwd)
             ? session.cwd : session.fileURL.deletingLastPathComponent().path
         let cd = "cd " + shellEscapedPath(cwd)
-        let cmd = buildNewSessionUsingProjectProfileCLIInvocation(session: session, project: project, options: options, initialPrompt: initialPrompt)
+        let cmd = buildNewSessionUsingProjectProfileCLIInvocation(
+            session: session, project: project, options: options, initialPrompt: initialPrompt)
         return cd + "\n" + cmd + "\n"
     }
 
-    func copyNewSessionUsingProjectProfileCommands(session: SessionSummary, project: Project, executableURL: URL, options: ResumeOptions, simplifiedForExternal: Bool = true, initialPrompt: String? = nil) {
-        let commands = simplifiedForExternal
-            ? buildExternalNewSessionUsingProjectProfileCommands(session: session, project: project, executableURL: executableURL, options: options, initialPrompt: initialPrompt)
-            : buildNewSessionUsingProjectProfileCommandLines(session: session, project: project, executableURL: executableURL, options: options, initialPrompt: initialPrompt)
+    func copyNewSessionUsingProjectProfileCommands(
+        session: SessionSummary, project: Project, executableURL: URL, options: ResumeOptions,
+        simplifiedForExternal: Bool = true, initialPrompt: String? = nil
+    ) {
+        let commands =
+            simplifiedForExternal
+            ? buildExternalNewSessionUsingProjectProfileCommands(
+                session: session, project: project, executableURL: executableURL, options: options,
+                initialPrompt: initialPrompt)
+            : buildNewSessionUsingProjectProfileCommandLines(
+                session: session, project: project, executableURL: executableURL, options: options,
+                initialPrompt: initialPrompt)
         let pb = NSPasteboard.general
         pb.clearContents()
         pb.setString(commands, forType: .string)
     }
 
     @discardableResult
-    func openNewSessionUsingProjectProfile(session: SessionSummary, project: Project, executableURL: URL, options: ResumeOptions, initialPrompt: String? = nil) -> Bool {
+    func openNewSessionUsingProjectProfile(
+        session: SessionSummary, project: Project, executableURL: URL, options: ResumeOptions,
+        initialPrompt: String? = nil
+    ) -> Bool {
         let scriptText = {
-            let lines = buildNewSessionUsingProjectProfileCommandLines(session: session, project: project, executableURL: executableURL, options: options, initialPrompt: initialPrompt)
-                .replacingOccurrences(of: "\n", with: "; ")
+            let lines = buildNewSessionUsingProjectProfileCommandLines(
+                session: session, project: project, executableURL: executableURL, options: options,
+                initialPrompt: initialPrompt
+            )
+            .replacingOccurrences(of: "\n", with: "; ")
             return """
-            tell application "Terminal"
-              activate
-              do script "\(lines)"
-            end tell
-            """
+                tell application "Terminal"
+                  activate
+                  do script "\(lines)"
+                end tell
+                """
         }()
 
         if let script = NSAppleScript(source: scriptText) {
@@ -462,25 +575,31 @@ struct SessionActions {
         "'" + v.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 
-    func copyRealResumeInvocation(session: SessionSummary, executableURL: URL, options: ResumeOptions) {
+    func copyRealResumeInvocation(
+        session: SessionSummary, executableURL: URL, options: ResumeOptions
+    ) {
         let execPath = resolveExecutableURL(preferred: executableURL)?.path ?? executableURL.path
-        let cmd = buildResumeCLIInvocation(session: session, executablePath: execPath, options: options)
+        let cmd = buildResumeCLIInvocation(
+            session: session, executablePath: execPath, options: options)
         let pb = NSPasteboard.general
         pb.clearContents()
         pb.setString(cmd + "\n", forType: .string)
     }
 
     @discardableResult
-    func openInTerminal(session: SessionSummary, executableURL: URL, options: ResumeOptions) -> Bool {
+    func openInTerminal(session: SessionSummary, executableURL: URL, options: ResumeOptions) -> Bool
+    {
         let scriptText = {
-            let lines = buildResumeCommandLines(session: session, executableURL: executableURL, options: options)
-                .replacingOccurrences(of: "\n", with: "; ")
+            let lines = buildResumeCommandLines(
+                session: session, executableURL: executableURL, options: options
+            )
+            .replacingOccurrences(of: "\n", with: "; ")
             return """
-            tell application "Terminal"
-              activate
-              do script "\(lines)"
-            end tell
-            """
+                tell application "Terminal"
+                  activate
+                  do script "\(lines)"
+                end tell
+                """
         }()
 
         if let script = NSAppleScript(source: scriptText) {
@@ -492,16 +611,19 @@ struct SessionActions {
     }
 
     @discardableResult
-    func openNewSession(session: SessionSummary, executableURL: URL, options: ResumeOptions) -> Bool {
+    func openNewSession(session: SessionSummary, executableURL: URL, options: ResumeOptions) -> Bool
+    {
         let scriptText = {
-            let lines = buildNewSessionCommandLines(session: session, executableURL: executableURL, options: options)
-                .replacingOccurrences(of: "\n", with: "; ")
+            let lines = buildNewSessionCommandLines(
+                session: session, executableURL: executableURL, options: options
+            )
+            .replacingOccurrences(of: "\n", with: "; ")
             return """
-            tell application "Terminal"
-              activate
-              do script "\(lines)"
-            end tell
-            """
+                tell application "Terminal"
+                  activate
+                  do script "\(lines)"
+                end tell
+                """
         }()
 
         if let script = NSAppleScript(source: scriptText) {
@@ -519,7 +641,8 @@ struct SessionActions {
         if let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) {
             let config = NSWorkspace.OpenConfiguration()
             config.activates = true
-            NSWorkspace.shared.openApplication(at: appURL, configuration: config, completionHandler: nil)
+            NSWorkspace.shared.openApplication(
+                at: appURL, configuration: config, completionHandler: nil)
         }
     }
 
@@ -562,7 +685,8 @@ struct SessionActions {
         proc.executableURL = URL(fileURLWithPath: "/usr/bin/open")
         proc.arguments = ["-a", "Terminal", directory]
         do {
-            try proc.run(); proc.waitUntilExit()
+            try proc.run()
+            proc.waitUntilExit()
             return proc.terminationStatus == 0
         } catch { return false }
     }
@@ -570,21 +694,23 @@ struct SessionActions {
     // MARK: - Warp Launch Configuration
     @discardableResult
     func openWarpLaunchConfig(session: SessionSummary, options: ResumeOptions) -> Bool {
-        let cwd = FileManager.default.fileExists(atPath: session.cwd)
+        let cwd =
+            FileManager.default.fileExists(atPath: session.cwd)
             ? session.cwd : session.fileURL.deletingLastPathComponent().path
         let home = FileManager.default.homeDirectoryForCurrentUser
         let folder = home.appendingPathComponent(".warp", isDirectory: true)
             .appendingPathComponent("launch_configurations", isDirectory: true)
         do {
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        } catch { /* ignore */ }
+        } catch { /* ignore */  }
 
         let baseName = "codmate-resume-\(session.id)"
         let fileName = baseName + ".yaml"
         let fileURL = folder.appendingPathComponent(fileName)
         let flagsString: String = {
             // Use configured options; prefer bare `codex` so Warp resolves via PATH.
-            let cmd = buildResumeCLIInvocation(session: session, executablePath: "codex", options: options)
+            let cmd = buildResumeCLIInvocation(
+                session: session, executablePath: "codex", options: options)
             // buildResumeCLIInvocation quotes the executable; strip single quotes for YAML simplicity.
             if cmd.hasPrefix("'codex'") { return String(cmd.dropFirst("'codex' ".count)) }
             if cmd.hasPrefix("\"codex\"") { return String(cmd.dropFirst("\"codex\" ".count)) }
@@ -594,16 +720,16 @@ struct SessionActions {
         }()
 
         let yaml = """
-        version: 1
-        name: CodMate Resume \(session.id)
-        windows:
-          - tabs:
-              - title: Codex
-                panes:
-                  - cwd: \(cwd)
-                    commands:
-                      - exec: codex \(flagsString)
-        """
+            version: 1
+            name: CodMate Resume \(session.id)
+            windows:
+              - tabs:
+                  - title: Codex
+                    panes:
+                      - cwd: \(cwd)
+                        commands:
+                          - exec: codex \(flagsString)
+            """
         do { try yaml.data(using: .utf8)?.write(to: fileURL) } catch {}
 
         // Prefer warp://launch/<config_name> (Warp resolves in its config dir), fallback to absolute path.

@@ -13,7 +13,7 @@ struct SessionListRowView: View {
                 .fill(isSelected ? Color.accentColor : Color.accentColor.opacity(0.12))
                 .frame(width: 28, height: 28)
                 .overlay(
-                    Image(systemName: "rectangle.and.text.magnifyingglass")
+                    Image(systemName: "text.bubble")
                         .font(.subheadline)
                         .foregroundStyle(iconForeground)
                 )

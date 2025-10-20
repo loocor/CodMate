@@ -7,6 +7,7 @@ struct SettingsView: View {
     @Binding private var selectedCategory: SettingCategory
     @StateObject private var codexVM = CodexVM()
     @EnvironmentObject private var viewModel: SessionListViewModel
+    @State private var showLicensesSheet = false
 
     init(preferences: SessionPreferencesStore, selection: Binding<SettingCategory>) {
         self._preferences = ObservedObject(wrappedValue: preferences)
@@ -809,6 +810,10 @@ struct SettingsView: View {
                     LabeledContent("Repository") {
                         Link(repoURL.absoluteString, destination: repoURL)
                     }
+                    LabeledContent("Open Source Licenses") {
+                        Button("View…") { showLicensesSheet = true }
+                            .buttonStyle(.bordered)
+                    }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -816,6 +821,10 @@ struct SettingsView: View {
                     .font(.body)
                     .foregroundColor(.secondary)
             }
+        }
+        .sheet(isPresented: $showLicensesSheet) {
+            OpenSourceLicensesView(repoURL: repoURL)
+                .frame(minWidth: 600, minHeight: 480)
         }
     }
 
@@ -962,6 +971,87 @@ struct SettingsView: View {
     }
 }
 
+// MARK: - Open Source Licenses Sheet
+@available(macOS 15.0, *)
+private struct OpenSourceLicensesView: View {
+    let repoURL: URL
+    @State private var content: String = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Open Source Licenses")
+                    .font(.title3).fontWeight(.semibold)
+                Spacer()
+                Button("Open on GitHub") { openOnGitHub() }
+            }
+            .padding(.bottom, 4)
+
+            if content.isEmpty {
+                ProgressView()
+                    .task { await loadContent() }
+            } else {
+                ScrollView {
+                    Text(content)
+                        .font(.system(.body, design: .monospaced))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                        .padding(.top, 4)
+                }
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private func openOnGitHub() {
+        // Point to the file in the default branch
+        let url = URL(string: repoURL.absoluteString + "/blob/main/THIRD-PARTY-NOTICES.md")!
+        NSWorkspace.shared.open(url)
+    }
+
+    private func candidateLocalURLs() -> [URL] {
+        var urls: [URL] = []
+        if let bundled = Bundle.main.url(forResource: "THIRD-PARTY-NOTICES", withExtension: "md") {
+            urls.append(bundled)
+        }
+        let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        urls.append(cwd.appendingPathComponent("THIRD-PARTY-NOTICES.md"))
+        // When running from Xcode/DerivedData, try a few parents
+        let execDir = Bundle.main.bundleURL
+        urls.append(execDir.appendingPathComponent("Contents/Resources/THIRD-PARTY-NOTICES.md"))
+        return urls
+    }
+
+    private func loadContent() async {
+        for url in candidateLocalURLs() {
+            if FileManager.default.fileExists(atPath: url.path),
+                let data = try? Data(contentsOf: url),
+                let text = String(data: data, encoding: .utf8)
+            {
+                await MainActor.run { self.content = text }
+                return
+            }
+        }
+        // Fallback to remote raw file on GitHub if local not found
+        if let remote = URL(
+            string: "https://raw.githubusercontent.com/loocor/CodMate/main/THIRD-PARTY-NOTICES.md")
+        {
+            do {
+                let (data, _) = try await URLSession.shared.data(from: remote)
+                if let text = String(data: data, encoding: .utf8) {
+                    await MainActor.run { self.content = text }
+                }
+            } catch {
+                await MainActor.run {
+                    self.content =
+                        "Unable to load licenses. Please see THIRD-PARTY-NOTICES.md in the repository."
+                }
+            }
+        }
+    }
+}
+
 // MARK: - Codex Settings ViewModel (inline to avoid project wiring churn)
 @MainActor
 final class CodexVM: ObservableObject {
@@ -1060,21 +1150,24 @@ final class CodexVM: ObservableObject {
         case .k2:
             providerDraft = .init(
                 id: "", name: "K2", baseURL: "https://api.moonshot.cn/v1", envKey: nil,
-                wireAPI: "responses", queryParamsRaw: nil, httpHeadersRaw: nil, envHttpHeadersRaw: nil,
+                wireAPI: "responses", queryParamsRaw: nil, httpHeadersRaw: nil,
+                envHttpHeadersRaw: nil,
                 requestMaxRetries: nil, streamMaxRetries: nil, streamIdleTimeoutMs: nil,
                 managedByCodMate: true)
             providerKeyApplyURL = "https://platform.moonshot.cn/console/api-keys"
         case .glm:
             providerDraft = .init(
                 id: "", name: "GLM", baseURL: "https://open.bigmodel.cn/api/paas/v4/", envKey: nil,
-                wireAPI: "responses", queryParamsRaw: nil, httpHeadersRaw: nil, envHttpHeadersRaw: nil,
+                wireAPI: "responses", queryParamsRaw: nil, httpHeadersRaw: nil,
+                envHttpHeadersRaw: nil,
                 requestMaxRetries: nil, streamMaxRetries: nil, streamIdleTimeoutMs: nil,
                 managedByCodMate: true)
             providerKeyApplyURL = "https://bigmodel.cn/usercenter/proj-mgmt/apikeys"
         case .deepseek:
             providerDraft = .init(
                 id: "", name: "DeepSeek", baseURL: "https://api.deepseek.com/v1", envKey: nil,
-                wireAPI: "responses", queryParamsRaw: nil, httpHeadersRaw: nil, envHttpHeadersRaw: nil,
+                wireAPI: "responses", queryParamsRaw: nil, httpHeadersRaw: nil,
+                envHttpHeadersRaw: nil,
                 requestMaxRetries: nil, streamMaxRetries: nil, streamIdleTimeoutMs: nil,
                 managedByCodMate: true)
             providerKeyApplyURL = "https://platform.deepseek.com/api_keys"
@@ -1539,6 +1632,7 @@ private struct DialecticsPane: View {
 }
 
 @available(macOS 15.0, *)
+@MainActor
 private final class DialecticsVM: ObservableObject {
     @Published var sessions: SessionsDiagnostics? = nil
     @Published var providers: CodexConfigService.ProviderDiagnostics? = nil
@@ -1551,17 +1645,15 @@ private final class DialecticsVM: ObservableObject {
 
     func runAll(preferences: SessionPreferencesStore) async {
         let home = FileManager.default.homeDirectoryForCurrentUser
-        let defRoot = await SessionPreferencesStore.defaultSessionsRoot(for: home)
+        let defRoot = SessionPreferencesStore.defaultSessionsRoot(for: home)
         let s = await sessionsSvc.run(currentRoot: preferences.sessionsRoot, defaultRoot: defRoot)
         let p = await configSvc.diagnoseProviders()
-        let resolved = await actions.resolveExecutableURL(
+        let resolved = actions.resolveExecutableURL(
             preferred: preferences.codexExecutableURL)?.path
-        await MainActor.run {
-            self.sessions = s
-            self.providers = p
-            self.resolvedCodexPath = resolved
-            self.pathEnv = ProcessInfo.processInfo.environment["PATH"] ?? ""
-        }
+        self.sessions = s
+        self.providers = p
+        self.resolvedCodexPath = resolved
+        self.pathEnv = ProcessInfo.processInfo.environment["PATH"] ?? ""
     }
 
     var appVersion: String {
@@ -1618,16 +1710,16 @@ private final class DialecticsVM: ObservableObject {
         df.dateFormat = "yyyyMMdd-HHmmss"
         let now = Date()
         panel.nameFieldStringValue = "CodMate-Diagnostics-\(df.string(from: now)).json"
-        panel.begin { resp in
+        panel.beginSheetModal(
+            for: NSApplication.shared.keyWindow ?? NSApplication.shared.windows.first!
+        ) { resp in
             guard resp == .OK, let url = panel.url else { return }
-            Task { @MainActor in
-                let report = self.buildReport(preferences: preferences, now: now)
-                let enc = JSONEncoder()
-                enc.outputFormatting = [.prettyPrinted, .withoutEscapingSlashes]
-                enc.dateEncodingStrategy = .iso8601
-                if let data = try? enc.encode(report) {
-                    try? data.write(to: url, options: .atomic)
-                }
+            let report = self.buildReport(preferences: preferences, now: now)
+            let enc = JSONEncoder()
+            enc.outputFormatting = [.prettyPrinted, .withoutEscapingSlashes]
+            enc.dateEncodingStrategy = .iso8601
+            if let data = try? enc.encode(report) {
+                try? data.write(to: url, options: .atomic)
             }
         }
     }

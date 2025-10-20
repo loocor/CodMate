@@ -12,7 +12,8 @@ fileprivate actor DiskCache {
     private var map: [String: Entry] = [:]
     private let url: URL
 
-    init(fileManager: FileManager = .default) {
+    init() {
+        let fileManager = FileManager.default
         let dir = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first!
             .appendingPathComponent("CodMate", isDirectory: true)
         try? fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -52,11 +53,12 @@ actor SessionIndexer {
     private let cache = NSCache<NSURL, CacheEntry>()
     private let diskCache: DiskCache
     private let logger = Logger(subsystem: "io.umate.codemate", category: "SessionIndexer")
-    private static let tailTimestampFormatter: ISO8601DateFormatter = {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return formatter
-    }()
+    /// Avoid global mutable, non-Sendable formatter; create locally when needed
+    nonisolated private static func makeTailTimestampFormatter() -> ISO8601DateFormatter {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }
 
     private final class CacheEntry {
         let modificationDate: Date?
@@ -70,14 +72,16 @@ actor SessionIndexer {
 
     init(fileManager: FileManager = .default) {
         self.fileManager = fileManager
-        self.diskCache = DiskCache(fileManager: fileManager)
+        self.diskCache = DiskCache()
         decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
     }
 
     func refreshSessions(root: URL, scope: SessionLoadScope) async throws -> [SessionSummary] {
         let sessionFiles = try sessionFileURLs(at: root, scope: scope)
-        logger.info("Refreshing sessions under \(root.path, privacy: .public) scope=\(String(describing: scope), privacy: .public) count=\(sessionFiles.count)")
+        logger.info(
+            "Refreshing sessions under \(root.path, privacy: .public) scope=\(String(describing: scope), privacy: .public) count=\(sessionFiles.count)"
+        )
         guard !sessionFiles.isEmpty else { return [] }
 
         let cpuCount = max(2, ProcessInfo.processInfo.processorCount)
@@ -198,7 +202,9 @@ actor SessionIndexer {
     private func sessionFileURLs(at root: URL, scope: SessionLoadScope) throws -> [URL] {
         var urls: [URL] = []
         guard let enumeratorURL = scopeBaseURL(root: root, scope: scope) else {
-            logger.warning("No enumerator URL for scope=\(String(describing: scope), privacy: .public) root=\(root.path, privacy: .public)")
+            logger.warning(
+                "No enumerator URL for scope=\(String(describing: scope), privacy: .public) root=\(root.path, privacy: .public)"
+            )
             return []
         }
 
@@ -628,7 +634,7 @@ actor SessionIndexer {
         else { return nil }
         let nsText = text as NSString
         let isoString = nsText.substring(with: match.range(at: 1))
-        return SessionIndexer.tailTimestampFormatter.date(from: isoString)
+        return SessionIndexer.makeTailTimestampFormatter().date(from: isoString)
     }
 
     // Global count for sidebar label
