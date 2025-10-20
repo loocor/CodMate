@@ -24,6 +24,58 @@ enum SessionActionError: LocalizedError {
 
 struct SessionActions {
     private let fileManager: FileManager = .default
+    private let codexHome: URL = FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent(".codex", isDirectory: true)
+
+    // MARK: - Local helpers: profiles in ~/.codex/config.toml
+    private func listPersistedProfiles() -> Set<String> {
+        let configURL = codexHome.appendingPathComponent("config.toml", isDirectory: false)
+        guard let data = try? Data(contentsOf: configURL), let raw = String(data: data, encoding: .utf8) else {
+            return []
+        }
+        var out: Set<String> = []
+        for line in raw.split(separator: "\n", omittingEmptySubsequences: false) {
+            let t = line.trimmingCharacters(in: .whitespaces)
+            // Match exact header: [profiles.<id>]
+            if t.hasPrefix("[profiles.") && t.hasSuffix("]") {
+                let start = "[profiles.".count
+                let endIndex = t.index(before: t.endIndex)
+                let id = String(t[t.index(t.startIndex, offsetBy: start)..<endIndex])
+                let trimmed = id.trimmingCharacters(in: .whitespaces)
+                if !trimmed.isEmpty { out.insert(trimmed) }
+            }
+        }
+        return out
+    }
+
+    private func persistedProfileExists(_ id: String?) -> Bool {
+        guard let id, !id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
+        return listPersistedProfiles().contains(id)
+    }
+
+    private func renderInlineProfileConfig(
+        key id: String,
+        model: String?,
+        approvalPolicy: String?,
+        sandboxMode: String?
+    ) -> String? {
+        // Build a TOML inline table for --config: profiles.<id>={ model="...", approval_policy="...", sandbox_mode="..." }
+        var pairs: [String] = []
+        if let model, !model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            let val = model.replacingOccurrences(of: "\"", with: "\\\"")
+            pairs.append("model=\"\(val)\"")
+        }
+        if let approval = approvalPolicy, !approval.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            let val = approval.replacingOccurrences(of: "\"", with: "\\\"")
+            pairs.append("approval_policy=\"\(val)\"")
+        }
+        if let sandbox = sandboxMode, !sandbox.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            let val = sandbox.replacingOccurrences(of: "\"", with: "\\\"")
+            pairs.append("sandbox_mode=\"\(val)\"")
+        }
+        guard !pairs.isEmpty else { return nil }
+        return "profiles.\(id)={ \(pairs.joined(separator: ", ")) }"
+    }
 
     func resolveExecutableURL(preferred: URL?) -> URL? {
         if let preferred, fileManager.isExecutableFile(atPath: preferred.path) { return preferred }
@@ -274,8 +326,19 @@ struct SessionActions {
     private func buildNewProjectArguments(project: Project, options: ResumeOptions) -> [String] {
         var args: [String] = []
         // Embedded per-project profile config (preferred)
-        if let pp = project.profile {
-            if let model = pp.model, !model.isEmpty { args += ["--model", model] }
+        let pp = project.profile
+        let profileId = project.profileId?.trimmingCharacters(in: .whitespaces)
+
+        // Decide whether to use a persisted profile, or inject a temporary one
+        let hasPersistedProfile = persistedProfileExists(profileId)
+
+        // Flags and model: when we are injecting a temporary profile and selecting it with --profile,
+        // we avoid passing --model redundantly to keep precedence simple. Otherwise include it.
+        if let pp {
+            if !(profileId?.isEmpty == false && !hasPersistedProfile) {
+                // Either no profile id, or persisted profile exists: keep explicit model flag
+                if let model = pp.model, !model.isEmpty { args += ["--model", model] }
+            }
             if pp.dangerouslyBypass == true {
                 args += ["--dangerously-bypass-approvals-and-sandbox"]
             } else if pp.fullAuto == true {
@@ -285,11 +348,40 @@ struct SessionActions {
                 if let a = pp.approval { args += ["-a", a.rawValue] }
             }
         } else {
-            // Fallback to explicit flags + model from session
+            // Fallback to explicit flags
             args += flags(from: options)
         }
-        // If a named profile id is provided, keep it to let CLI load in-file configs too.
-        if let profile = project.profileId, !profile.isEmpty { args += ["--profile", profile] }
+
+        if let profileId, !profileId.isEmpty {
+            if hasPersistedProfile {
+                args += ["--profile", profileId]
+            } else {
+                // Resolve effective approval/sandbox according to project profile (approximate full-auto/danger bypass when set)
+                var approvalRaw: String? = pp?.approval?.rawValue
+                var sandboxRaw: String? = pp?.sandbox?.rawValue
+                if pp?.dangerouslyBypass == true {
+                    approvalRaw = ApprovalPolicy.never.rawValue
+                    sandboxRaw = SandboxMode.dangerFullAccess.rawValue
+                } else if pp?.fullAuto == true {
+                    approvalRaw = ApprovalPolicy.onFailure.rawValue
+                    sandboxRaw = SandboxMode.workspaceWrite.rawValue
+                }
+                // Fallback to ResumeOptions when project profile lacks explicit values
+                if approvalRaw == nil { approvalRaw = options.approval?.rawValue }
+                if sandboxRaw == nil { sandboxRaw = options.sandbox?.rawValue }
+
+                if let inline = renderInlineProfileConfig(
+                    key: profileId,
+                    model: pp?.model,
+                    approvalPolicy: nil,
+                    sandboxMode: nil
+                ) {
+                    args += ["--profile", profileId, "-c", inline]
+                } else {
+                    // profile id provided but nothing to inject; omit --profile to avoid referring to a non-existent profile
+                }
+            }
+        }
         return args
     }
 
@@ -434,13 +526,10 @@ struct SessionActions {
         using project: Project, fallbackModel: String?, options: ResumeOptions
     ) -> [String] {
         var args: [String] = []
-        // Model precedence: project.profile.model -> fallback (session.model) -> none
-        if let pm = project.profile?.model, !pm.isEmpty {
-            args += ["--model", pm]
-        } else if let fm = fallbackModel, !fm.isEmpty {
-            args += ["--model", fm]
-        }
-        // Flags precedence: danger -> full-auto -> explicit -s/-a only when present in project profile
+        let pid = project.profileId?.trimmingCharacters(in: .whitespaces)
+        let hasPersisted = persistedProfileExists(pid)
+
+        // Flags precedence: danger -> full-auto -> explicit -s/-a when present in project profile
         if project.profile?.dangerouslyBypass == true {
             args += ["--dangerously-bypass-approvals-and-sandbox"]
         } else if project.profile?.fullAuto == true {
@@ -449,8 +538,44 @@ struct SessionActions {
             if let s = project.profile?.sandbox { args += ["-s", s.rawValue] }
             if let a = project.profile?.approval { args += ["-a", a.rawValue] }
         }
-        // Keep named profile id if provided (coexist with inline flags)
-        if let profile = project.profileId, !profile.isEmpty { args += ["--profile", profile] }
+
+        // Model: include explicit --model unless we are injecting a temporary profile (to avoid precedence overlap)
+        let modelFromProject = project.profile?.model
+        if !(pid?.isEmpty == false && !hasPersisted) {
+            if let pm = modelFromProject, !pm.isEmpty {
+                args += ["--model", pm]
+            } else if let fm = fallbackModel, !fm.isEmpty {
+                args += ["--model", fm]
+            }
+        }
+
+        // Effective policies for potential inline profile injection
+        var approvalRaw: String? = project.profile?.approval?.rawValue
+        var sandboxRaw: String? = project.profile?.sandbox?.rawValue
+        if project.profile?.dangerouslyBypass == true {
+            approvalRaw = ApprovalPolicy.never.rawValue
+            sandboxRaw = SandboxMode.dangerFullAccess.rawValue
+        } else if project.profile?.fullAuto == true {
+            approvalRaw = ApprovalPolicy.onFailure.rawValue
+            sandboxRaw = SandboxMode.workspaceWrite.rawValue
+        }
+        if approvalRaw == nil { approvalRaw = options.approval?.rawValue }
+        if sandboxRaw == nil { sandboxRaw = options.sandbox?.rawValue }
+
+        // Profile selection
+        if let pid, !pid.isEmpty {
+            if hasPersisted {
+                args += ["--profile", pid]
+            } else if let inline = renderInlineProfileConfig(
+                key: pid,
+                model: modelFromProject ?? fallbackModel,
+                approvalPolicy: nil,
+                sandboxMode: nil
+            ) {
+                // Zero-write: inject the inline profile and select it
+                args += ["--profile", pid, "-c", inline]
+            }
+        }
         return args
     }
 
