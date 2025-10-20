@@ -554,6 +554,33 @@ actor CodexConfigService {
         return out.joined(separator: "\n") + "\n"
     }
 
+    // MARK: - Projects (config-backed)
+
+    func listProjects() -> [Project] {
+        let text = (try? String(contentsOf: paths.configURL, encoding: .utf8)) ?? ""
+        return parseProjects(from: text)
+    }
+
+    func upsertProject(_ project: Project) throws {
+        let text = (try? String(contentsOf: paths.configURL, encoding: .utf8)) ?? ""
+        var current = parseProjects(from: text)
+        if let idx = current.firstIndex(where: { $0.id == project.id }) {
+            current[idx] = project
+        } else {
+            current.append(project)
+        }
+        let rewritten = rewriteProjectsRegion(in: text, with: current)
+        try writeConfig(rewritten)
+    }
+
+    func deleteProject(id: String) throws {
+        let text = (try? String(contentsOf: paths.configURL, encoding: .utf8)) ?? ""
+        var current = parseProjects(from: text)
+        current.removeAll { $0.id == id }
+        let rewritten = rewriteProjectsRegion(in: text, with: current)
+        try writeConfig(rewritten)
+    }
+
     // MARK: - Canonical providers region rewriter
     private func rewriteProvidersRegion(in text: String, with providers: [CodexProvider]) -> String {
         // 1) Remove all provider blocks (and any stray managed provider bodies without header)
@@ -626,6 +653,115 @@ actor CodexConfigService {
             i += 1
         }
         return keep.joined(separator: "\n")
+    }
+
+    // MARK: - Projects region rewriter and parser
+
+    private func parseProjects(from text: String) -> [Project] {
+        var map: [String: Project] = [:]
+        var order: [String] = []
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        var i = 0
+        while i < lines.count {
+            let line = lines[i].trimmingCharacters(in: .whitespaces)
+            if let id = matchProjectHeader(line) {
+                var j = i + 1
+                var body: [String] = []
+                while j < lines.count {
+                    let l = lines[j]
+                    if l.trimmingCharacters(in: .whitespaces).hasPrefix("[") { break }
+                    body.append(l)
+                    j += 1
+                }
+                let p = parseProjectBody(id: id, body: body)
+                map[id] = p
+                if !order.contains(id) { order.append(id) }
+                i = j
+                continue
+            }
+            i += 1
+        }
+        return order.compactMap { map[$0] }
+    }
+
+    private func matchProjectHeader(_ line: String) -> String? {
+        // [projects.<id>]
+        guard line.hasPrefix("[projects.") && line.hasSuffix("]") else { return nil }
+        let start = "[projects.".count
+        let endIndex = line.index(before: line.endIndex)
+        let id = String(line[line.index(line.startIndex, offsetBy: start)..<endIndex])
+        return id.trimmingCharacters(in: .whitespaces)
+    }
+
+    private func parseProjectBody(id: String, body: [String]) -> Project {
+        var name: String = id
+        var directory: String = ""
+        var trust: String? = nil
+        var overview: String? = nil
+        var instructions: String? = nil
+        var profile: String? = nil
+        for raw in body {
+            let line = raw.trimmingCharacters(in: .whitespaces)
+            guard !line.hasPrefix("#"), let eq = line.firstIndex(of: "=") else { continue }
+            let key = line[..<eq].trimmingCharacters(in: .whitespaces)
+            let value = String(line[line.index(after: eq)...]).trimmingCharacters(in: .whitespaces)
+            switch key {
+            case "name": name = unquote(value)
+            case "directory": directory = unquote(value)
+            case "path": if directory.isEmpty { directory = unquote(value) }
+            case "trust_level": trust = unquote(value)
+            case "overview": overview = unquote(value)
+            case "instructions": instructions = unquote(value)
+            case "profile": profile = unquote(value)
+            default: break
+            }
+        }
+        return Project(id: id, name: name, directory: directory, trustLevel: trust, overview: overview, instructions: instructions, profileId: profile)
+    }
+
+    private func renderProjectBody(_ p: Project) -> String {
+        var out: [String] = []
+        out.append("# managed-by=codmate")
+        if !p.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { out.append("name = \"\(p.name)\"") }
+        out.append("directory = \"\(p.directory)\"")
+        if let v = p.trustLevel, !v.isEmpty { out.append("trust_level = \"\(v)\"") }
+        if let v = p.overview, !v.isEmpty { out.append("overview = \"\(v)\"") }
+        if let v = p.instructions, !v.isEmpty { out.append("instructions = \"\(v)\"") }
+        if let v = p.profileId, !v.isEmpty { out.append("profile = \"\(v)\"") }
+        return out.joined(separator: "\n") + "\n"
+    }
+
+    private func rewriteProjectsRegion(in text: String, with projects: [Project]) -> String {
+        // Remove all project blocks
+        var lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        // Pass 1: strip all [projects.*] blocks
+        do {
+            var i = 0
+            while i < lines.count {
+                let t = lines[i].trimmingCharacters(in: .whitespaces)
+                if t.hasPrefix("[projects.") && t.hasSuffix("]") {
+                    var j = i + 1
+                    while j < lines.count {
+                        let tt = lines[j].trimmingCharacters(in: .whitespaces)
+                        if tt.hasPrefix("[") { break }
+                        j += 1
+                    }
+                    lines.removeSubrange(i..<j)
+                    continue
+                }
+                i += 1
+            }
+        }
+        var out = lines.joined(separator: "\n")
+        guard !projects.isEmpty else { return out }
+        if !out.hasSuffix("\n") { out += "\n" }
+        if !out.hasSuffix("\n\n") { out += "\n" }
+        for p in projects {
+            out += "[projects.\(p.id)]\n"
+            out += renderProjectBody(p)
+            out += "\n"
+        }
+        return out
     }
 
     private func countStrayProviderBodies(in text: String) -> Int {

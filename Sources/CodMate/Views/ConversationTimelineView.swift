@@ -273,6 +273,10 @@ private struct EventSegmentView: View {
         case .info: return .gray
         }
     }
+
+    private var isAgentReasoning: Bool {
+        (event.title?.localizedCaseInsensitiveContains("agent reasoning") ?? false)
+    }
 }
 
 #Preview {

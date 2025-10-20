@@ -4,6 +4,8 @@ struct SessionNote: Codable, Hashable {
     let id: String
     var title: String?
     var comment: String?
+    var projectId: String?
+    var profileId: String?
     var updatedAt: Date
 }
 
@@ -54,9 +56,20 @@ actor SessionNotesStore {
     }
 
     func upsert(id: String, title: String?, comment: String?) {
-        var note = (note(for: id) ?? SessionNote(id: id, title: nil, comment: nil, updatedAt: Date()))
+        var note = (note(for: id) ?? SessionNote(id: id, title: nil, comment: nil, projectId: nil, profileId: nil, updatedAt: Date()))
         note.title = title
         note.comment = comment
+        note.updatedAt = Date()
+        if let data = try? JSONEncoder().encode(note) {
+            let url = fileURL(for: id)
+            try? data.write(to: url, options: .atomic)
+        }
+    }
+
+    func assignProject(id: String, projectId: String?, profileId: String? = nil) {
+        var note = (note(for: id) ?? SessionNote(id: id, title: nil, comment: nil, projectId: nil, profileId: nil, updatedAt: Date()))
+        note.projectId = projectId
+        if let profileId { note.profileId = profileId }
         note.updatedAt = Date()
         if let data = try? JSONEncoder().encode(note) {
             let url = fileURL(for: id)

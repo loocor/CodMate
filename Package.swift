@@ -12,8 +12,8 @@ let package = Package(
         )
     ],
     dependencies: [
-        // Embedded terminal support (optional at build time)
-        .package(url: "https://github.com/migueldeicaza/SwiftTerm.git", from: "3.0.0")
+        // Embedded terminal support (align with Xcode project 1.5.x)
+        .package(url: "https://github.com/migueldeicaza/SwiftTerm.git", from: "1.5.1")
     ],
     targets: [
         .executableTarget(

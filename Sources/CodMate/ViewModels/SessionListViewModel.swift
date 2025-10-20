@@ -168,10 +168,7 @@ final class SessionListViewModel: ObservableObject {
         let now = Date()
         for s in current {
             guard let newT = s.lastUpdatedAt else { continue }
-            if let oldT = prevMap[s.id] {
-                if newT > oldT { activityHeartbeat[s.id] = now }
-            } else {
-                // New in list: treat as recently updated
+            if let oldT = prevMap[s.id], newT > oldT {
                 activityHeartbeat[s.id] = now
             }
         }

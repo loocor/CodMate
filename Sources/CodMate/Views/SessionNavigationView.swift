@@ -8,6 +8,9 @@ struct SessionNavigationView: View {
     @State private var monthStart: Date = Calendar.current.date(
         from: Calendar.current.dateComponents([.year, .month], from: Date()))!
     @State private var dimension: DateDimension = .updated
+    @State private var showNewProject = false
+
+    @State private var sidebarMode: SidebarMode = .directories
 
     var body: some View {
         VStack(spacing: 0) {
@@ -18,13 +21,42 @@ struct SessionNavigationView: View {
 
             Divider()
 
-            // 中部可滚动：目录树
-            PathTreeView(
-                root: viewModel.pathTreeRoot,
-                selectedPath: $viewModel.selectedPath
-            )
+            // 中部可滚动：目录/项目 切换
+            VStack(spacing: 8) {
+                HStack(spacing: 8) {
+                    Picker("", selection: $sidebarMode) {
+                        Text("Directories").tag(SidebarMode.directories)
+                        Text("Projects").tag(SidebarMode.projects)
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    Spacer(minLength: 4)
+                    if sidebarMode == .projects {
+                        Button {
+                            showNewProject = true
+                        } label: {
+                            Image(systemName: "plus")
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .help("New Project")
+                    }
+                }
+
+                Group {
+                    switch sidebarMode {
+                    case .directories:
+                        PathTreeView(
+                            root: viewModel.pathTreeRoot,
+                            selectedPath: $viewModel.selectedPath
+                        )
+                    case .projects:
+                        ProjectsListView()
+                    }
+                }
+            }
             .padding(.horizontal, 8)
-            .padding(.top, 8)  // Add 8pt spacing below divider
+            .padding(.top, 8)
             .frame(maxHeight: .infinity)
 
             // 底部固定：日历区域（与目录树间隔 8pt）
@@ -43,6 +75,10 @@ struct SessionNavigationView: View {
         }
         .onChange(of: dimension) { _, d in
             _ = viewModel.calendarCounts(for: monthStart, dimension: d)
+        }
+        .sheet(isPresented: $showNewProject) {
+            ProjectEditorSheet(isPresented: $showNewProject, mode: .new)
+                .environmentObject(viewModel)
         }
     }
 
@@ -158,6 +194,8 @@ struct SessionNavigationView: View {
         viewModel.dateDimension = dimension
     }
 }
+
+private enum SidebarMode: Hashable { case directories, projects }
 
 #Preview {
     // Mock ViewModel for preview
