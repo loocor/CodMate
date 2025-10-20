@@ -103,7 +103,7 @@ private func makeTerminalFont(size: CGFloat) -> NSFont {
 }
 
 private func fontHasCJKGlyphs(_ font: NSFont) -> Bool {
-    let samples = "测试汉字宽度"
+    let samples = "CJK width test"
     let ctFont = font as CTFont
     for scalar in samples.unicodeScalars {
         var ch = UniChar(scalar.value)

@@ -17,7 +17,7 @@ actor SessionCacheStore {
         try? fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
         url = dir.appendingPathComponent("sessionIndex-v2.json")
 
-        // 在 init 中同步加载缓存（init 是 nonisolated 的）
+        // Load cache synchronously in init (init is nonisolated)
         if let data = try? Data(contentsOf: url),
             let entries = try? JSONDecoder().decode([Entry].self, from: data)
         {

@@ -21,6 +21,10 @@ struct SessionListColumnView: View {
     // open embedded terminal (Alpha)
     var onOpenEmbedded: ((SessionSummary) -> Void)? = nil
     @EnvironmentObject private var viewModel: SessionListViewModel
+    @State private var showNewProjectSheet = false
+    @State private var newProjectPrefill: ProjectEditorSheet.Prefill? = nil
+    @State private var newProjectAssignIDs: [String] = []
+    @State private var lastClickedID: String? = nil
 
     var body: some View {
         VStack(spacing: 0) {
@@ -52,7 +56,17 @@ struct SessionListColumnView: View {
                                     awaitingFollowup: isAwaitingFollowup?(session) ?? false
                                 )
                                 .tag(session.id)
-                                .onDrag { NSItemProvider(object: session.id as NSString) }
+                                .contentShape(Rectangle())
+                                .onTapGesture { handleClick(on: session) }
+                                .onDrag {
+                                    let ids: [String]
+                                    if selectionContains(session.id) && selection.count > 1 {
+                                        ids = Array(selection)
+                                    } else {
+                                        ids = [session.id]
+                                    }
+                                    return NSItemProvider(object: ids.joined(separator: "\n") as NSString)
+                                }
                                 .listRowInsets(EdgeInsets())
                                 .contextMenu {
                                     Button {
@@ -75,10 +89,14 @@ struct SessionListColumnView: View {
                                     } label: {
                                         Label("Edit Title & Comment", systemImage: "pencil")
                                     }
-                                    // Assign to Project submenu (MVP)
+                                    // Assign to Project submenu
                                     if !viewModel.projects.isEmpty {
                                         Menu {
-                                            Button("(None)") { Task { await viewModel.assignSessions(to: nil, ids: [session.id]) } }
+                                            Button("New Project…") {
+                                                newProjectPrefill = prefillForProject(from: session)
+                                                newProjectAssignIDs = [session.id]
+                                                showNewProjectSheet = true
+                                            }
                                             Divider()
                                             ForEach(viewModel.projects) { p in
                                                 Button(p.name.isEmpty ? p.id : p.name) {
@@ -128,6 +146,15 @@ struct SessionListColumnView: View {
             .padding(.horizontal, 16)
         }
         .padding(.vertical, 16)
+        .sheet(isPresented: $showNewProjectSheet) {
+            ProjectEditorSheet(
+                isPresented: $showNewProjectSheet,
+                mode: .new,
+                prefill: newProjectPrefill,
+                autoAssignSessionIDs: newProjectAssignIDs
+            )
+            .environmentObject(viewModel)
+        }
     }
 
     private var header: some View {
@@ -151,6 +178,58 @@ struct SessionListColumnView: View {
 extension SessionListColumnView {
     func selectionContains(_ id: SessionSummary.ID) -> Bool {
         selection.contains(id)
+    }
+
+    private func prefillForProject(from session: SessionSummary) -> ProjectEditorSheet.Prefill {
+        let dir = FileManager.default.fileExists(atPath: session.cwd)
+        ? session.cwd
+        : session.fileURL.deletingLastPathComponent().path
+        var name = session.userTitle?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if name.isEmpty { name = URL(fileURLWithPath: dir, isDirectory: true).lastPathComponent }
+        // overview: prefer userComment; fallback instruction snippet
+        let overview = (session.userComment?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 }
+            ?? (session.instructions?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { s in
+                if s.isEmpty { return nil }
+                // limit to ~220 chars to keep it short
+                return s.count <= 220 ? s : String(s.prefix(220)) + "…"
+            }
+        let instructions = session.instructions?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return ProjectEditorSheet.Prefill(
+            name: name,
+            directory: dir,
+            trustLevel: nil,
+            overview: overview,
+            instructions: instructions,
+            profileId: nil
+        )
+    }
+
+    private func handleClick(on session: SessionSummary) {
+        // Determine current modifiers (command/control/shift)
+        let mods = NSApp.currentEvent?.modifierFlags ?? []
+        let isToggle = mods.contains(.command) || mods.contains(.control)
+        let isRange = mods.contains(.shift)
+        let id = session.id
+        if isRange, let anchor = lastClickedID {
+            let flat = sections.flatMap { $0.sessions.map(\.id) }
+            if let a = flat.firstIndex(of: anchor), let b = flat.firstIndex(of: id) {
+                let lo = min(a, b), hi = max(a, b)
+                let rangeIDs = Set(flat[lo...hi])
+                selection = rangeIDs
+            } else {
+                selection = [id]
+            }
+        } else if isToggle {
+            if selection.contains(id) {
+                selection.remove(id)
+            } else {
+                selection.insert(id)
+            }
+            lastClickedID = id
+        } else {
+            selection = [id]
+            lastClickedID = id
+        }
     }
 }
 

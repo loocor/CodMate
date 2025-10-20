@@ -78,6 +78,7 @@ struct SessionListRowView: View {
                 }
             }
             .padding(.trailing, 8)
+            .allowsHitTesting(false)
         }
     }
 }

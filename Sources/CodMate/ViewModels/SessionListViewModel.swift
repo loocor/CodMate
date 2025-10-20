@@ -15,7 +15,7 @@ final class SessionListViewModel: ObservableObject {
     @Published var enrichmentTotal: Int = 0
     @Published var errorMessage: String?
 
-    // 新的过滤状态：支持组合过滤
+    // New filter state: supports combined filters
     @Published var selectedPath: String? = nil {
         didSet {
             guard !suppressFilterNotifications, oldValue != selectedPath else { return }
@@ -71,7 +71,10 @@ final class SessionListViewModel: ObservableObject {
 
     // Projects
     private let configService = CodexConfigService()
+    private let projectsStore = ProjectsStore()
     @Published private(set) var projects: [Project] = []
+    private var projectCounts: [String: Int] = [:]
+    private var projectMemberships: [String: String] = [:]
     @Published var selectedProjectId: String? = nil {
         didSet {
             guard !suppressFilterNotifications, oldValue != selectedProjectId else { return }
@@ -90,7 +93,7 @@ final class SessionListViewModel: ObservableObject {
         self.indexer = indexer
         self.actions = actions
         self.notesStore = SessionNotesStore(notesRoot: preferences.notesRoot)
-        // 启动时默认状态：All Sessions（无目录过滤）+ 当天日期
+        // Default at startup: All Sessions (no directory filter) + today
         let today = Date()
         let cal = Calendar.current
         suppressFilterNotifications = true
@@ -136,8 +139,11 @@ final class SessionListViewModel: ObservableObject {
             guard token == activeRefreshToken else { return }
             let notes = await notesStore.all()
             notesSnapshot = notes
-            // Refresh projects on each sessions refresh to reflect external edits
-            Task { await self.loadProjects() }
+            // Refresh projects/memberships snapshot and import legacy mappings if needed
+            Task {
+                await self.loadProjects()
+                await self.importMembershipsFromNotesIfNeeded(notes: notes)
+            }
             apply(notes: notes, to: &sessions)
             registerActivityHeartbeat(previous: allSessions, current: sessions)
             allSessions = sessions
@@ -148,7 +154,7 @@ final class SessionListViewModel: ObservableObject {
             currentMonthDimension = dateDimension
             currentMonthKey = monthKey(for: selectedDay, dimension: dateDimension)
             Task { await self.refreshGlobalCount() }
-            // 刷新侧边栏路径树，确保新增文件通过刷新即可出现
+            // Refresh path tree to ensure newly created files appear via refresh
             Task {
                 let counts = await indexer.collectCWDCounts(root: preferences.sessionsRoot)
                 let tree = counts.buildPathTreeFromCounts()
@@ -298,7 +304,7 @@ final class SessionListViewModel: ObservableObject {
             _ = actions.openAppleTerminal(at: dir)
             copyNewProjectCommands(project: project)
         }
-        Task { await SystemNotifier.shared.notify(title: "CodMate", body: "命令已拷贝，请粘贴到打开的终端") }
+        Task { await SystemNotifier.shared.notify(title: "CodMate", body: "Command copied. Paste it in the opened terminal.") }
     }
 
     func copyRealResumeCommand(session: SessionSummary) {
@@ -443,7 +449,7 @@ final class SessionListViewModel: ObservableObject {
         }
     }
 
-    // MARK: - 过滤状态管理
+    // MARK: - Filter state management
 
     func setSelectedPath(_ path: String?) {
         if selectedPath == path { return }
@@ -463,7 +469,16 @@ final class SessionListViewModel: ObservableObject {
         selectedProjectId = nil
         suppressFilterNotifications = false
         scheduleFilterRefresh(force: true)
-        // searchText 保持不变，便于连续检索
+        // Keep searchText unchanged to allow consecutive searches
+    }
+
+    // Clear only scope filters (directory and project), keep the date filter intact
+    func clearScopeFilters() {
+        suppressFilterNotifications = true
+        selectedPath = nil
+        selectedProjectId = nil
+        suppressFilterNotifications = false
+        scheduleFilterRefresh(force: true)
     }
 
     private func applyFilters() {
@@ -474,7 +489,7 @@ final class SessionListViewModel: ObservableObject {
 
         var filtered = allSessions
 
-        // 1. 目录过滤
+        // 1. Directory filter
         if let path = selectedPath {
             let canonicalSelected = Self.canonicalPath(path)
             let prefix = canonicalSelected == "/" ? "/" : canonicalSelected + "/"
@@ -492,20 +507,15 @@ final class SessionListViewModel: ObservableObject {
             }
         }
 
-        // 2. 项目过滤（优先显式映射；其次目录推断）
-        if let pid = selectedProjectId, let project = projects.first(where: { $0.id == pid }) {
-            let projPath = Self.canonicalPath(project.directory)
-            let prefix = projPath == "/" ? "/" : projPath + "/"
+        // 2. Project filter (based on ProjectsStore explicit mapping)
+        if let pid = selectedProjectId {
+            let memberships = projectMemberships
             filtered = filtered.filter { summary in
-                // explicit mapping wins
-                if notesSnapshot[summary.id]?.projectId == pid { return true }
-                // directory inference when under project directory
-                let canonical = canonicalCwdCache[summary.id] ?? Self.canonicalPath(summary.cwd)
-                return canonical == projPath || canonical.hasPrefix(prefix)
+                memberships[summary.id] == pid
             }
         }
 
-        // 3. 日期过滤
+        // 3. Date filter
         if let day = selectedDay {
             filtered = filtered.filter { sess in
                 let cal = Calendar.current
@@ -521,7 +531,7 @@ final class SessionListViewModel: ObservableObject {
             }
         }
 
-        // 4. 搜索过滤
+        // 4. Search filter
         let term = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         if !term.isEmpty {
             filtered = filtered.filter { summary in
@@ -529,10 +539,10 @@ final class SessionListViewModel: ObservableObject {
             }
         }
 
-        // 5. 排序
+        // 5. Sorting
         filtered = sortOrder.sort(filtered)
 
-        // 6. 分组
+        // 6. Grouping
         sections = Self.groupSessions(filtered, dimension: dateDimension)
     }
 
@@ -750,18 +760,18 @@ final class SessionListViewModel: ObservableObject {
     }
 
     private func currentScope() -> SessionLoadScope {
-        // 如果选中了具体日期，根据维度决定加载范围
+        // If a specific date is selected, decide load scope by dimension
         if let day = selectedDay {
             switch dateDimension {
             case .created:
-                // Created 维度：只加载该日目录下的文件
+                // Created dimension: only load files of the given day
                 return .day(day)
             case .updated:
-                // Updated 维度：为确保与日历统计保持一致，统一加载全部文件后再过滤
+                // Updated dimension: load everything and then filter to match calendar stats
                 return .all
             }
         }
-        // 无日期过滤时：加载所有数据
+        // No date filter: load all
         return .all
     }
 
@@ -873,7 +883,7 @@ final class SessionListViewModel: ObservableObject {
     private func countsForLoadedMonth(dimension: DateDimension) -> [Int: Int] {
         var counts: [Int: Int] = [:]
         let calendar = Calendar.current
-        // 获取当前选择的月份
+        // Get the currently selected month
         guard let selectedDay = selectedDay else { return [:] }
         let monthStart = calendar.date(
             from: calendar.dateComponents([.year, .month], from: selectedDay))!
@@ -886,7 +896,7 @@ final class SessionListViewModel: ObservableObject {
             case .updated:
                 referenceDate = session.lastUpdatedAt ?? session.startedAt
             }
-            // 验证日期是否属于当前月份
+            // Verify the date is within the current month
             guard calendar.isDate(referenceDate, equalTo: monthStart, toGranularity: .month) else {
                 continue
             }
@@ -916,8 +926,21 @@ extension SessionListViewModel {
 
     // MARK: - Projects
     func loadProjects() async {
-        let list = await configService.listProjects()
-        await MainActor.run { self.projects = list }
+        var list = await projectsStore.listProjects()
+        if list.isEmpty {
+            let cfg = await configService.listProjects()
+            if !cfg.isEmpty {
+                for p in cfg { await projectsStore.upsertProject(p) }
+                list = await projectsStore.listProjects()
+            }
+        }
+        let counts = await projectsStore.counts()
+        let memberships = await projectsStore.membershipsSnapshot()
+        await MainActor.run {
+            self.projects = list
+            self.projectCounts = counts
+            self.projectMemberships = memberships
+        }
     }
 
     func setSelectedProject(_ id: String?) {
@@ -925,24 +948,44 @@ extension SessionListViewModel {
     }
 
     func assignSessions(to projectId: String?, ids: [String]) async {
-        for id in ids { await notesStore.assignProject(id: id, projectId: projectId) }
-        let notes = await notesStore.all()
-        notesSnapshot = notes
+        await projectsStore.assign(sessionIds: ids, to: projectId)
+        let counts = await projectsStore.counts()
+        let memberships = await projectsStore.membershipsSnapshot()
+        await MainActor.run {
+            self.projectCounts = counts
+            self.projectMemberships = memberships
+        }
         applyFilters()
     }
 
-    func projectCountsFromNotes() -> [String: Int] {
-        var counts: [String: Int] = [:]
-        for (_, note) in notesSnapshot {
-            if let pid = note.projectId { counts[pid, default: 0] += 1 }
-        }
-        return counts
+    func projectCountsFromStore() -> [String: Int] { projectCounts }
+
+    // Project upsert/delete with config sync
+    func createOrUpdateProject(_ project: Project) async {
+        await projectsStore.upsertProject(project)
+        await loadProjects()
     }
 
-    // Helper for views to upsert a project
-    func configServiceUpsert(project: Project) async {
-        do { try await configService.upsertProject(project) } catch {
-            await MainActor.run { self.errorMessage = error.localizedDescription }
+    func deleteProject(id: String) async {
+        await projectsStore.deleteProject(id: id)
+        await loadProjects()
+        if selectedProjectId == id { selectedProjectId = nil }
+        applyFilters()
+    }
+
+    // Import memberships from notes.projectId one-time when store is empty
+    private func importMembershipsFromNotesIfNeeded(notes: [String: SessionNote]) async {
+        let existing = await projectsStore.membershipsSnapshot()
+        if !existing.isEmpty { return }
+        var buckets: [String: [String]] = [:] // pid -> [sid]
+        for (sid, n) in notes { if let pid = n.projectId { buckets[pid, default: []].append(sid) } }
+        guard !buckets.isEmpty else { return }
+        for (pid, sids) in buckets { await projectsStore.assign(sessionIds: sids, to: pid) }
+        let counts = await projectsStore.counts()
+        let memberships = await projectsStore.membershipsSnapshot()
+        await MainActor.run {
+            self.projectCounts = counts
+            self.projectMemberships = memberships
         }
     }
 }
