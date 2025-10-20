@@ -37,6 +37,7 @@ struct ProjectsListView: View {
                     .tag(Optional.some(p.id))
                     .listRowInsets(EdgeInsets())
                     .contentShape(Rectangle())
+                    .onTapGesture(count: 2) { editingProject = p; showEdit = true }
                     .onTapGesture { viewModel.setSelectedProject(p.id) }
                     .contextMenu {
                         Button { viewModel.openNewSession(project: p) } label: {

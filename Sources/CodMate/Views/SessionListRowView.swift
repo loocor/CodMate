@@ -6,6 +6,8 @@ struct SessionListRowView: View {
     var isSelected: Bool = false
     var isUpdating: Bool = false
     var awaitingFollowup: Bool = false
+    var inProject: Bool = false
+    var projectTip: String? = nil
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -55,8 +57,14 @@ struct SessionListRowView: View {
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .padding(.vertical, 8)
         .buttonStyle(.plain)
-        .overlay(alignment: .trailing) {
+        .overlay(alignment: .topTrailing) {
             HStack(spacing: 8) {
+                if inProject {
+                    Image(systemName: "square.grid.2x2")
+                        .foregroundStyle(Color.secondary)
+                        .font(.system(size: 12, weight: .regular))
+                        .help(projectTip ?? "Project")
+                }
                 if isUpdating {
                     Image(systemName: "timer")
                         .foregroundStyle(Color.orange)
@@ -67,7 +75,7 @@ struct SessionListRowView: View {
                 if isRunning {
                     Image(systemName: "play.circle.fill")
                         .foregroundStyle(Color.green)
-                        .font(.system(size: 22, weight: .semibold))
+                        .font(.system(size: 24, weight: .semibold))
                         .help("Running in terminal")
                 }
                 if awaitingFollowup {
@@ -78,13 +86,14 @@ struct SessionListRowView: View {
                 }
             }
             .padding(.trailing, 8)
+            .padding(.top, 8)
             .allowsHitTesting(false)
         }
     }
 }
 
-private extension SessionListRowView {
-    var iconForeground: some ShapeStyle {
+extension SessionListRowView {
+    fileprivate var iconForeground: some ShapeStyle {
         isSelected ? AnyShapeStyle(Color.white) : AnyShapeStyle(Color.accentColor)
     }
 }

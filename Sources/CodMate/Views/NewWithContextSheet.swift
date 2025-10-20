@@ -13,6 +13,7 @@ struct NewWithContextSheet: View {
     @State private var showPreview: Bool = false
     private let treeshaker = ContextTreeshaker()
     @State private var previewTask: Task<Void, Never>? = nil
+    @State private var escMonitor: Any? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -34,8 +35,6 @@ struct NewWithContextSheet: View {
 
             HStack {
                 Button("Close") { isPresented = false }
-                Button("Cancel") { cancelHeavyWork() }
-                    .keyboardShortcut(.cancelAction)
                 Spacer()
                 Button {
                     copyOnly()
@@ -53,8 +52,21 @@ struct NewWithContextSheet: View {
         .frame(width: 860, height: 540)
         .padding(16)
         .task { await initialDefaults() }
-        .onAppear { viewModel.cancelHeavyWork() }
-        .onDisappear { cancelHeavyWork() }
+        .onAppear {
+            viewModel.cancelHeavyWork()
+            // Intercept ESC to cancel heavy work without closing the sheet
+            escMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+                if event.keyCode == 53 { // ESC
+                    cancelHeavyWork()
+                    return nil // swallow event
+                }
+                return event
+            }
+        }
+        .onDisappear {
+            cancelHeavyWork()
+            if let m = escMonitor { NSEvent.removeMonitor(m); escMonitor = nil }
+        }
         .onChange(of: selectedIDs) { _, _ in if showPreview { schedulePreview() } }
         .onChange(of: options.mergeConsecutiveAssistant) { _, _ in if showPreview { schedulePreview() } }
         .onChange(of: options.includeReasoning) { _, _ in if showPreview { schedulePreview() } }
@@ -68,18 +80,26 @@ struct NewWithContextSheet: View {
                 searchField
             }
 
-            List(selection: Binding(get: { selectedIDs }, set: { selectedIDs = $0 })) {
+            List {
                 ForEach(filteredSessions(), id: \.id) { s in
                     HStack(spacing: 8) {
-                        Text(s.effectiveTitle).lineLimit(1)
-                        Spacer()
-                        Text(s.startedAt, style: .date)
+                        Toggle("", isOn: Binding(
+                            get: { selectedIDs.contains(s.id) },
+                            set: { checked in
+                                if checked { selectedIDs.insert(s.id) } else { selectedIDs.remove(s.id) }
+                            }
+                        ))
+                        .labelsHidden()
+
+                        Text(s.effectiveTitle)
+                            .lineLimit(1)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+
+                        Text(s.startedAt.formatted(date: .numeric, time: .shortened))
+                            .font(.caption2.monospacedDigit())
                             .foregroundStyle(.secondary)
-                            .font(.caption2)
                     }
                     .tag(s.id)
-                    .contentShape(Rectangle())
-                    .onTapGesture { toggleSelection(s.id) }
                 }
             }
             .environment(\.defaultMinListRowHeight, 40)
@@ -106,9 +126,16 @@ struct NewWithContextSheet: View {
                     HStack(spacing: 8) {
                         Text("Max message size (KB)")
                             .frame(width: 170, alignment: .trailing)
-                        Slider(value: Binding(get: { Double(options.maxMessageBytes) / 1024.0 }, set: { options.maxMessageBytes = max(1024, Int($0 * 1024)) }), in: 1...32)
-                        Text("\(options.maxMessageBytes / 1024)KB").monospacedDigit()
-                            .frame(width: 64, alignment: .leading)
+                        Slider(
+                            value: Binding(
+                                get: { Double(options.maxMessageBytes) / 1024.0 },
+                                set: { options.maxMessageBytes = max(1024, Int($0 * 1024)) }
+                            ), in: 1...16
+                        )
+                        .frame(maxWidth: .infinity)
+                        Text("\(options.maxMessageBytes / 1024)KB")
+                            .monospacedDigit()
+                            .frame(width: 64, alignment: .trailing)
                     }
                 }
                 .padding(8)
@@ -134,6 +161,7 @@ struct NewWithContextSheet: View {
                                 .textSelection(.enabled)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .font(.system(.body, design: .rounded))
+                                .foregroundStyle(previewText.isEmpty ? .tertiary : .primary)
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                     } else {
@@ -153,7 +181,7 @@ struct NewWithContextSheet: View {
             Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
             TextField("Search", text: $searchText)
                 .textFieldStyle(.plain)
-                .frame(width: 160)
+                .frame(maxWidth: .infinity)
             if !searchText.isEmpty {
                 Button { searchText = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.tertiary) }
                     .buttonStyle(.plain)
@@ -166,6 +194,7 @@ struct NewWithContextSheet: View {
                 .fill(Color(nsColor: .textBackgroundColor))
                 .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(Color.secondary.opacity(0.25), lineWidth: 1))
         )
+        .frame(maxWidth: .infinity)
     }
 
     private func filteredSessions() -> [SessionSummary] {

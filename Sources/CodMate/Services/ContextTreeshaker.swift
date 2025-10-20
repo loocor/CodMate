@@ -4,7 +4,7 @@ struct TreeshakeOptions: Sendable, Equatable {
     var includeReasoning: Bool = false
     var includeToolSummary: Bool = false
     var mergeConsecutiveAssistant: Bool = true
-    var maxMessageBytes: Int = 8 * 1024 // 8KB default
+    var maxMessageBytes: Int = 2 * 1024 // 2KB default (faster preview)
 }
 
 actor ContextTreeshaker {
@@ -110,16 +110,48 @@ actor ContextTreeshaker {
     }
 
     private func trim(_ text: String, limit: Int) -> String {
+        // Keep within byte limit while respecting Unicode character boundaries
         guard limit > 0 else { return text }
-        let bytes = Array(text.utf8)
-        guard bytes.count > limit else { return text }
-        // keep head/tail samples (25% head, 25% tail)
-        let headLen = max(512, limit / 4)
-        let tailLen = max(512, limit / 4)
-        let head = bytes.prefix(headLen)
-        let tail = bytes.suffix(tailLen)
-        let headStr = String(decoding: head, as: UTF8.self)
-        let tailStr = String(decoding: tail, as: UTF8.self)
+        let totalBytes = text.utf8.count
+        guard totalBytes > limit else { return text }
+
+        // Keep head/tail samples to provide surrounding context
+        let headBytes = max(512, limit / 4)
+        let tailBytes = max(512, limit / 4)
+        let headStr = prefixByUTF8(text, maxBytes: headBytes)
+        let tailStr = suffixByUTF8(text, maxBytes: tailBytes)
         return headStr + "\n\n… [snip] …\n\n" + tailStr
+    }
+
+    // Safe UTF-8 prefix cut at Character boundaries
+    private func prefixByUTF8(_ text: String, maxBytes: Int) -> String {
+        guard maxBytes > 0 else { return "" }
+        var used = 0
+        var endIndex = text.startIndex
+        for ch in text { // Character iteration respects extended grapheme clusters
+            let b = String(ch).utf8.count
+            if used + b > maxBytes { break }
+            used += b
+            endIndex = text.index(after: endIndex)
+        }
+        return String(text[..<endIndex])
+    }
+
+    // Safe UTF-8 suffix cut at Character boundaries
+    private func suffixByUTF8(_ text: String, maxBytes: Int) -> String {
+        guard maxBytes > 0 else { return "" }
+        var used = 0
+        var charCount = 0
+        for ch in text.reversed() { // reversed Characters
+            let b = String(ch).utf8.count
+            if used + b > maxBytes { break }
+            used += b
+            charCount += 1
+        }
+        if charCount == 0 { return "" }
+        // Take last `charCount` Characters
+        var start = text.endIndex
+        for _ in 0..<charCount { start = text.index(before: start) }
+        return String(text[start...])
     }
 }

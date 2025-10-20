@@ -226,20 +226,19 @@ struct ContentView: View {
     private var detailActionBar: some View {
         HStack(spacing: 12) {
             if let focused = focusedSummary {
-                Button(action: { Task { await viewModel.beginEditing(session: focused) } }) {
-                    HStack(spacing: 6) {
-                        Text(focused.effectiveTitle)
+                HStack(spacing: 6) {
+                    Text(focused.effectiveTitle)
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+                    Button(action: { Task { await viewModel.beginEditing(session: focused) } }) {
                         Image(systemName: "pencil")
                             .font(.subheadline)
                             .foregroundStyle(.tertiary)
                     }
-                    .font(.headline)
-                    .foregroundStyle(.primary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
+                    .buttonStyle(.plain)
+                    .help("Rename / Add Comment")
                 }
-                .buttonStyle(.plain)
-                .help("Rename / Add Comment")
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
 
            Spacer()
