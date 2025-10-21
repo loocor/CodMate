@@ -16,7 +16,10 @@ import Foundation
         {
             if let v = views[id] { return v }
 
-            let term = LocalProcessTerminalView(frame: .zero)
+            // Ensure SwiftTerm disables OSC 10/11 color query responses for embedded sessions
+            setenv("CODEX_DISABLE_COLOR_QUERY", "1", 1)
+
+            let term: LocalProcessTerminalView = CodMateTerminalView(frame: .zero)
             term.font = font
             // Start login shell
             term.startProcess(executable: "/bin/zsh", args: ["-l"])

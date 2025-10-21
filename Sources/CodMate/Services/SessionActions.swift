@@ -242,7 +242,7 @@ struct SessionActions {
         let execPath = "codex"
         // Embedded terminal: keep environment exports for robustness
         let exports =
-            "export LANG=zh_CN.UTF-8; export LC_ALL=zh_CN.UTF-8; export LC_CTYPE=zh_CN.UTF-8; export TERM=xterm-256color"
+            "export LANG=zh_CN.UTF-8; export LC_ALL=zh_CN.UTF-8; export LC_CTYPE=zh_CN.UTF-8; export TERM=xterm-256color; export CODEX_DISABLE_COLOR_QUERY=1"
         let invocation = buildResumeCLIInvocation(
             session: session, executablePath: execPath, options: options)
         let resume = "PATH=\(injectedPATH) \(invocation)"
@@ -259,7 +259,7 @@ struct SessionActions {
         let cd = "cd " + shellEscapedPath(cwd)
         let injectedPATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:${PATH}"
         let exports =
-            "export LANG=zh_CN.UTF-8; export LC_ALL=zh_CN.UTF-8; export LC_CTYPE=zh_CN.UTF-8; export TERM=xterm-256color"
+            "export LANG=zh_CN.UTF-8; export LC_ALL=zh_CN.UTF-8; export LC_CTYPE=zh_CN.UTF-8; export TERM=xterm-256color; export CODEX_DISABLE_COLOR_QUERY=1"
         let invocation = buildNewSessionCLIInvocation(session: session, options: options)
         let command = "PATH=\(injectedPATH) \(invocation)"
         return cd + "\n" + exports + "\n" + command + "\n"
@@ -423,6 +423,7 @@ struct SessionActions {
             "export LC_ALL=zh_CN.UTF-8",
             "export LC_CTYPE=zh_CN.UTF-8",
             "export TERM=xterm-256color",
+            "export CODEX_DISABLE_COLOR_QUERY=1",
         ]
         if let env = project.profile?.env {
             for (k, v) in env {

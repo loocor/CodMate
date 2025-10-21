@@ -64,7 +64,7 @@ import SwiftUI
         }
 
         func makeNSView(context: Context) -> LocalProcessTerminalView {
-            let term = LocalProcessTerminalView(frame: .zero)
+            let term = CodMateTerminalView(frame: CGRect.zero)
             let font = makeTerminalFont(size: 12)
             term.font = font
             term.startProcess(executable: "/bin/zsh", args: ["-l"])
@@ -86,6 +86,7 @@ import SwiftUI
             "LXGW WenKai Mono",
             "Noto Sans Mono CJK SC",
             "NotoSansMonoCJKsc-Regular",
+            "JetBrains Mono", "JetBrainsMono-Regular", "JetBrains Mono NL",
             "JetBrainsMonoNL Nerd Font Mono",
             "JetBrainsMono Nerd Font Mono",
             "SF Mono",

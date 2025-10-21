@@ -39,6 +39,7 @@
 		31B626722EA24A9E008CA40F /* EmbeddedTerminalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31B626712EA24A9E008CA40F /* EmbeddedTerminalView.swift */; };
 		31B626742EA24E3B008CA40F /* SystemNotifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31B626732EA24E3B008CA40F /* SystemNotifier.swift */; };
 		31B626762EA26B6D008CA40F /* TerminalSessionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31B626752EA26B6D008CA40F /* TerminalSessionManager.swift */; };
+		41A001252B30050000000001 /* CodMateTerminalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41A001262B30050000000001 /* CodMateTerminalView.swift */; };
         41A001242B30040000000001 /* THIRD-PARTY-NOTICES.md in Resources */ = {isa = PBXBuildFile; fileRef = 41A001232B30040000000001 /* THIRD-PARTY-NOTICES.md */; };
 		41A0010E2B00000A00000001 /* SessionsDiagnosticsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41A0010F2B00000A00000001 /* SessionsDiagnosticsService.swift */; };
 		31B626782EA26BEE008CA40F /* TerminalHostView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31B626772EA26BEE008CA40F /* TerminalHostView.swift */; };
@@ -56,6 +57,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+        41A001262B30050000000001 /* CodMateTerminalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CodMateTerminalView.swift; path = Sources/CodMate/Views/CodMateTerminalView.swift; sourceTree = SOURCE_ROOT; };
 		1A00007F2A00000100000001 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; name = Info.plist; path = CodMate/Info.plist; sourceTree = SOURCE_ROOT; };
 		1A0000802A00000100000001 /* CodMate.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CodMate.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		1A0000812A00000100000001 /* CodMateApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CodMateApp.swift; path = Sources/CodMate/CodMateApp.swift; sourceTree = SOURCE_ROOT; };
@@ -201,9 +203,9 @@
             name = Services;
             sourceTree = SOURCE_ROOT;
         };
-			1A00020D2A00000100000001 /* Views */ = {
-				isa = PBXGroup;
-				children = (
+		1A00020D2A00000100000001 /* Views */ = {
+			isa = PBXGroup;
+			children = (
                 41A0011A2B20026000000001 /* Components */,
 					1A00008A2A00000100000001 /* SessionNavigationView.swift */,
 					1A0001222A00000100000001 /* CalendarMonthView.swift */,
@@ -213,6 +215,7 @@
 					1A00008D2A00000100000001 /* SessionDetailView.swift */,
 					1A0001262A00000100000001 /* ConversationTimelineView.swift */,
 					1A0001272A00000100000001 /* SettingsView.swift */,
+					41A001262B30050000000001 /* CodMateTerminalView.swift */,
 					31B626712EA24A9E008CA40F /* EmbeddedTerminalView.swift */,
 					31B626772EA26BEE008CA40F /* TerminalHostView.swift */,
 					311247A12EA38F7600D8D33E /* WindowConfigurator.swift */,
@@ -271,7 +274,7 @@
 			);
 			mainGroup = 1A0000002A00000100000001;
 			packageReferences = (
-				318405A12EA337CE00409C33 /* XCRemoteSwiftPackageReference "SwiftTerm" */,
+				318405A12EA337CE00409C33 /* XCLocalSwiftPackageReference "SwiftTerm" */,
 			);
 			productRefGroup = 1A00000A2A00000100000001 /* Products */;
 			projectDirPath = "";
@@ -342,6 +345,7 @@
                 41A0011C2B20026000000003 /* SandboxApprovalEditor.swift in Sources */,
                 41A0011D2B2002A000000002 /* NewWithContextSheet.swift in Sources */,
                 41A0011F2B2002A000000004 /* ContextTreeshaker.swift in Sources */,
+                41A001252B30050000000001 /* CodMateTerminalView.swift in Sources */,
             );
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -535,21 +539,17 @@
 		};
 /* End XCConfigurationList section */
 
-/* Begin XCRemoteSwiftPackageReference section */
-		318405A12EA337CE00409C33 /* XCRemoteSwiftPackageReference "SwiftTerm" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/migueldeicaza/SwiftTerm";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 1.5.0;
-			};
+/* Begin XCLocalSwiftPackageReference section */
+		318405A12EA337CE00409C33 /* XCLocalSwiftPackageReference "SwiftTerm" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = SwiftTerm;
 		};
-/* End XCRemoteSwiftPackageReference section */
+/* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
 		318405A22EA337CE00409C33 /* SwiftTerm */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = 318405A12EA337CE00409C33 /* XCRemoteSwiftPackageReference "SwiftTerm" */;
+			package = 318405A12EA337CE00409C33 /* XCLocalSwiftPackageReference "SwiftTerm" */;
 			productName = SwiftTerm;
 		};
 /* End XCSwiftPackageProductDependency section */
