@@ -28,16 +28,18 @@ import SwiftUI
         }
 
         private func applyTheme(_ v: LocalProcessTerminalView) {
+            // Transparent background; let parent container decide backdrop.
+            v.wantsLayer = true
+            v.layer?.backgroundColor = NSColor.clear.cgColor
+            v.nativeBackgroundColor = .clear
             if isDark {
                 v.caretColor = NSColor.white
                 v.nativeForegroundColor = NSColor(white: 0.9, alpha: 1.0)
-                v.nativeBackgroundColor = NSColor(white: 0.10, alpha: 1.0)
-                v.selectedTextBackgroundColor = NSColor(white: 0.3, alpha: 0.6)
+                v.selectedTextBackgroundColor = NSColor(white: 0.3, alpha: 0.45)
             } else {
                 v.caretColor = NSColor.black
                 v.nativeForegroundColor = NSColor(white: 0.10, alpha: 1.0)
-                v.nativeBackgroundColor = NSColor(white: 0.98, alpha: 1.0)
-                v.selectedTextBackgroundColor = NSColor(white: 0.7, alpha: 0.4)
+                v.selectedTextBackgroundColor = NSColor(white: 0.7, alpha: 0.35)
             }
         }
 
@@ -67,16 +69,8 @@ import SwiftUI
 
             @objc func copyAction(_ sender: Any?) {
                 guard let term = terminal else { return }
-                // Prefer using SwiftTerm's selection API when available
-                if let selection = term.getSelection(), !selection.isEmpty {
-                    let pb = NSPasteboard.general
-                    pb.clearContents()
-                    pb.setString(selection, forType: .string)
-                    return
-                }
-                // Otherwise try standard copy:
+                // Delegate copy to the view; our subclass sanitizes the pasteboard.
                 if NSApp.sendAction(#selector(NSText.copy(_:)), to: term, from: sender) { return }
-                // No selection to copy
                 NSSound.beep()
             }
 

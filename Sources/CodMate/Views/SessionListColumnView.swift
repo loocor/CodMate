@@ -19,7 +19,7 @@ struct SessionListColumnView: View {
     var isUpdating: ((SessionSummary) -> Bool)? = nil
     // awaiting follow-up probe
     var isAwaitingFollowup: ((SessionSummary) -> Bool)? = nil
-    // open embedded terminal (Alpha)
+    // open embedded terminal
     var onOpenEmbedded: ((SessionSummary) -> Void)? = nil
     @EnvironmentObject private var viewModel: SessionListViewModel
     @State private var showNewProjectSheet = false
@@ -86,7 +86,7 @@ struct SessionListColumnView: View {
                                             openEmbedded(session)
                                         } label: {
                                             Label(
-                                                "Open Embedded Terminal (Alpha)",
+                                                "Open Embedded Terminal",
                                                 systemImage: "rectangle.badge.plus")
                                         }
                                     }

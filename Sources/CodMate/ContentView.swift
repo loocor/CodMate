@@ -17,6 +17,8 @@ struct ContentView: View {
     @State private var runningSessionIDs = Set<SessionSummary.ID>()
     @State private var isDetailMaximized = false
     @State private var showNewWithContext = false
+    // When starting embedded sessions, record the initial command lines per-session
+    @State private var embeddedInitialCommands: [SessionSummary.ID: String] = [:]
     // Provide a simple font chooser that prefers CJK-capable monospace
     private func makeTerminalFont(size: CGFloat) -> NSFont {
         #if canImport(SwiftTerm)
@@ -24,6 +26,7 @@ struct ContentView: View {
             "Sarasa Mono SC", "Sarasa Term SC",
             "LXGW WenKai Mono",
             "Noto Sans Mono CJK SC", "NotoSansMonoCJKsc-Regular",
+            "JetBrains Mono", "JetBrainsMono-Regular", "JetBrains Mono NL",
             "JetBrainsMonoNL Nerd Font Mono", "JetBrainsMono Nerd Font Mono",
             "SF Mono", "Menlo",
         ]
@@ -185,7 +188,7 @@ struct ContentView: View {
                     if runningSessionIDs.contains(focused.id) {
                         ZStack(alignment: .topTrailing) {
                             TerminalHostView(sessionID: focused.id,
-                                             initialCommands: viewModel.buildResumeCommands(session: focused),
+                                             initialCommands: embeddedInitialCommands[focused.id] ?? viewModel.buildResumeCommands(session: focused),
                                              font: makeTerminalFont(size: 12),
                                              isDark: colorScheme == .dark)
                                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -210,7 +213,13 @@ struct ContentView: View {
                         SessionDetailView(
                             summary: focused,
                             isProcessing: isPerformingAction,
-                            onResume: { startEmbedded(for: focused) },
+                            onResume: {
+                                if viewModel.preferences.defaultResumeUseEmbeddedTerminal {
+                                    startEmbedded(for: focused)
+                                } else {
+                                    openPreferredExternal(for: focused)
+                                }
+                            },
                             onReveal: { viewModel.reveal(session: focused) },
                             onDelete: presentDeleteConfirmation
                         )
@@ -252,7 +261,11 @@ struct ContentView: View {
                     } label: {
                         Label("New", systemImage: "plus")
                     } primaryAction: {
-                        startNewSession(for: focused)
+                        if viewModel.preferences.defaultResumeUseEmbeddedTerminal {
+                            startEmbeddedNew(for: focused)
+                        } else {
+                            startNewSession(for: focused)
+                        }
                     }
                     .disabled(isPerformingAction)
                     .help("Start a new Codex session (use project profile when available)")
@@ -290,16 +303,22 @@ struct ContentView: View {
                         }
                     } label: { Label("Open in Warp (Path)", systemImage: "app.gift.fill") }
 
-                    // Alpha: embedded terminal (respect preference)
+                    // Embedded terminal (respect preference)
                     if viewModel.preferences.defaultResumeUseEmbeddedTerminal {
                         Button {
                             if let f = focusedSummary { startEmbedded(for: f) }
-                        } label: { Label("Open Embedded Terminal (Alpha)", systemImage: "rectangle.badge.plus") }
+                        } label: { Label("Open Embedded Terminal", systemImage: "rectangle.badge.plus") }
                     }
                 } label: {
                     Label("Resume", systemImage: "play.fill")
                 } primaryAction: {
-                    if let f = focusedSummary { openPreferredExternal(for: f) }
+                    if let f = focusedSummary {
+                        if viewModel.preferences.defaultResumeUseEmbeddedTerminal {
+                            startEmbedded(for: f)
+                        } else {
+                            openPreferredExternal(for: f)
+                        }
+                    }
                 }
                 .disabled(isPerformingAction || focusedSummary == nil)
                 .help("Resume and more options")
@@ -418,15 +437,40 @@ struct ContentView: View {
     }
 
     private func startEmbedded(for session: SessionSummary) {
+        // Build the default resume commands for this session so TerminalHostView can inject them
+        embeddedInitialCommands[session.id] = viewModel.buildResumeCommands(session: session)
         runningSessionIDs.insert(session.id)
     }
 
     private func stopEmbedded(forID id: SessionSummary.ID) {
+        // Tear down the embedded terminal view and terminate its child process
+        #if canImport(SwiftTerm)
+        TerminalSessionManager.shared.stop(id: id)
+        #endif
         runningSessionIDs.remove(id)
+        embeddedInitialCommands.removeValue(forKey: id)
         if runningSessionIDs.isEmpty {
             isDetailMaximized = false
             columnVisibility = .all
         }
+    }
+
+    private func shellEscapeForCD(_ path: String) -> String {
+        // Minimal POSIX shell escaping suitable for `cd` arguments
+        return "'" + path.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
+
+    private func startEmbeddedNew(for session: SessionSummary) {
+        // Build the 'new session' commands (respecting project profile when present)
+        let cwd = FileManager.default.fileExists(atPath: session.cwd)
+            ? session.cwd : session.fileURL.deletingLastPathComponent().path
+        let cd = "cd " + shellEscapeForCD(cwd)
+        let injectedPATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:${PATH}"
+        let exports = "export LANG=zh_CN.UTF-8; export LC_ALL=zh_CN.UTF-8; export LC_CTYPE=zh_CN.UTF-8; export TERM=xterm-256color; export CODEX_DISABLE_COLOR_QUERY=1"
+        let invocation = viewModel.buildNewSessionCLIInvocationRespectingProject(session: session)
+        let command = "PATH=\(injectedPATH) \(invocation)"
+        embeddedInitialCommands[session.id] = cd + "\n" + exports + "\n" + command + "\n"
+        runningSessionIDs.insert(session.id)
     }
 
     private func openPreferredExternal(for session: SessionSummary) {
