@@ -282,26 +282,44 @@ private struct EventSegmentView: View {
 
     private var roleTitle: String {
         if isAgentReasoning { return "Reasoning" }
+        if case .info = event.actor {
+            if isTokenUsage { return "Token Usage" }
+            if isEnvironment { return "Environment" }
+            if isContextUpdate { return "Syncing" }
+            return "Info"
+        }
         switch event.actor {
         case .user: return "User"
         case .assistant: return "Codex"
         case .tool: return "Tool"
-        case .info: return "Syncing"
+        case .info: return "Info"
         }
     }
 
     private var roleIcon: String {
         if isAgentReasoning { return "brain" }
+        if case .info = event.actor {
+            if isTokenUsage { return "gauge" }
+            if isEnvironment { return "macwindow" }
+            if isContextUpdate { return "arrow.triangle.2.circlepath" }
+            return "info.circle"
+        }
         switch event.actor {
         case .user: return "person.fill"
         case .assistant: return "sparkles"
         case .tool: return "hammer.fill"
-        case .info: return "arrow.triangle.2.circlepath"
+        case .info: return "info.circle"
         }
     }
 
     private var roleColor: Color {
         if isAgentReasoning { return .purple }
+        if case .info = event.actor {
+            if isTokenUsage { return .orange }
+            if isEnvironment { return .gray }
+            if isContextUpdate { return .gray }
+            return .gray
+        }
         switch event.actor {
         case .user: return .accentColor
         case .assistant: return .blue
@@ -312,6 +330,18 @@ private struct EventSegmentView: View {
 
     private var isAgentReasoning: Bool {
         (event.title?.localizedCaseInsensitiveContains("agent reasoning") ?? false)
+    }
+
+    private var isTokenUsage: Bool {
+        (event.title?.localizedCaseInsensitiveContains("token usage") ?? false)
+    }
+
+    private var isEnvironment: Bool {
+        (event.title == TimelineEvent.environmentContextTitle)
+    }
+
+    private var isContextUpdate: Bool {
+        (event.title?.localizedCaseInsensitiveCompare("Context Updated") == .orderedSame)
     }
 }
 

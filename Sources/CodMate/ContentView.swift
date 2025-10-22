@@ -231,6 +231,7 @@ struct ContentView: View {
                             onReveal: { viewModel.reveal(session: focused) },
                             onDelete: presentDeleteConfirmation
                         )
+                        .environmentObject(viewModel)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     }
                 } else {
@@ -763,7 +764,19 @@ extension ContentView {
 
     private func exportMarkdownForSession(_ session: SessionSummary) {
         let loader = SessionTimelineLoader()
-        let turns = ((try? loader.load(url: session.fileURL)) ?? []).removingEnvironmentContext()
+        let allTurns = ((try? loader.load(url: session.fileURL)) ?? [])
+        let kinds = viewModel.preferences.markdownVisibleKinds
+        let turns: [ConversationTurn] = allTurns.compactMap { turn in
+            let userAllowed = turn.userMessage.flatMap { kinds.contains(event: $0) } ?? false
+            let keptOutputs = turn.outputs.filter { kinds.contains(event: $0) }
+            if !userAllowed && keptOutputs.isEmpty { return nil }
+            return ConversationTurn(
+                id: turn.id,
+                timestamp: turn.timestamp,
+                userMessage: userAllowed ? turn.userMessage : nil,
+                outputs: keptOutputs
+            )
+        }
         var lines: [String] = []
         lines.append("# \(session.displayName)")
         lines.append("")
@@ -804,9 +817,26 @@ extension ContentView {
         let panel = NSSavePanel()
         panel.title = "Export Markdown"
         panel.allowedContentTypes = [.plainText]
-        panel.nameFieldStringValue = session.displayName + ".md"
+        let base = sanitizedExportFileName(session.effectiveTitle, fallback: session.displayName)
+        panel.nameFieldStringValue = base + ".md"
         if panel.runModal() == .OK, let url = panel.url {
             try? md.data(using: .utf8)?.write(to: url)
         }
+    }
+
+    // Local helper to avoid Xcode target membership issues for utility files
+    private func sanitizedExportFileName(_ s: String, fallback: String, maxLength: Int = 120) -> String {
+        var text = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        if text.isEmpty { return fallback }
+        let disallowed = CharacterSet(charactersIn: "/:")
+            .union(.newlines)
+            .union(.controlCharacters)
+        text = text.unicodeScalars.map { disallowed.contains($0) ? Character(" ") : Character($0) }
+            .reduce(into: String(), { $0.append($1) })
+        while text.contains("  ") { text = text.replacingOccurrences(of: "  ", with: " ") }
+        text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if text.isEmpty { text = fallback }
+        if text.count > maxLength { let idx = text.index(text.startIndex, offsetBy: maxLength); text = String(text[..<idx]) }
+        return text
     }
 }

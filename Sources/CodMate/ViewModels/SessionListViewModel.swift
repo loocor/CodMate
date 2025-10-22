@@ -39,6 +39,8 @@ final class SessionListViewModel: ObservableObject {
         didSet {
             guard !suppressFilterNotifications, oldValue != dateDimension else { return }
             enrichmentSnapshots.removeAll()
+            // Update UI immediately with current dataset under new dimension.
+            applyFilters()
             scheduleFilterRefresh(force: true)
         }
     }
@@ -674,6 +676,8 @@ final class SessionListViewModel: ObservableObject {
         selectedDay = normalized
         if let d = normalized { selectedDays = [d] } else { selectedDays.removeAll() }
         suppressFilterNotifications = false
+        // Update UI immediately using existing dataset; then load correct scope.
+        applyFilters()
         // After coordinated update of selectedDay/selectedDays, trigger a refresh once.
         // Use force=true to ensure scope reload (created uses .day; updated uses .all).
         scheduleFilterRefresh(force: true)
@@ -697,6 +701,8 @@ final class SessionListViewModel: ObservableObject {
             selectedDay = nil
         }
         suppressFilterNotifications = false
+        // Update UI immediately using existing dataset; then load correct scope.
+        applyFilters()
         scheduleFilterRefresh(force: true)
     }
 

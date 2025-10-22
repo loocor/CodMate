@@ -32,6 +32,7 @@ UI Rules (macOS specific)
   - Add “New” button next to Resume to start a fresh Codex session using the current session’s working directory and model.
   - “Task Instructions” uses a DisclosureGroup; load lazily when expanded.
   - Conversation timeline uses LazyVStack; differentiate user/assistant/tool/info bubbles.
+  - Timeline & Markdown visibility: Settings › General provides per-surface checkboxes to choose which message types are shown in the conversation timeline and included when exporting Markdown. Defaults: Timeline shows all except Environment Context (which has its own section); Markdown includes only User and Assistant.
   - Context menu in list rows adds: “Generate Title & 100-char Summary” to run LLM on-demand for the selected session.
   - Embedded Terminal: One live shell per session when resumed in-app; switching sessions in the middle list switches the attached terminal. The shell keeps running when you navigate away. “Return to history” closes the running shell for the focused session.
 
