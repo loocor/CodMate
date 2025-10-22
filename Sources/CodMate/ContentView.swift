@@ -268,6 +268,56 @@ struct ContentView: View {
                         } label: {
                             Label("New With Context…", systemImage: "text.append")
                         }
+
+                        // New in Terminal (copy + open at path)
+                        Button {
+                            let f = focused
+                            let dir =
+                                FileManager.default.fileExists(atPath: f.cwd)
+                                ? f.cwd : f.fileURL.deletingLastPathComponent().path
+                            viewModel.recordIntentForDetailNew(anchor: f)
+                            viewModel.copyNewSessionCommandsRespectingProject(session: f)
+                            _ = viewModel.openAppleTerminal(at: dir)
+                            Task {
+                                await SystemNotifier.shared.notify(
+                                    title: "CodMate",
+                                    body: "Command copied. Paste it in the opened terminal.")
+                            }
+                        } label: {
+                            Label("New in Terminal", systemImage: "terminal")
+                        }
+
+                        // New in iTerm2 (Direct)
+                        Button {
+                            let f = focused
+                            let dir =
+                                FileManager.default.fileExists(atPath: f.cwd)
+                                ? f.cwd : f.fileURL.deletingLastPathComponent().path
+                            viewModel.recordIntentForDetailNew(anchor: f)
+                            let cmd = viewModel.buildNewSessionCLIInvocationRespectingProject(session: f)
+                            viewModel.openPreferredTerminalViaScheme(
+                                app: .iterm2, directory: dir, command: cmd)
+                        } label: {
+                            Label("New in iTerm2 (Direct)", systemImage: "app.fill")
+                        }
+
+                        // New in Warp (Path)
+                        Button {
+                            let f = focused
+                            let dir =
+                                FileManager.default.fileExists(atPath: f.cwd)
+                                ? f.cwd : f.fileURL.deletingLastPathComponent().path
+                            viewModel.recordIntentForDetailNew(anchor: f)
+                            viewModel.copyNewSessionCommandsRespectingProject(session: f)
+                            viewModel.openPreferredTerminalViaScheme(app: .warp, directory: dir)
+                            Task {
+                                await SystemNotifier.shared.notify(
+                                    title: "CodMate",
+                                    body: "Command copied. Paste it in the opened terminal.")
+                            }
+                        } label: {
+                            Label("New in Warp (Path)", systemImage: "app.gift.fill")
+                        }
                     } label: {
                         Label("New", systemImage: "plus")
                     } primaryAction: {
@@ -290,7 +340,7 @@ struct ContentView: View {
                             let dir =
                                 FileManager.default.fileExists(atPath: f.cwd)
                                 ? f.cwd : f.fileURL.deletingLastPathComponent().path
-                            viewModel.copyResumeCommands(session: f)
+                            viewModel.copyResumeCommandsRespectingProject(session: f)
                             _ = viewModel.openAppleTerminal(at: dir)
                             Task {
                                 await SystemNotifier.shared.notify(
@@ -308,7 +358,7 @@ struct ContentView: View {
                             let dir =
                                 FileManager.default.fileExists(atPath: f.cwd)
                                 ? f.cwd : f.fileURL.deletingLastPathComponent().path
-                            let cmd = viewModel.buildResumeCLIInvocation(session: f)
+                            let cmd = viewModel.buildResumeCLIInvocationRespectingProject(session: f)
                             viewModel.openPreferredTerminalViaScheme(
                                 app: .iterm2, directory: dir, command: cmd)
                         }
@@ -322,7 +372,7 @@ struct ContentView: View {
                             let dir =
                                 FileManager.default.fileExists(atPath: f.cwd)
                                 ? f.cwd : f.fileURL.deletingLastPathComponent().path
-                            viewModel.copyResumeCommands(session: f)
+                            viewModel.copyResumeCommandsRespectingProject(session: f)
                             viewModel.openPreferredTerminalViaScheme(app: .warp, directory: dir)
                             Task {
                                 await SystemNotifier.shared.notify(
@@ -534,7 +584,7 @@ struct ContentView: View {
     }
 
     private func openPreferredExternal(for session: SessionSummary) {
-        viewModel.copyResumeCommands(session: session)
+        viewModel.copyResumeCommandsRespectingProject(session: session)
         let app = viewModel.preferences.defaultResumeExternalApp
         let dir =
             FileManager.default.fileExists(atPath: session.cwd)
@@ -542,7 +592,7 @@ struct ContentView: View {
             : session.fileURL.deletingLastPathComponent().path
         switch app {
         case .iterm2:
-            let cmd = viewModel.buildResumeCLIInvocation(session: session)
+            let cmd = viewModel.buildResumeCLIInvocationRespectingProject(session: session)
             viewModel.openPreferredTerminalViaScheme(app: .iterm2, directory: dir, command: cmd)
         case .warp:
             viewModel.openPreferredTerminalViaScheme(app: .warp, directory: dir)
