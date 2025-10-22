@@ -1,5 +1,5 @@
-import SwiftUI
 import AppKit
+import SwiftUI
 
 struct SessionListColumnView: View {
     let sections: [SessionDaySection]
@@ -21,6 +21,8 @@ struct SessionListColumnView: View {
     var isAwaitingFollowup: ((SessionSummary) -> Bool)? = nil
     // open embedded terminal
     var onOpenEmbedded: ((SessionSummary) -> Void)? = nil
+    // notify which item is the user's primary (last clicked) for detail focus
+    var onPrimarySelect: ((SessionSummary) -> Void)? = nil
     @EnvironmentObject private var viewModel: SessionListViewModel
     @State private var showNewProjectSheet = false
     @State private var newProjectPrefill: ProjectEditorSheet.Prefill? = nil
@@ -62,6 +64,7 @@ struct SessionListColumnView: View {
                                 .contentShape(Rectangle())
                                 .onTapGesture(count: 2) {
                                     selection = [session.id]
+                                    onPrimarySelect?(session)
                                     Task { await viewModel.beginEditing(session: session) }
                                 }
                                 .onTapGesture { handleClick(on: session) }
@@ -72,7 +75,8 @@ struct SessionListColumnView: View {
                                     } else {
                                         ids = [session.id]
                                     }
-                                    return NSItemProvider(object: ids.joined(separator: "\n") as NSString)
+                                    return NSItemProvider(
+                                        object: ids.joined(separator: "\n") as NSString)
                                 }
                                 .listRowInsets(EdgeInsets())
                                 .contextMenu {
@@ -107,11 +111,16 @@ struct SessionListColumnView: View {
                                             Divider()
                                             ForEach(viewModel.projects) { p in
                                                 Button(p.name.isEmpty ? p.id : p.name) {
-                                                    Task { await viewModel.assignSessions(to: p.id, ids: [session.id]) }
+                                                    Task {
+                                                        await viewModel.assignSessions(
+                                                            to: p.id, ids: [session.id])
+                                                    }
                                                 }
                                             }
                                         } label: {
-                                            Label("Assign to Project…", systemImage: "folder.badge.plus")
+                                            Label(
+                                                "Assign to Project…",
+                                                systemImage: "folder.badge.plus")
                                         }
                                     }
                                     Button {
@@ -172,7 +181,7 @@ struct SessionListColumnView: View {
                 text: $viewModel.quickSearchText,
                 onSubmit: { text in viewModel.immediateApplyQuickSearch(text) }
             )
-                .frame(maxWidth: .infinity)
+            .frame(maxWidth: .infinity)
 
             HStack(alignment: .center, spacing: 12) {
                 Picker("", selection: $sortOrder) {
@@ -200,7 +209,7 @@ extension SessionListColumnView {
 
     private func projectTip(for session: SessionSummary) -> String? {
         guard let pid = viewModel.projectIdForSession(session.id),
-              let p = viewModel.projects.first(where: { $0.id == pid })
+            let p = viewModel.projects.first(where: { $0.id == pid })
         else { return nil }
         let name = p.name.trimmingCharacters(in: .whitespacesAndNewlines)
         let display = name.isEmpty ? p.id : name
@@ -211,14 +220,19 @@ extension SessionListColumnView {
     }
 
     private func prefillForProject(from session: SessionSummary) -> ProjectEditorSheet.Prefill {
-        let dir = FileManager.default.fileExists(atPath: session.cwd)
-        ? session.cwd
-        : session.fileURL.deletingLastPathComponent().path
+        let dir =
+            FileManager.default.fileExists(atPath: session.cwd)
+            ? session.cwd
+            : session.fileURL.deletingLastPathComponent().path
         var name = session.userTitle?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if name.isEmpty { name = URL(fileURLWithPath: dir, isDirectory: true).lastPathComponent }
         // overview: prefer userComment; fallback instruction snippet
-        let overview = (session.userComment?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 }
-            ?? (session.instructions?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { s in
+        let overview =
+            (session.userComment?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap {
+                $0.isEmpty ? nil : $0
+            }
+            ?? (session.instructions?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap {
+                s in
                 if s.isEmpty { return nil }
                 // limit to ~220 chars to keep it short
                 return s.count <= 220 ? s : String(s.prefix(220)) + "…"
@@ -243,12 +257,14 @@ extension SessionListColumnView {
         if isRange, let anchor = lastClickedID {
             let flat = sections.flatMap { $0.sessions.map(\.id) }
             if let a = flat.firstIndex(of: anchor), let b = flat.firstIndex(of: id) {
-                let lo = min(a, b), hi = max(a, b)
+                let lo = min(a, b)
+                let hi = max(a, b)
                 let rangeIDs = Set(flat[lo...hi])
                 selection = rangeIDs
             } else {
                 selection = [id]
             }
+            onPrimarySelect?(session)
         } else if isToggle {
             if selection.contains(id) {
                 selection.remove(id)
@@ -256,9 +272,11 @@ extension SessionListColumnView {
                 selection.insert(id)
             }
             lastClickedID = id
+            onPrimarySelect?(session)
         } else {
             selection = [id]
             lastClickedID = id
+            onPrimarySelect?(session)
         }
     }
 }
@@ -286,7 +304,9 @@ private struct SearchField: NSViewRepresentable {
         field.sendsWholeSearchString = true
         // Do not steal initial focus; if the system puts focus here, drop it back to window
         DispatchQueue.main.async {
-            if let win = field.window, win.firstResponder === field || win.firstResponder === field.currentEditor() {
+            if let win = field.window,
+                win.firstResponder === field || win.firstResponder === field.currentEditor()
+            {
                 win.makeFirstResponder(nil)
             }
         }
@@ -321,7 +341,9 @@ private struct SearchField: NSViewRepresentable {
 
         // Intercept Return/Escape; respect IME composition
         @MainActor
-        func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+        func control(
+            _ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector
+        ) -> Bool {
             // If composing with IME, let the editor handle the key (do not submit)
             if textView.hasMarkedText() { return false }
             if commandSelector == #selector(NSResponder.insertNewline(_:)) {

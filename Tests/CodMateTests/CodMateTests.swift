@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import CodMate
 
 final class CodMateTests: XCTestCase {
@@ -9,6 +10,7 @@ final class CodMateTests: XCTestCase {
             fileSizeBytes: 1024,
             startedAt: Date(),
             endedAt: Date().addingTimeInterval(60),
+            activeDuration: nil,
             cliVersion: "0.46.0",
             cwd: "/Users/test/project",
             originator: "codex_cli",
@@ -73,8 +75,8 @@ final class CodMateTests: XCTestCase {
         let timestamp = formatter.string(from: Date(timeIntervalSince1970: 0))
 
         let sessionRow = """
-{"timestamp":"\(timestamp)","type":"session_meta","payload":{"id":"session-zero-pad","timestamp":"\(timestamp)","cwd":"/tmp/project","originator":"codex_cli","cli_version":"0.1.0","instructions":"Test"}}
-"""
+            {"timestamp":"\(timestamp)","type":"session_meta","payload":{"id":"session-zero-pad","timestamp":"\(timestamp)","cwd":"/tmp/project","originator":"codex_cli","cli_version":"0.1.0","instructions":"Test"}}
+            """
         let fileURL = dayURL.appendingPathComponent("session.jsonl")
         try sessionRow.data(using: .utf8)?.write(to: fileURL)
 
@@ -105,7 +107,7 @@ final class CodMateTests: XCTestCase {
             #"{"timestamp":"2025-10-18T12:00:02Z","type":"event_msg","payload":{"type":"user_message","message":"Need help with task","kind":"plain"}}"#,
             #"{"timestamp":"2025-10-18T12:00:03Z","type":"event_msg","payload":{"type":"token_count","message":"","kind":"plain"}}"#,
             #"{"timestamp":"2025-10-18T12:00:04Z","type":"response_item","payload":{"type":"function_call","call_id":"call1","name":"noop","content":[]}}"#,
-            #"{"timestamp":"2025-10-18T12:00:05Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Here is the answer"}]}}"#
+            #"{"timestamp":"2025-10-18T12:00:05Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Here is the answer"}]}}"#,
         ]
         try lines.joined(separator: "\n").data(using: .utf8)?.write(to: tempURL)
 
@@ -130,7 +132,7 @@ final class CodMateTests: XCTestCase {
             #"{"timestamp":"2025-10-18T12:00:00Z","type":"session_meta","payload":{"id":"session","timestamp":"2025-10-18T12:00:00Z","cwd":"/tmp","originator":"codex","cli_version":"0.1.0"}}"#,
             #"{"timestamp":"2025-10-18T12:00:01Z","type":"turn_context","payload":{"model":"gpt-5","approval_policy":"never","cwd":"/tmp","summary":""}}"#,
             #"{"timestamp":"2025-10-18T12:00:02Z","type":"turn_context","payload":{"model":"gpt-5","approval_policy":"never","cwd":"/tmp","summary":""}}"#,
-            #"{"timestamp":"2025-10-18T12:00:03Z","type":"turn_context","payload":{"model":"gpt-5","approval_policy":"never","cwd":"/tmp","summary":""}}"#
+            #"{"timestamp":"2025-10-18T12:00:03Z","type":"turn_context","payload":{"model":"gpt-5","approval_policy":"never","cwd":"/tmp","summary":""}}"#,
         ]
         try lines.joined(separator: "\n").data(using: .utf8)?.write(to: tempURL)
 
@@ -156,7 +158,7 @@ final class CodMateTests: XCTestCase {
             #"{"timestamp":"2025-10-18T12:00:02Z","type":"event_msg","payload":{"type":"user_message","message":"Hello","kind":"plain"}}"#,
             #"{"timestamp":"2025-10-18T12:00:03Z","type":"event_msg","payload":{"type":"agent_reasoning","text":"Thinking about the answer"}} "#,
             #"{"timestamp":"2025-10-18T12:00:04Z","type":"event_msg","payload":{"type":"token_count","info":{"total":{"input_tokens":100,"output_tokens":20}}, "rate_limits":{"primary":{"used_percent":10.0,"window_minutes":60,"resets_in_seconds":100}}}}"#,
-            #"{"timestamp":"2025-10-18T12:00:05Z","type":"event_msg","payload":{"type":"agent_message","message":"Here you go","kind":"plain"}}"#
+            #"{"timestamp":"2025-10-18T12:00:05Z","type":"event_msg","payload":{"type":"agent_message","message":"Here you go","kind":"plain"}}"#,
         ]
         try lines.joined(separator: "\n").data(using: .utf8)?.write(to: tempURL)
 
@@ -189,7 +191,7 @@ final class CodMateTests: XCTestCase {
 
         let lines = [
             #"{"timestamp":"2025-10-18T12:00:00Z","type":"session_meta","payload":{"id":"session","timestamp":"2025-10-18T12:00:00Z","cwd":"/tmp","originator":"codex","cli_version":"0.1.0"}}"#,
-            #"{"timestamp":"2025-10-18T12:00:01Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<environment_context><cwd>/tmp</cwd><approval_policy>never</approval_policy><sandbox_mode>workspace-write</sandbox_mode></environment_context>"}]}}"#
+            #"{"timestamp":"2025-10-18T12:00:01Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<environment_context><cwd>/tmp</cwd><approval_policy>never</approval_policy><sandbox_mode>workspace-write</sandbox_mode></environment_context>"}]}}"#,
         ]
         try lines.joined(separator: "\n").data(using: .utf8)?.write(to: tempURL)
 

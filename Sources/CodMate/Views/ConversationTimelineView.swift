@@ -37,8 +37,6 @@ struct ConversationTimelineView: View {
     }
 }
 
- 
-
 private struct ConversationTurnRow: View {
     let turn: ConversationTurn
     let position: Int
@@ -187,6 +185,7 @@ private struct ConversationCard: View {
 
 private struct EventSegmentView: View {
     let event: TimelineEvent
+    @State private var isHover = false
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
@@ -231,17 +230,54 @@ private struct EventSegmentView: View {
                 }
             }
 
-            if event.repeatCount > 1 {
-                Text("×\(event.repeatCount)")
-                    .font(.caption2.monospacedDigit())
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(
-                        Capsule().fill(Color.secondary.opacity(0.15))
-                    )
-                    .foregroundStyle(.secondary)
+            HStack(spacing: 6) {
+                if isHover {
+                    Button(action: copyEvent) {
+                        Image(systemName: "doc.on.doc")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .accessibilityLabel("Copy")
+                    }
+                    .buttonStyle(.plain)
+                    .help("Copy")
+                    .transition(.opacity)
+                }
+                if event.repeatCount > 1 {
+                    Text("×\(event.repeatCount)")
+                        .font(.caption2.monospacedDigit())
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(
+                            Capsule().fill(Color.secondary.opacity(0.15))
+                        )
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(.top, 6)
+            .padding(.trailing, 6)
+        }
+        .onHover { inside in withAnimation(.easeInOut(duration: 0.12)) { isHover = inside } }
+    }
+
+    private func copyEvent() {
+        var lines: [String] = []
+        // Role/title
+        lines.append("**\(roleTitle)**")
+        if let title = event.title, !title.isEmpty, event.actor != .user {
+            lines.append(title)
+        }
+        // Body
+        if let text = event.text, !text.isEmpty { lines.append(text) }
+        // Metadata
+        if let metadata = event.metadata, !metadata.isEmpty {
+            for key in metadata.keys.sorted() {
+                if let value = metadata[key], !value.isEmpty { lines.append("- \(key): \(value)") }
             }
         }
+        let s = lines.joined(separator: "\n")
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.setString(s, forType: .string)
     }
 
     private var roleTitle: String {
