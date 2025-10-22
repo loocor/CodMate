@@ -3,7 +3,7 @@ import SwiftUI
 struct CalendarMonthView: View {
     let monthStart: Date
     let counts: [Int: Int]
-    let selectedDay: Date?
+    let selectedDays: Set<Date>
     let onSelectDay: (Date) -> Void
 
     var body: some View {
@@ -15,10 +15,11 @@ struct CalendarMonthView: View {
         GeometryReader { geometry in
             let totalWidth = geometry.size.width
             let columnWidth = (totalWidth - spacing * 6) / 7
-            
+
             VStack(spacing: 8) {
-                weekdayHeader(weekdaySymbols: weekdaySymbols, columnWidth: columnWidth, spacing: spacing)
-                
+                weekdayHeader(
+                    weekdaySymbols: weekdaySymbols, columnWidth: columnWidth, spacing: spacing)
+
                 calendarGrid(
                     grid: grid,
                     calendar: cal,
@@ -28,8 +29,10 @@ struct CalendarMonthView: View {
             }
         }
     }
-    
-    private func weekdayHeader(weekdaySymbols: [String], columnWidth: CGFloat, spacing: CGFloat) -> some View {
+
+    private func weekdayHeader(weekdaySymbols: [String], columnWidth: CGFloat, spacing: CGFloat)
+        -> some View
+    {
         HStack(spacing: spacing) {
             ForEach(weekdaySymbols, id: \.self) { w in
                 Text(w)
@@ -39,8 +42,10 @@ struct CalendarMonthView: View {
             }
         }
     }
-    
-    private func calendarGrid(grid: [[Int]], calendar: Calendar, columnWidth: CGFloat, spacing: CGFloat) -> some View {
+
+    private func calendarGrid(
+        grid: [[Int]], calendar: Calendar, columnWidth: CGFloat, spacing: CGFloat
+    ) -> some View {
         VStack(spacing: spacing) {
             ForEach(0..<grid.count, id: \.self) { row in
                 calendarRow(
@@ -52,18 +57,20 @@ struct CalendarMonthView: View {
             }
         }
     }
-    
-    private func calendarRow(days: [Int], calendar: Calendar, columnWidth: CGFloat, spacing: CGFloat) -> some View {
+
+    private func calendarRow(
+        days: [Int], calendar: Calendar, columnWidth: CGFloat, spacing: CGFloat
+    ) -> some View {
         HStack(spacing: spacing) {
             ForEach(Array(days.enumerated()), id: \.offset) { _, day in
                 dayCell(day: day, calendar: calendar, columnWidth: columnWidth)
             }
         }
     }
-    
+
     private func dayCell(day: Int, calendar: Calendar, columnWidth: CGFloat) -> some View {
         let isSelected = isSelectedDay(day: day, calendar: calendar)
-        
+
         return Button {
             if day > 0 {
                 let date = calendar.date(bySetting: .day, value: day, of: monthStart)!
@@ -76,16 +83,16 @@ struct CalendarMonthView: View {
         .frame(width: columnWidth, height: 38)
         .help(day > 0 ? helpText(for: day, isSelected: isSelected) : "")
     }
-    
+
     private func dayCellContent(day: Int, isSelected: Bool) -> some View {
         ZStack(alignment: .topLeading) {
             RoundedRectangle(cornerRadius: 6)
                 .fill(day > 0 ? Color.secondary.opacity(0.06) : Color.clear)
-            
+
             if day > 0 {
                 dayNumber(day: day)
             }
-            
+
             if day > 0, let count = counts[day], count > 0 {
                 sessionCount(count: count)
             }
@@ -95,14 +102,14 @@ struct CalendarMonthView: View {
                 .strokeBorder(Color.accentColor, lineWidth: isSelected ? 2 : 0)
         )
     }
-    
+
     private func dayNumber(day: Int) -> some View {
         Text("\(day)")
             .font(.caption)
             .foregroundStyle(.secondary.opacity(0.5))
             .padding(4)
     }
-    
+
     private func sessionCount(count: Int) -> some View {
         VStack {
             Spacer()
@@ -117,11 +124,13 @@ struct CalendarMonthView: View {
     }
 
     private func isSelectedDay(day: Int, calendar: Calendar) -> Bool {
-        guard day > 0, let selectedDay = selectedDay else { return false }
-        let cellDate = calendar.date(bySetting: .day, value: day, of: monthStart)!
-        return calendar.isDate(calendar.startOfDay(for: cellDate), inSameDayAs: selectedDay)
+        guard day > 0 else { return false }
+        let cellDate = calendar.startOfDay(
+            for: calendar.date(bySetting: .day, value: day, of: monthStart)!)
+        for d in selectedDays { if calendar.isDate(d, inSameDayAs: cellDate) { return true } }
+        return false
     }
-    
+
     private func helpText(for day: Int, isSelected: Bool) -> String {
         let count = counts[day] ?? 0
         if isSelected {
@@ -130,7 +139,7 @@ struct CalendarMonthView: View {
             return "\(count) sessions • Click to filter by this day"
         }
     }
-    
+
     private func monthGrid() -> [[Int]] {
         let cal = Calendar.current
         let range = cal.range(of: .day, in: .month, for: monthStart) ?? 1..<29
@@ -161,7 +170,7 @@ struct CalendarMonthView: View {
     return CalendarMonthView(
         monthStart: monthStart,
         counts: mockCounts,
-        selectedDay: calendar.date(from: DateComponents(year: 2024, month: 12, day: 15))
+        selectedDays: [calendar.date(from: DateComponents(year: 2024, month: 12, day: 15))!]
     ) { selectedDay in
         print("Selected day: \(selectedDay)")
     }

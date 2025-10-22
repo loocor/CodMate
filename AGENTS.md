@@ -16,11 +16,11 @@ UI Rules (macOS specific)
 - Use macOS SwiftUI and AppKit bridges; do NOT use iOS‑only placements such as `.navigationBarTrailing`.
 - Settings › Codex 使用 macOS 15 的 TabView 新 API（`Tab("…", systemImage: "…")`）拆分为多个页签，减少纵向滚动；容器内边距与其他设置页统一（水平 16、顶部 16）。
 - Search: prefer a toolbar `SearchField` in macOS, not `.searchable` when exact placement (far right) matters.
-- Toolbars: place refresh as the last ToolbarItem to pin it at the far right. Keep destructive actions in the detail pane, not in the main toolbar.
+- Toolbars: place refresh as the last ToolbarItem to pin it at the far right. Keep destructive actions in the detail pane, not in the main toolbar. Command+R and the refresh button also invalidate and recompute global sidebar statistics (projects/path tree and calendar day counts) to reflect new sessions immediately.
 - Sidebar (left):
   - Top (fixed): "All Sessions" row showing total count and selection state.
   - Middle (scrollable): path tree built from `cwd` counts. Rows are compact: default min row height 18, small control size, reduced insets. Single‑click selects/expands; double‑click applies filter (enter the directory).
-  - Bottom (fixed): calendar month view (240pt height) with per‑day counts (created/last‑updated switch). Always pinned to the bottom with 8pt spacing above.
+  - Bottom (fixed): calendar month view (240pt height) with per‑day counts (created/last‑updated switch). Always pinned to the bottom with 8pt spacing above. Supports multi‑select via Command‑click to toggle multiple days; plain click selects a single day (click the same day to clear).
   - Only the middle path tree scrolls; top "All Sessions" and bottom calendar remain fixed.
   - Sidebar width: min 220pt, max 25% of window width, ideal 260pt.
 - Content (middle):
@@ -33,6 +33,7 @@ UI Rules (macOS specific)
   - “Task Instructions” uses a DisclosureGroup; load lazily when expanded.
   - Conversation timeline uses LazyVStack; differentiate user/assistant/tool/info bubbles.
   - Context menu in list rows adds: “Generate Title & 100-char Summary” to run LLM on-demand for the selected session.
+  - Embedded Terminal: One live shell per session when resumed in-app; switching sessions in the middle list switches the attached terminal. The shell keeps running when you navigate away. “Return to history” closes the running shell for the focused session.
 
 Performance Contract
 - Fast path indexing: memory‑mapped reads; parse first ~400 lines + read tail ~64KB to correct `lastUpdatedAt`.
@@ -40,6 +41,7 @@ Performance Contract
 - Full‑text search: chunked stream scan (128 KB), case‑insensitive; avoid `lowercased()` on whole file.
 - Disk cache: `~/Library/Caches/CodMate/sessionIndex-v1.json` keyed by path+mtime; prefer cache hits before parsing.
 - Sidebar statistics (calendar/tree) must be global and computed independently of the current list scope to keep navigation usable.
+ - Embedded terminals: keep shells alive when not visible; only render the selected session’s terminal. Users explicitly close shells via “Return to history” to release resources.
 
 Coding Guidelines
 - Concurrency: use `actor` for services managing shared caches; UI updates on MainActor only.

@@ -1,5 +1,5 @@
-import Foundation
 import AppKit
+import Foundation
 
 @MainActor
 final class SessionListViewModel: ObservableObject {
@@ -42,6 +42,13 @@ final class SessionListViewModel: ObservableObject {
             scheduleFilterRefresh(force: true)
         }
     }
+    // Multiple day selection support (normalized to startOfDay)
+    @Published var selectedDays: Set<Date> = [] {
+        didSet {
+            guard !suppressFilterNotifications else { return }
+            scheduleFilterRefresh(force: true)
+        }
+    }
 
     let preferences: SessionPreferencesStore
 
@@ -79,9 +86,13 @@ final class SessionListViewModel: ObservableObject {
     struct PendingAssignIntent: Identifiable, Sendable, Hashable {
         let id = UUID()
         let projectId: String
-        let expectedCwd: String // canonical path
+        let expectedCwd: String  // canonical path
         let t0: Date
-        struct Hints: Sendable, Hashable { var model: String?; var sandbox: String?; var approval: String? }
+        struct Hints: Sendable, Hashable {
+            var model: String?
+            var sandbox: String?
+            var approval: String?
+        }
         let hints: Hints
     }
     private var pendingAssignIntents: [PendingAssignIntent] = []
@@ -118,7 +129,7 @@ final class SessionListViewModel: ObservableObject {
         self.selectedDay = cal.startOfDay(for: today)
         suppressFilterNotifications = false
         configureDirectoryMonitor()
-            Task { await loadProjects() }
+        Task { await loadProjects() }
         // Observe agent completion notifications to surface in list
         NotificationCenter.default.addObserver(
             forName: .codMateAgentCompleted,
@@ -176,6 +187,7 @@ final class SessionListViewModel: ObservableObject {
             registerActivityHeartbeat(previous: allSessions, current: sessions)
             allSessions = sessions
             rebuildCanonicalCwdCache()
+            invalidateCalendarCaches()
             await computeCalendarCaches()
             applyFilters()
             startBackgroundEnrichment()
@@ -242,11 +254,16 @@ final class SessionListViewModel: ObservableObject {
     // Cancel ongoing background tasks (fulltext, enrichment, scheduled refreshes, quick pulses).
     // Useful when a heavy modal/sheet is presented and the UI should stay responsive.
     func cancelHeavyWork() {
-        fulltextTask?.cancel(); fulltextTask = nil
-        enrichmentTask?.cancel(); enrichmentTask = nil
-        scheduledFilterRefresh?.cancel(); scheduledFilterRefresh = nil
-        directoryRefreshTask?.cancel(); directoryRefreshTask = nil
-        quickPulseTask?.cancel(); quickPulseTask = nil
+        fulltextTask?.cancel()
+        fulltextTask = nil
+        enrichmentTask?.cancel()
+        enrichmentTask = nil
+        scheduledFilterRefresh?.cancel()
+        scheduledFilterRefresh = nil
+        directoryRefreshTask?.cancel()
+        directoryRefreshTask = nil
+        quickPulseTask?.cancel()
+        quickPulseTask = nil
         isEnriching = false
         isLoading = false
     }
@@ -334,7 +351,9 @@ final class SessionListViewModel: ObservableObject {
     }
 
     func copyNewProjectCommands(project: Project) {
-        actions.copyNewProjectCommands(project: project, executableURL: preferences.codexExecutableURL, options: preferences.resumeOptions)
+        actions.copyNewProjectCommands(
+            project: project, executableURL: preferences.codexExecutableURL,
+            options: preferences.resumeOptions)
     }
 
     func openNewSession(project: Project) {
@@ -351,62 +370,108 @@ final class SessionListViewModel: ObservableObject {
             actions.openTerminalViaScheme(.warp, directory: dirOpt)
             copyNewProjectCommands(project: project)
         case .terminal:
-            _ = actions.openNewProject(project: project, executableURL: preferences.codexExecutableURL, options: preferences.resumeOptions)
+            _ = actions.openNewProject(
+                project: project, executableURL: preferences.codexExecutableURL,
+                options: preferences.resumeOptions)
         case .none:
             let fallback = dirOpt ?? NSHomeDirectory()
             _ = actions.openAppleTerminal(at: fallback)
             copyNewProjectCommands(project: project)
         }
-        Task { await SystemNotifier.shared.notify(title: "CodMate", body: "Command copied. Paste it in the opened terminal.") }
+        Task {
+            await SystemNotifier.shared.notify(
+                title: "CodMate", body: "Command copied. Paste it in the opened terminal.")
+        }
     }
 
     // MARK: - New (detail) respecting Project Profile
     func buildNewSessionCLIInvocationRespectingProject(session: SessionSummary) -> String {
-        if let pid = projectIdForSession(session.id), let p = projects.first(where: { $0.id == pid }), (p.profile != nil || (p.profileId?.isEmpty == false)) {
-            return actions.buildNewSessionUsingProjectProfileCLIInvocation(session: session, project: p, options: preferences.resumeOptions)
+        if let pid = projectIdForSession(session.id),
+            let p = projects.first(where: { $0.id == pid }),
+            p.profile != nil || (p.profileId?.isEmpty == false)
+        {
+            return actions.buildNewSessionUsingProjectProfileCLIInvocation(
+                session: session, project: p, options: preferences.resumeOptions)
         }
-        return actions.buildNewSessionCLIInvocation(session: session, options: preferences.resumeOptions)
+        return actions.buildNewSessionCLIInvocation(
+            session: session, options: preferences.resumeOptions)
     }
 
-    func buildNewSessionCLIInvocationRespectingProject(session: SessionSummary, initialPrompt: String) -> String {
-        if let pid = projectIdForSession(session.id), let p = projects.first(where: { $0.id == pid }), (p.profile != nil || (p.profileId?.isEmpty == false)) {
-            return actions.buildNewSessionUsingProjectProfileCLIInvocation(session: session, project: p, options: preferences.resumeOptions, initialPrompt: initialPrompt)
+    func buildNewSessionCLIInvocationRespectingProject(
+        session: SessionSummary, initialPrompt: String
+    ) -> String {
+        if let pid = projectIdForSession(session.id),
+            let p = projects.first(where: { $0.id == pid }),
+            p.profile != nil || (p.profileId?.isEmpty == false)
+        {
+            return actions.buildNewSessionUsingProjectProfileCLIInvocation(
+                session: session, project: p, options: preferences.resumeOptions,
+                initialPrompt: initialPrompt)
         }
-        return actions.buildNewSessionCLIInvocation(session: session, options: preferences.resumeOptions, initialPrompt: initialPrompt)
+        return actions.buildNewSessionCLIInvocation(
+            session: session, options: preferences.resumeOptions, initialPrompt: initialPrompt)
     }
 
     func copyNewSessionCommandsRespectingProject(session: SessionSummary) {
-        if let pid = projectIdForSession(session.id), let p = projects.first(where: { $0.id == pid }), (p.profile != nil || (p.profileId?.isEmpty == false)) {
-            actions.copyNewSessionUsingProjectProfileCommands(session: session, project: p, executableURL: preferences.codexExecutableURL, options: preferences.resumeOptions)
+        if let pid = projectIdForSession(session.id),
+            let p = projects.first(where: { $0.id == pid }),
+            p.profile != nil || (p.profileId?.isEmpty == false)
+        {
+            actions.copyNewSessionUsingProjectProfileCommands(
+                session: session, project: p, executableURL: preferences.codexExecutableURL,
+                options: preferences.resumeOptions)
         } else {
-            actions.copyNewSessionCommands(session: session, executableURL: preferences.codexExecutableURL, options: preferences.resumeOptions)
+            actions.copyNewSessionCommands(
+                session: session, executableURL: preferences.codexExecutableURL,
+                options: preferences.resumeOptions)
         }
     }
 
     func copyNewSessionCommandsRespectingProject(session: SessionSummary, initialPrompt: String) {
-        if let pid = projectIdForSession(session.id), let p = projects.first(where: { $0.id == pid }), (p.profile != nil || (p.profileId?.isEmpty == false)) {
-            actions.copyNewSessionUsingProjectProfileCommands(session: session, project: p, executableURL: preferences.codexExecutableURL, options: preferences.resumeOptions, initialPrompt: initialPrompt)
+        if let pid = projectIdForSession(session.id),
+            let p = projects.first(where: { $0.id == pid }),
+            p.profile != nil || (p.profileId?.isEmpty == false)
+        {
+            actions.copyNewSessionUsingProjectProfileCommands(
+                session: session, project: p, executableURL: preferences.codexExecutableURL,
+                options: preferences.resumeOptions, initialPrompt: initialPrompt)
         } else {
-            let cmd = actions.buildNewSessionCLIInvocation(session: session, options: preferences.resumeOptions, initialPrompt: initialPrompt)
+            let cmd = actions.buildNewSessionCLIInvocation(
+                session: session, options: preferences.resumeOptions, initialPrompt: initialPrompt)
             let pb = NSPasteboard.general
-            pb.clearContents(); pb.setString(cmd + "\n", forType: .string)
+            pb.clearContents()
+            pb.setString(cmd + "\n", forType: .string)
         }
     }
 
     func openNewSessionRespectingProject(session: SessionSummary) {
-        if let pid = projectIdForSession(session.id), let p = projects.first(where: { $0.id == pid }), (p.profile != nil || (p.profileId?.isEmpty == false)) {
-            _ = actions.openNewSessionUsingProjectProfile(session: session, project: p, executableURL: preferences.codexExecutableURL, options: preferences.resumeOptions)
+        if let pid = projectIdForSession(session.id),
+            let p = projects.first(where: { $0.id == pid }),
+            p.profile != nil || (p.profileId?.isEmpty == false)
+        {
+            _ = actions.openNewSessionUsingProjectProfile(
+                session: session, project: p, executableURL: preferences.codexExecutableURL,
+                options: preferences.resumeOptions)
         } else {
-            _ = actions.openNewSession(session: session, executableURL: preferences.codexExecutableURL, options: preferences.resumeOptions)
+            _ = actions.openNewSession(
+                session: session, executableURL: preferences.codexExecutableURL,
+                options: preferences.resumeOptions)
         }
     }
 
     func openNewSessionRespectingProject(session: SessionSummary, initialPrompt: String) {
-        if let pid = projectIdForSession(session.id), let p = projects.first(where: { $0.id == pid }), (p.profile != nil || (p.profileId?.isEmpty == false)) {
-            _ = actions.openNewSessionUsingProjectProfile(session: session, project: p, executableURL: preferences.codexExecutableURL, options: preferences.resumeOptions, initialPrompt: initialPrompt)
+        if let pid = projectIdForSession(session.id),
+            let p = projects.first(where: { $0.id == pid }),
+            p.profile != nil || (p.profileId?.isEmpty == false)
+        {
+            _ = actions.openNewSessionUsingProjectProfile(
+                session: session, project: p, executableURL: preferences.codexExecutableURL,
+                options: preferences.resumeOptions, initialPrompt: initialPrompt)
         } else {
             // Terminal-only variant is not implemented for non-project case; open generic new then user pastes.
-            _ = actions.openNewSession(session: session, executableURL: preferences.codexExecutableURL, options: preferences.resumeOptions)
+            _ = actions.openNewSession(
+                session: session, executableURL: preferences.codexExecutableURL,
+                options: preferences.resumeOptions)
         }
     }
 
@@ -571,7 +636,34 @@ final class SessionListViewModel: ObservableObject {
     func setSelectedDay(_ day: Date?) {
         let normalized = day.map { Calendar.current.startOfDay(for: $0) }
         if selectedDay == normalized { return }
+        suppressFilterNotifications = true
         selectedDay = normalized
+        if let d = normalized { selectedDays = [d] } else { selectedDays.removeAll() }
+        suppressFilterNotifications = false
+        // After coordinated update of selectedDay/selectedDays, trigger a refresh once.
+        // Use force=true to ensure scope reload (created uses .day; updated uses .all).
+        scheduleFilterRefresh(force: true)
+    }
+
+    // Toggle selection for a specific day (Cmd-click behavior)
+    func toggleSelectedDay(_ day: Date) {
+        let d = Calendar.current.startOfDay(for: day)
+        suppressFilterNotifications = true
+        if selectedDays.contains(d) {
+            selectedDays.remove(d)
+        } else {
+            selectedDays.insert(d)
+        }
+        // Keep single-selection reflected in selectedDay; otherwise nil
+        if selectedDays.count == 1, let only = selectedDays.first {
+            selectedDay = only
+        } else if selectedDays.isEmpty {
+            selectedDay = nil
+        } else {
+            selectedDay = nil
+        }
+        suppressFilterNotifications = false
+        scheduleFilterRefresh(force: true)
     }
 
     func clearAllFilters() {
@@ -630,17 +722,23 @@ final class SessionListViewModel: ObservableObject {
             }
         }
 
-        // 3. Date filter
-        if let day = selectedDay {
+        // 3. Date filter (supports multiple selected days)
+        let cal = Calendar.current
+        if !selectedDays.isEmpty {
             filtered = filtered.filter { sess in
-                let cal = Calendar.current
+                let ref: Date =
+                    (dateDimension == .created)
+                    ? sess.startedAt : (sess.lastUpdatedAt ?? sess.startedAt)
+                for d in selectedDays { if cal.isDate(ref, inSameDayAs: d) { return true } }
+                return false
+            }
+        } else if let day = selectedDay {
+            filtered = filtered.filter { sess in
                 switch dateDimension {
                 case .created:
                     return cal.isDate(sess.startedAt, inSameDayAs: day)
                 case .updated:
-                    if let end = sess.lastUpdatedAt {
-                        return cal.isDate(end, inSameDayAs: day)
-                    }
+                    if let end = sess.lastUpdatedAt { return cal.isDate(end, inSameDayAs: day) }
                     return cal.isDate(sess.startedAt, inSameDayAs: day)
                 }
             }
@@ -840,7 +938,7 @@ final class SessionListViewModel: ObservableObject {
                     self.isEnriching = false
                     self.enrichmentProgress = 0
                     self.enrichmentTotal = 0
-                        self.enrichmentSnapshots[cacheKey] = currentIDs
+                    self.enrichmentSnapshots[cacheKey] = currentIDs
                 }
             }
         }
@@ -939,7 +1037,8 @@ final class SessionListViewModel: ObservableObject {
         if let day {
             let calendar = Calendar.current
             let comps = calendar.dateComponents([.year, .month, .day], from: day)
-            guard let year = comps.year, let month = comps.month, let dayComponent = comps.day else {
+            guard let year = comps.year, let month = comps.month, let dayComponent = comps.day
+            else {
                 return nil
             }
             return "\(dateDimension.rawValue)|\(year)-\(month)-\(dayComponent)|\(pathKey)"
@@ -977,7 +1076,7 @@ final class SessionListViewModel: ObservableObject {
             for s in displayed {
                 let path = s.fileURL.path
                 if let attrs = try? fm.attributesOfItem(atPath: path),
-                   let m = attrs[.modificationDate] as? Date
+                    let m = attrs[.modificationDate] as? Date
                 {
                     modified[s.id] = m
                 }
@@ -1008,7 +1107,7 @@ final class SessionListViewModel: ObservableObject {
     private func countsForLoadedMonth(dimension: DateDimension) -> [Int: Int] {
         var counts: [Int: Int] = [:]
         let calendar = Calendar.current
-        // Get the currently selected month
+        // Get the currently selected month (prefer single selectedDay; otherwise empty)
         guard let selectedDay = selectedDay else { return [:] }
         let monthStart = calendar.date(
             from: calendar.dateComponents([.year, .month], from: selectedDay))!
@@ -1047,6 +1146,12 @@ extension SessionListViewModel {
     func refreshGlobalCount() async {
         let count = await indexer.countAllSessions(root: preferences.sessionsRoot)
         await MainActor.run { self.globalSessionCount = count }
+    }
+
+    // Invalidate all cached monthly counts; next access will recompute
+    func invalidateCalendarCaches() {
+        monthCountsCache.removeAll()
+        objectWillChange.send()
     }
 
     // MARK: - Projects
@@ -1092,13 +1197,18 @@ extension SessionListViewModel {
         let cal = Calendar.current
         for s in allSessions {
             // Date filter
-            if let day = selectedDay {
-                let refDate: Date = {
-                    switch dateDimension {
-                    case .created: return s.startedAt
-                    case .updated: return s.lastUpdatedAt ?? s.startedAt
+            let refDate: Date =
+                (dateDimension == .created) ? s.startedAt : (s.lastUpdatedAt ?? s.startedAt)
+            if !selectedDays.isEmpty {
+                var match = false
+                for d in selectedDays {
+                    if cal.isDate(refDate, inSameDayAs: d) {
+                        match = true
+                        break
                     }
-                }()
+                }
+                if !match { continue }
+            } else if let day = selectedDay {
                 if !cal.isDate(refDate, inSameDayAs: day) { continue }
             }
             if let pid = projectMemberships[s.id] {
@@ -1124,7 +1234,8 @@ extension SessionListViewModel {
             var t = directTotal[id] ?? 0
             for c in (children[id] ?? []) {
                 let (cv, ct) = aggregate(for: c, using: &map)
-                v += cv; t += ct
+                v += cv
+                t += ct
             }
             map[id] = (v, t)
             return (v, t)
@@ -1143,8 +1254,18 @@ extension SessionListViewModel {
         let cal = Calendar.current
         var count = 0
         for s in allSessions {
-            if let day = selectedDay {
-                let ref: Date = (dateDimension == .created) ? s.startedAt : (s.lastUpdatedAt ?? s.startedAt)
+            let ref: Date =
+                (dateDimension == .created) ? s.startedAt : (s.lastUpdatedAt ?? s.startedAt)
+            if !selectedDays.isEmpty {
+                var match = false
+                for d in selectedDays {
+                    if cal.isDate(ref, inSameDayAs: d) {
+                        match = true
+                        break
+                    }
+                }
+                if !match { continue }
+            } else if let day = selectedDay {
                 if !cal.isDate(ref, inSameDayAs: day) { continue }
             }
             count += 1
@@ -1215,7 +1336,7 @@ extension SessionListViewModel {
     private func importMembershipsFromNotesIfNeeded(notes: [String: SessionNote]) async {
         let existing = await projectsStore.membershipsSnapshot()
         if !existing.isEmpty { return }
-        var buckets: [String: [String]] = [:] // pid -> [sid]
+        var buckets: [String: [String]] = [:]  // pid -> [sid]
         for (sid, n) in notes { if let pid = n.projectId { buckets[pid, default: []].append(sid) } }
         guard !buckets.isEmpty else { return }
         for (pid, sids) in buckets { await projectsStore.assign(sessionIds: sids, to: pid) }
@@ -1243,10 +1364,14 @@ extension SessionListViewModel {
         pendingAssignIntents.removeAll { now.timeIntervalSince($0.t0) > 60 }
     }
 
-    private func recordIntent(projectId: String, expectedCwd: String, hints: PendingAssignIntent.Hints) {
+    private func recordIntent(
+        projectId: String, expectedCwd: String, hints: PendingAssignIntent.Hints
+    ) {
         if !preferences.autoAssignNewToSameProject { return }
         let canonical = Self.canonicalPath(expectedCwd)
-        pendingAssignIntents.append(PendingAssignIntent(projectId: projectId, expectedCwd: canonical, t0: Date(), hints: hints))
+        pendingAssignIntents.append(
+            PendingAssignIntent(
+                projectId: projectId, expectedCwd: canonical, t0: Date(), hints: hints))
         pruneExpiredIntents()
     }
 
@@ -1261,11 +1386,15 @@ extension SessionListViewModel {
     }
 
     func recordIntentForProjectNew(project: Project) {
-        let expected = (project.directory?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 } ?? NSHomeDirectory()
+        let expected =
+            (project.directory?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap {
+                $0.isEmpty ? nil : $0
+            } ?? NSHomeDirectory()
         let hints = PendingAssignIntent.Hints(
             model: project.profile?.model,
             sandbox: project.profile?.sandbox?.rawValue ?? preferences.resumeOptions.flagSandboxRaw,
-            approval: project.profile?.approval?.rawValue ?? preferences.resumeOptions.flagApprovalRaw
+            approval: project.profile?.approval?.rawValue
+                ?? preferences.resumeOptions.flagApprovalRaw
         )
         recordIntent(projectId: project.id, expectedCwd: expected, hints: hints)
     }
@@ -1280,24 +1409,36 @@ extension SessionListViewModel {
             return s.startedAt >= windowStart && s.startedAt <= windowEnd
         }
         guard !candidates.isEmpty else { return }
-        struct Scored { let intent: PendingAssignIntent; let score: Int; let timeAbs: TimeInterval }
+        struct Scored {
+            let intent: PendingAssignIntent
+            let score: Int
+            let timeAbs: TimeInterval
+        }
         var scored: [Scored] = []
         for it in candidates {
             var score = 0
             if let m = it.hints.model, let sm = s.model, !m.isEmpty, m == sm { score += 1 }
-            if let a = it.hints.approval, let sa = s.approvalPolicy, !a.isEmpty, a == sa { score += 1 }
+            if let a = it.hints.approval, let sa = s.approvalPolicy, !a.isEmpty, a == sa {
+                score += 1
+            }
             let timeAbs = abs(s.startedAt.timeIntervalSince(it.t0))
             scored.append(Scored(intent: it, score: score, timeAbs: timeAbs))
         }
-        guard let best = scored.max(by: { lhs, rhs in
-            if lhs.score != rhs.score { return lhs.score < rhs.score }
-            return lhs.timeAbs > rhs.timeAbs
-        }) else { return }
+        guard
+            let best = scored.max(by: { lhs, rhs in
+                if lhs.score != rhs.score { return lhs.score < rhs.score }
+                return lhs.timeAbs > rhs.timeAbs
+            })
+        else { return }
         let topScore = best.score
         let topTime = best.timeAbs
-        let dupCount = scored.filter { $0.score == topScore && abs($0.timeAbs - topTime) < 0.001 }.count
+        let dupCount = scored.filter { $0.score == topScore && abs($0.timeAbs - topTime) < 0.001 }
+            .count
         if dupCount > 1 {
-            Task { await SystemNotifier.shared.notify(title: "CodMate", body: "Assign to \(best.intent.projectId)?") }
+            Task {
+                await SystemNotifier.shared.notify(
+                    title: "CodMate", body: "Assign to \(best.intent.projectId)?")
+            }
             return
         }
         Task {
@@ -1309,7 +1450,8 @@ extension SessionListViewModel {
                 self.projectMemberships = memberships
                 self.applyFilters()
             }
-            await SystemNotifier.shared.notify(title: "CodMate", body: "Assigned to \(best.intent.projectId)")
+            await SystemNotifier.shared.notify(
+                title: "CodMate", body: "Assigned to \(best.intent.projectId)")
         }
         pendingAssignIntents.removeAll { $0.id == best.intent.id }
     }
