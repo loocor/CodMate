@@ -30,7 +30,9 @@ struct SessionActions {
     // MARK: - Local helpers: profiles in ~/.codex/config.toml
     private func listPersistedProfiles() -> Set<String> {
         let configURL = codexHome.appendingPathComponent("config.toml", isDirectory: false)
-        guard let data = try? Data(contentsOf: configURL), let raw = String(data: data, encoding: .utf8) else {
+        guard let data = try? Data(contentsOf: configURL),
+            let raw = String(data: data, encoding: .utf8)
+        else {
             return []
         }
         var out: Set<String> = []
@@ -49,7 +51,9 @@ struct SessionActions {
     }
 
     private func persistedProfileExists(_ id: String?) -> Bool {
-        guard let id, !id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
+        guard let id, !id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return false
+        }
         return listPersistedProfiles().contains(id)
     }
 
@@ -65,11 +69,15 @@ struct SessionActions {
             let val = model.replacingOccurrences(of: "\"", with: "\\\"")
             pairs.append("model=\"\(val)\"")
         }
-        if let approval = approvalPolicy, !approval.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        if let approval = approvalPolicy,
+            !approval.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        {
             let val = approval.replacingOccurrences(of: "\"", with: "\\\"")
             pairs.append("approval_policy=\"\(val)\"")
         }
-        if let sandbox = sandboxMode, !sandbox.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        if let sandbox = sandboxMode,
+            !sandbox.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        {
             let val = sandbox.replacingOccurrences(of: "\"", with: "\\\"")
             pairs.append("sandbox_mode=\"\(val)\"")
         }
@@ -209,6 +217,8 @@ struct SessionActions {
     func buildNewSessionCLIInvocation(
         session: SessionSummary, options: ResumeOptions, initialPrompt: String? = nil
     ) -> String {
+        // Launch a fresh Codex session by invoking `codex` directly
+        // (do not pass a literal "new" subcommand).
         let exe = "codex"
         var parts: [String] = [exe]
         let args = buildNewSessionArguments(session: session, options: options).map {
@@ -394,6 +404,7 @@ struct SessionActions {
             }
             return arg
         }
+        // Invoke `codex` directly without a "new" subcommand
         return ([exe] + args).joined(separator: " ")
     }
 
@@ -584,6 +595,7 @@ struct SessionActions {
         session: SessionSummary, project: Project, options: ResumeOptions,
         initialPrompt: String? = nil
     ) -> String {
+        // Launch using project profile by invoking `codex` directly without a "new" subcommand.
         let exe = "codex"
         var parts: [String] = [exe]
         let args = buildNewSessionArguments(

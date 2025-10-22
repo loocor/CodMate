@@ -8,6 +8,8 @@ struct ContentView: View {
 
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var selection = Set<SessionSummary.ID>()
+    @State private var selectionPrimaryId: SessionSummary.ID? = nil
+    @State private var lastSelectionSnapshot = Set<SessionSummary.ID>()
     @State private var isPerformingAction = false
     @State private var deleteConfirmationPresented = false
     @State private var alertState: AlertState?
@@ -19,18 +21,25 @@ struct ContentView: View {
     @State private var showNewWithContext = false
     // When starting embedded sessions, record the initial command lines per-session
     @State private var embeddedInitialCommands: [SessionSummary.ID: String] = [:]
+    // Track pending rekey for embedded New so we can move the PTY to the real new session id
+    struct PendingEmbeddedRekey {
+        let anchorId: String
+        let expectedCwd: String
+        let t0: Date
+    }
+    @State private var pendingEmbeddedRekeys: [PendingEmbeddedRekey] = []
     // Provide a simple font chooser that prefers CJK-capable monospace
     private func makeTerminalFont(size: CGFloat) -> NSFont {
         #if canImport(SwiftTerm)
-        let candidates = [
-            "Sarasa Mono SC", "Sarasa Term SC",
-            "LXGW WenKai Mono",
-            "Noto Sans Mono CJK SC", "NotoSansMonoCJKsc-Regular",
-            "JetBrains Mono", "JetBrainsMono-Regular", "JetBrains Mono NL",
-            "JetBrainsMonoNL Nerd Font Mono", "JetBrainsMono Nerd Font Mono",
-            "SF Mono", "Menlo",
-        ]
-        for name in candidates { if let f = NSFont(name: name, size: size) { return f } }
+            let candidates = [
+                "Sarasa Mono SC", "Sarasa Term SC",
+                "LXGW WenKai Mono",
+                "Noto Sans Mono CJK SC", "NotoSansMonoCJKsc-Regular",
+                "JetBrains Mono", "JetBrainsMono-Regular", "JetBrains Mono NL",
+                "JetBrainsMonoNL Nerd Font Mono", "JetBrainsMono Nerd Font Mono",
+                "SF Mono", "Menlo",
+            ]
+            for name in candidates { if let f = NSFont(name: name, size: size) { return f } }
         #endif
         return NSFont.monospacedSystemFont(ofSize: size, weight: .regular)
     }
@@ -44,27 +53,36 @@ struct ContentView: View {
             navigationSplitView(geometry: geometry)
         }
     }
-    
+
     private func navigationSplitView(geometry: GeometryProxy) -> some View {
         let sidebarMaxWidth = geometry.size.width * 0.25
-        
+
         return NavigationSplitView(columnVisibility: $columnVisibility) {
             sidebarContent(sidebarMaxWidth: sidebarMaxWidth)
         } content: {
             listContent
-            } detail: {
-                detailColumn
-            }
+        } detail: {
+            detailColumn
+        }
         .navigationSplitViewStyle(.balanced)
         .task {
             await viewModel.refreshSessions(force: true)
         }
         .onChange(of: viewModel.sections) { _, _ in
             normalizeSelection()
+            reconcilePendingEmbeddedRekeys()
         }
-        .onChange(of: selection) { _, _ in
+        .onChange(of: selection) { _, newSel in
             // Enforce: the middle list should always have one selected item
             normalizeSelection()
+            // Track primary selection id (last explicitly added id)
+            let added = newSel.subtracting(lastSelectionSnapshot)
+            if let justAdded = added.first { selectionPrimaryId = justAdded }
+            // If primary got removed, choose a stable fallback
+            if let primary = selectionPrimaryId, !newSel.contains(primary) {
+                selectionPrimaryId = newSel.first
+            }
+            lastSelectionSnapshot = newSel
         }
         .onChange(of: viewModel.errorMessage) { _, message in
             guard let message else { return }
@@ -109,7 +127,7 @@ struct ContentView: View {
             handleExecutableSelection(result: result)
         }
     }
-    
+
     private func sidebarContent(sidebarMaxWidth: CGFloat) -> some View {
         SessionNavigationView(
             totalCount: viewModel.totalSessionCount,
@@ -119,7 +137,7 @@ struct ContentView: View {
         .navigationSplitViewColumnWidth(
             min: 250, ideal: 270, max: max(250, sidebarMaxWidth))
     }
-    
+
     private var listContent: some View {
         SessionListColumnView(
             sections: viewModel.sections,
@@ -136,7 +154,9 @@ struct ContentView: View {
             isRunning: { runningSessionIDs.contains($0.id) },
             isUpdating: { viewModel.isActivelyUpdating($0.id) },
             isAwaitingFollowup: { viewModel.isAwaitingFollowup($0.id) },
-            onOpenEmbedded: (viewModel.preferences.defaultResumeUseEmbeddedTerminal ? { startEmbedded(for: $0) } : nil)
+            onOpenEmbedded: (viewModel.preferences.defaultResumeUseEmbeddedTerminal
+                ? { startEmbedded(for: $0) } : nil),
+            onPrimarySelect: { s in selectionPrimaryId = s.id }
         )
         .environmentObject(viewModel)
         .navigationSplitViewColumnWidth(min: 420, ideal: 480, max: 600)
@@ -150,7 +170,7 @@ struct ContentView: View {
             }
         }
     }
-    
+
     private var refreshToolbarContent: some View {
         HStack(spacing: 12) {
             Button {
@@ -173,7 +193,7 @@ struct ContentView: View {
         }
         .padding(.horizontal, 4)
     }
-    
+
     private var detailColumn: some View {
         VStack(spacing: 0) {
             detailActionBar
@@ -186,29 +206,17 @@ struct ContentView: View {
             Group {
                 if let focused = focusedSummary {
                     if runningSessionIDs.contains(focused.id) {
-                        ZStack(alignment: .topTrailing) {
-                            TerminalHostView(sessionID: focused.id,
-                                             initialCommands: embeddedInitialCommands[focused.id] ?? viewModel.buildResumeCommands(session: focused),
-                                             font: makeTerminalFont(size: 12),
-                                             isDark: colorScheme == .dark)
-                                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                                .padding(12)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                        .fill(Color.black.opacity(0.001)) // keep hit-testing simple, visually invisible
-                                )
-                                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                        .stroke(Color.white.opacity(0.08), lineWidth: 1)
-                                )
-
-                            // NOTE: Temporarily hide maximize/restore; re-enable after fold logic is refined
-                            // maximizeToggleButton()
-                            //     .padding(.top, 18)
-                            //     .padding(.trailing, 18)
-                            //     .shadow(color: Color.black.opacity(0.25), radius: 8, x: 0, y: 2)
-                        }
+                        TerminalHostView(
+                            terminalKey: focused.id,
+                            initialCommands: embeddedInitialCommands[focused.id]
+                                ?? viewModel.buildResumeCommands(session: focused),
+                            font: makeTerminalFont(size: 12),
+                            isDark: colorScheme == .dark
+                        )
+                        .id(focused.id)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .padding(.horizontal, 16)
+                        // Left list acts as the terminal switcher across sessions
                     } else {
                         SessionDetailView(
                             summary: focused,
@@ -250,12 +258,14 @@ struct ContentView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
 
-           Spacer()
+            Spacer()
 
-           HStack(spacing: 8) {
+            HStack(spacing: 8) {
                 if let focused = focusedSummary {
                     Menu {
-                        Button { showNewWithContext = true } label: {
+                        Button {
+                            showNewWithContext = true
+                        } label: {
                             Label("New With Context…", systemImage: "text.append")
                         }
                     } label: {
@@ -277,37 +287,60 @@ struct ContentView: View {
                     // 1) Terminal (copy + open at path)
                     Button {
                         if let f = focusedSummary {
-                            let dir = FileManager.default.fileExists(atPath: f.cwd) ? f.cwd : f.fileURL.deletingLastPathComponent().path
+                            let dir =
+                                FileManager.default.fileExists(atPath: f.cwd)
+                                ? f.cwd : f.fileURL.deletingLastPathComponent().path
                             viewModel.copyResumeCommands(session: f)
                             _ = viewModel.openAppleTerminal(at: dir)
-                            Task { await SystemNotifier.shared.notify(title: "CodMate", body: "Command copied. Paste it in the opened terminal.") }
+                            Task {
+                                await SystemNotifier.shared.notify(
+                                    title: "CodMate",
+                                    body: "Command copied. Paste it in the opened terminal.")
+                            }
                         }
-                    } label: { Label("Open in Terminal", systemImage: "terminal") }
+                    } label: {
+                        Label("Open in Terminal", systemImage: "terminal")
+                    }
 
                     // 2) iTerm2 via scheme (direct)
                     Button {
                         if let f = focusedSummary {
-                            let dir = FileManager.default.fileExists(atPath: f.cwd) ? f.cwd : f.fileURL.deletingLastPathComponent().path
+                            let dir =
+                                FileManager.default.fileExists(atPath: f.cwd)
+                                ? f.cwd : f.fileURL.deletingLastPathComponent().path
                             let cmd = viewModel.buildResumeCLIInvocation(session: f)
-                            viewModel.openPreferredTerminalViaScheme(app: .iterm2, directory: dir, command: cmd)
+                            viewModel.openPreferredTerminalViaScheme(
+                                app: .iterm2, directory: dir, command: cmd)
                         }
-                    } label: { Label("Open in iTerm2 (Direct)", systemImage: "app.fill") }
+                    } label: {
+                        Label("Open in iTerm2 (Direct)", systemImage: "app.fill")
+                    }
 
                     // 3) Warp via path (copy + open tab)
                     Button {
                         if let f = focusedSummary {
-                            let dir = FileManager.default.fileExists(atPath: f.cwd) ? f.cwd : f.fileURL.deletingLastPathComponent().path
+                            let dir =
+                                FileManager.default.fileExists(atPath: f.cwd)
+                                ? f.cwd : f.fileURL.deletingLastPathComponent().path
                             viewModel.copyResumeCommands(session: f)
                             viewModel.openPreferredTerminalViaScheme(app: .warp, directory: dir)
-                            Task { await SystemNotifier.shared.notify(title: "CodMate", body: "Command copied. Paste it in the opened terminal.") }
+                            Task {
+                                await SystemNotifier.shared.notify(
+                                    title: "CodMate",
+                                    body: "Command copied. Paste it in the opened terminal.")
+                            }
                         }
-                    } label: { Label("Open in Warp (Path)", systemImage: "app.gift.fill") }
+                    } label: {
+                        Label("Open in Warp (Path)", systemImage: "app.gift.fill")
+                    }
 
                     // Embedded terminal (respect preference)
                     if viewModel.preferences.defaultResumeUseEmbeddedTerminal {
                         Button {
                             if let f = focusedSummary { startEmbedded(for: f) }
-                        } label: { Label("Open Embedded Terminal", systemImage: "rectangle.badge.plus") }
+                        } label: {
+                            Label("Open Embedded Terminal", systemImage: "rectangle.badge.plus")
+                        }
                     }
                 } label: {
                     Label("Resume", systemImage: "play.fill")
@@ -343,18 +376,22 @@ struct ContentView: View {
 
                     Button {
                         viewModel.copyRealResumeCommand(session: focused)
-                        Task { await SystemNotifier.shared.notify(title: "CodMate", body: "Real command copied") }
+                        Task {
+                            await SystemNotifier.shared.notify(
+                                title: "CodMate", body: "Real command copied")
+                        }
                     } label: {
                         Image(systemName: "doc.on.doc")
                     }
                     .help("Copy real resume command")
                 } else {
+                    let canExport = (focusedSummary?.eventCount ?? 0) > 0 && !viewModel.isLoading
                     Button {
                         exportMarkdownForFocused()
                     } label: {
                         Image(systemName: "square.and.arrow.down")
                     }
-                    .disabled(focusedSummary == nil)
+                    .disabled(!canExport)
                     .help("Export Markdown")
                 }
 
@@ -374,11 +411,13 @@ struct ContentView: View {
         guard !selection.isEmpty else {
             return viewModel.sections.first?.sessions.first
         }
-
-        let allSummaries = summaryLookup
+        let all = summaryLookup
+        if let pid = selectionPrimaryId, selection.contains(pid), let s = all[pid] {
+            return s
+        }
         return
             selection
-            .compactMap { allSummaries[$0] }
+            .compactMap { all[$0] }
             .sorted { lhs, rhs in
                 (lhs.lastUpdatedAt ?? lhs.startedAt) > (rhs.lastUpdatedAt ?? rhs.startedAt)
             }
@@ -406,7 +445,12 @@ struct ContentView: View {
 
     private func resumeFromList(_ session: SessionSummary) {
         selection = [session.id]
-        openPreferredExternal(for: session)
+        selectionPrimaryId = session.id
+        if viewModel.preferences.defaultResumeUseEmbeddedTerminal {
+            startEmbedded(for: session)
+        } else {
+            openPreferredExternal(for: session)
+        }
     }
 
     private func handleDeleteRequest(_ session: SessionSummary) {
@@ -440,12 +484,16 @@ struct ContentView: View {
         // Build the default resume commands for this session so TerminalHostView can inject them
         embeddedInitialCommands[session.id] = viewModel.buildResumeCommands(session: session)
         runningSessionIDs.insert(session.id)
+        // Nudge Codex to redraw cleanly once it starts, by sending "/" then backspace
+        #if canImport(SwiftTerm)
+            TerminalSessionManager.shared.scheduleSlashNudge(forKey: session.id, delay: 1.0)
+        #endif
     }
 
     private func stopEmbedded(forID id: SessionSummary.ID) {
         // Tear down the embedded terminal view and terminate its child process
         #if canImport(SwiftTerm)
-        TerminalSessionManager.shared.stop(id: id)
+            TerminalSessionManager.shared.stop(key: id)
         #endif
         runningSessionIDs.remove(id)
         embeddedInitialCommands.removeValue(forKey: id)
@@ -462,21 +510,34 @@ struct ContentView: View {
 
     private func startEmbeddedNew(for session: SessionSummary) {
         // Build the 'new session' commands (respecting project profile when present)
-        let cwd = FileManager.default.fileExists(atPath: session.cwd)
+        let cwd =
+            FileManager.default.fileExists(atPath: session.cwd)
             ? session.cwd : session.fileURL.deletingLastPathComponent().path
         let cd = "cd " + shellEscapeForCD(cwd)
         let injectedPATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:${PATH}"
-        let exports = "export LANG=zh_CN.UTF-8; export LC_ALL=zh_CN.UTF-8; export LC_CTYPE=zh_CN.UTF-8; export TERM=xterm-256color; export CODEX_DISABLE_COLOR_QUERY=1"
+        let exports =
+            "export LANG=zh_CN.UTF-8; export LC_ALL=zh_CN.UTF-8; export LC_CTYPE=zh_CN.UTF-8; export TERM=xterm-256color; export CODEX_DISABLE_COLOR_QUERY=1"
         let invocation = viewModel.buildNewSessionCLIInvocationRespectingProject(session: session)
         let command = "PATH=\(injectedPATH) \(invocation)"
-        embeddedInitialCommands[session.id] = cd + "\n" + exports + "\n" + command + "\n"
+        // Enter alternate screen and clear for a truly clean view (cursor home);
+        // avoids reflow artifacts and isolates scrollback while the new session runs.
+        let preclear = "printf '\\033[?1049h\\033[H\\033[2J'"
+
+        embeddedInitialCommands[session.id] =
+            preclear + "\n" + cd + "\n" + exports + "\n" + command + "\n"
         runningSessionIDs.insert(session.id)
+        // Record pending rekey so that when the new session appears, we can move this PTY to the real id
+        pendingEmbeddedRekeys.append(
+            PendingEmbeddedRekey(
+                anchorId: session.id, expectedCwd: canonicalizePath(cwd), t0: Date())
+        )
     }
 
     private func openPreferredExternal(for session: SessionSummary) {
         viewModel.copyResumeCommands(session: session)
         let app = viewModel.preferences.defaultResumeExternalApp
-        let dir = FileManager.default.fileExists(atPath: session.cwd)
+        let dir =
+            FileManager.default.fileExists(atPath: session.cwd)
             ? session.cwd
             : session.fileURL.deletingLastPathComponent().path
         switch app {
@@ -490,14 +551,18 @@ struct ContentView: View {
         case .none:
             break
         }
-        Task { await SystemNotifier.shared.notify(title: "CodMate", body: "Command copied. Paste it in the opened terminal.") }
+        Task {
+            await SystemNotifier.shared.notify(
+                title: "CodMate", body: "Command copied. Paste it in the opened terminal.")
+        }
     }
 
     private func openPreferredExternalForNew(session: SessionSummary) {
         // Record pending intent for auto-assign before launching
         viewModel.recordIntentForDetailNew(anchor: session)
         let app = viewModel.preferences.defaultResumeExternalApp
-        let dir = FileManager.default.fileExists(atPath: session.cwd)
+        let dir =
+            FileManager.default.fileExists(atPath: session.cwd)
             ? session.cwd
             : session.fileURL.deletingLastPathComponent().path
         switch app {
@@ -512,7 +577,10 @@ struct ContentView: View {
         case .none:
             break
         }
-        Task { await SystemNotifier.shared.notify(title: "CodMate", body: "Command copied. Paste it in the opened terminal.") }
+        Task {
+            await SystemNotifier.shared.notify(
+                title: "CodMate", body: "Command copied. Paste it in the opened terminal.")
+        }
     }
 
     private func startNewSession(for session: SessionSummary) {
@@ -533,10 +601,13 @@ struct ContentView: View {
         Button {
             toggleDetailMaximized()
         } label: {
-            Image(systemName: isDetailMaximized ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right")
-                .font(.system(size: 15, weight: .semibold))
-                .padding(8)
-                .background(.ultraThinMaterial, in: Capsule())
+            Image(
+                systemName: isDetailMaximized
+                    ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right"
+            )
+            .font(.system(size: 15, weight: .semibold))
+            .padding(8)
+            .background(.ultraThinMaterial, in: Capsule())
         }
         .buttonStyle(.plain)
         .accessibilityLabel(isDetailMaximized ? "Restore view" : "Maximize terminal")
@@ -580,6 +651,52 @@ struct ContentView: View {
     }
 }
 
+// MARK: - Embedded PTY rekey helpers
+extension ContentView {
+    private func canonicalizePath(_ path: String) -> String {
+        let expanded = (path as NSString).expandingTildeInPath
+        var standardized = URL(fileURLWithPath: expanded).standardizedFileURL.path
+        if standardized.count > 1 && standardized.hasSuffix("/") { standardized.removeLast() }
+        return standardized
+    }
+
+    private func reconcilePendingEmbeddedRekeys() {
+        guard !pendingEmbeddedRekeys.isEmpty else { return }
+        let all = viewModel.sections.flatMap(\.sessions)
+        let now = Date()
+        var remaining: [PendingEmbeddedRekey] = []
+        for pending in pendingEmbeddedRekeys {
+            // Window to match nearby creations
+            let windowStart = pending.t0.addingTimeInterval(-2)
+            let windowEnd = pending.t0.addingTimeInterval(120)
+            let candidates = all.filter { s in
+                guard s.id != pending.anchorId else { return false }
+                let canon = canonicalizePath(s.cwd)
+                guard canon == pending.expectedCwd else { return false }
+                return s.startedAt >= windowStart && s.startedAt <= windowEnd
+            }
+            if let winner = candidates.min(by: {
+                abs($0.startedAt.timeIntervalSince(pending.t0))
+                    < abs($1.startedAt.timeIntervalSince(pending.t0))
+            }) {
+                #if canImport(SwiftTerm)
+                    TerminalSessionManager.shared.rekey(from: pending.anchorId, to: winner.id)
+                #endif
+                if runningSessionIDs.contains(pending.anchorId) {
+                    runningSessionIDs.remove(pending.anchorId)
+                    runningSessionIDs.insert(winner.id)
+                }
+                if selection.contains(pending.anchorId) {
+                    selection = [winner.id]
+                }
+            } else {
+                if now.timeIntervalSince(pending.t0) < 180 { remaining.append(pending) }
+            }
+        }
+        pendingEmbeddedRekeys = remaining
+    }
+}
+
 private struct AlertState: Identifiable {
     let id = UUID()
     let title: String
@@ -588,6 +705,7 @@ private struct AlertState: Identifiable {
 
 // MARK: - Export helper
 extension ContentView {
+    // No additional helpers: left session list acts as the switcher
     private func exportMarkdownForFocused() {
         guard let focused = focusedSummary else { return }
         exportMarkdownForSession(focused)
