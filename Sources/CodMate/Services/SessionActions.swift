@@ -366,25 +366,30 @@ struct SessionActions {
             if hasPersistedProfile {
                 args += ["--profile", profileId]
             } else {
-                // Resolve effective approval/sandbox according to project profile (approximate full-auto/danger bypass when set)
+                // Resolve effective approval/sandbox for project-level new inline profile
                 var approvalRaw: String? = pp?.approval?.rawValue
                 var sandboxRaw: String? = pp?.sandbox?.rawValue
-                if pp?.dangerouslyBypass == true {
-                    approvalRaw = ApprovalPolicy.never.rawValue
-                    sandboxRaw = SandboxMode.dangerFullAccess.rawValue
-                } else if pp?.fullAuto == true {
-                    approvalRaw = ApprovalPolicy.onFailure.rawValue
-                    sandboxRaw = SandboxMode.workspaceWrite.rawValue
+                if sandboxRaw == nil {
+                    if pp?.dangerouslyBypass == true {
+                        sandboxRaw = SandboxMode.dangerFullAccess.rawValue
+                    } else if let opt = options.sandbox?.rawValue {
+                        sandboxRaw = opt
+                    }
                 }
-                // Fallback to ResumeOptions when project profile lacks explicit values
-                if approvalRaw == nil { approvalRaw = options.approval?.rawValue }
-                if sandboxRaw == nil { sandboxRaw = options.sandbox?.rawValue }
+                if approvalRaw == nil {
+                    if let opt = options.approval?.rawValue {
+                        approvalRaw = opt
+                    } else {
+                        approvalRaw = ApprovalPolicy.onRequest.rawValue
+                    }
+                }
+                if sandboxRaw == nil { sandboxRaw = SandboxMode.workspaceWrite.rawValue }
 
                 if let inline = renderInlineProfileConfig(
                     key: profileId,
                     model: pp?.model,
-                    approvalPolicy: nil,
-                    sandboxMode: nil
+                    approvalPolicy: approvalRaw,
+                    sandboxMode: sandboxRaw
                 ) {
                     args += ["--profile", profileId, "-c", inline]
                 } else {
@@ -561,18 +566,26 @@ struct SessionActions {
             }
         }
 
-        // Effective policies for potential inline profile injection
+        // Effective policies for inline profile injection (New using project):
+        // - approval: prefer explicit; otherwise prefer options; else default to on-request
+        // - sandbox: prefer explicit; otherwise Danger Bypass => danger-full-access; otherwise options; else default to workspace-write
         var approvalRaw: String? = project.profile?.approval?.rawValue
         var sandboxRaw: String? = project.profile?.sandbox?.rawValue
-        if project.profile?.dangerouslyBypass == true {
-            approvalRaw = ApprovalPolicy.never.rawValue
-            sandboxRaw = SandboxMode.dangerFullAccess.rawValue
-        } else if project.profile?.fullAuto == true {
-            approvalRaw = ApprovalPolicy.onFailure.rawValue
-            sandboxRaw = SandboxMode.workspaceWrite.rawValue
+        if sandboxRaw == nil {
+            if project.profile?.dangerouslyBypass == true {
+                sandboxRaw = SandboxMode.dangerFullAccess.rawValue
+            } else if let opt = options.sandbox?.rawValue {
+                sandboxRaw = opt
+            }
         }
-        if approvalRaw == nil { approvalRaw = options.approval?.rawValue }
-        if sandboxRaw == nil { sandboxRaw = options.sandbox?.rawValue }
+        if approvalRaw == nil {
+            if let opt = options.approval?.rawValue {
+                approvalRaw = opt
+            } else {
+                approvalRaw = ApprovalPolicy.onRequest.rawValue
+            }
+        }
+        if sandboxRaw == nil { sandboxRaw = SandboxMode.workspaceWrite.rawValue }
 
         // Profile selection
         if let pid, !pid.isEmpty {
@@ -581,8 +594,8 @@ struct SessionActions {
             } else if let inline = renderInlineProfileConfig(
                 key: pid,
                 model: modelFromProject ?? fallbackModel,
-                approvalPolicy: nil,
-                sandboxMode: nil
+                approvalPolicy: approvalRaw,
+                sandboxMode: sandboxRaw
             ) {
                 // Zero-write: inject the inline profile and select it
                 args += ["--profile", pid, "-c", inline]
@@ -676,6 +689,157 @@ struct SessionActions {
             : buildNewSessionUsingProjectProfileCommandLines(
                 session: session, project: project, executableURL: executableURL, options: options,
                 initialPrompt: initialPrompt)
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.setString(commands, forType: .string)
+    }
+
+    // MARK: - Resume (detail) respecting Project Profile
+    private func buildResumeArguments(
+        using project: Project, fallbackModel: String?, options: ResumeOptions
+    ) -> [String] {
+        var args: [String] = []
+        let pid = project.profileId?.trimmingCharacters(in: .whitespaces)
+        let hasPersisted = persistedProfileExists(pid)
+
+        // Compute effective approval/sandbox for resume inline profile
+        // approval: prefer explicit; else options; else default on-request
+        // sandbox: prefer explicit; else Danger Bypass => danger-full-access; else options; else default workspace-write
+        var approvalRaw: String? = project.profile?.approval?.rawValue
+        var sandboxRaw: String? = project.profile?.sandbox?.rawValue
+        if sandboxRaw == nil {
+            if project.profile?.dangerouslyBypass == true {
+                sandboxRaw = SandboxMode.dangerFullAccess.rawValue
+            } else if let opt = options.sandbox?.rawValue {
+                sandboxRaw = opt
+            }
+        }
+        if approvalRaw == nil {
+            if let opt = options.approval?.rawValue {
+                approvalRaw = opt
+            } else {
+                approvalRaw = ApprovalPolicy.onRequest.rawValue
+            }
+        }
+        if sandboxRaw == nil { sandboxRaw = SandboxMode.workspaceWrite.rawValue }
+
+        // Only select profile; do not pass flags to preserve original resume semantics
+        if let pid, !pid.isEmpty {
+            if hasPersisted {
+                args += ["--profile", pid]
+            } else if let inline = renderInlineProfileConfig(
+                key: pid,
+                model: project.profile?.model ?? fallbackModel,
+                approvalPolicy: approvalRaw,
+                sandboxMode: sandboxRaw
+            ) {
+                // Zero-write: inject the inline profile and select it
+                args += ["--profile", pid, "-c", inline]
+            }
+        }
+        return args
+    }
+
+    func buildResumeUsingProjectProfileCLIInvocation(
+        session: SessionSummary, project: Project, options: ResumeOptions
+    ) -> String {
+        // Invoke `codex` directly and select profile (no flags)
+        let exe = "codex"
+        var parts: [String] = [exe]
+        let args = buildResumeArguments(
+            using: project, fallbackModel: session.model, options: options
+        ).map {
+            arg -> String in
+            if arg.contains(where: { $0.isWhitespace || $0 == "'" }) {
+                return shellEscapedPath(arg)
+            }
+            return arg
+        }
+        parts.append(contentsOf: args)
+        parts.append("resume")
+        parts.append(session.id)
+        return parts.joined(separator: " ")
+    }
+
+    func buildResumeUsingProjectProfileCLIInvocation(
+        session: SessionSummary, project: Project, executablePath: String, options: ResumeOptions
+    ) -> String {
+        let exe = shellQuoteIfNeeded(executablePath)
+        var parts: [String] = [exe]
+        let args = buildResumeArguments(
+            using: project, fallbackModel: session.model, options: options
+        ).map {
+            arg -> String in
+            if arg.contains(where: { $0.isWhitespace || $0 == "'" }) {
+                return shellEscapedPath(arg)
+            }
+            return arg
+        }
+        parts.append(contentsOf: args)
+        parts.append("resume")
+        parts.append(session.id)
+        return parts.joined(separator: " ")
+    }
+
+    func buildResumeUsingProjectProfileCommandLines(
+        session: SessionSummary, project: Project, executableURL: URL, options: ResumeOptions
+    ) -> String {
+        _ = executableURL
+        let cwd =
+            FileManager.default.fileExists(atPath: session.cwd)
+            ? session.cwd : session.fileURL.deletingLastPathComponent().path
+        let cd = "cd " + shellEscapedPath(cwd)
+        // PATH/env injection comes from project profile only
+        let prepend = project.profile?.pathPrepend ?? []
+        let prependString = prepend.filter {
+            !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }.joined(separator: ":")
+        let defaultPATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+        let injectedPATH =
+            (prependString.isEmpty ? defaultPATH : prependString + ":" + defaultPATH) + ":${PATH}"
+        var exportLines: [String] = [
+            "export LANG=zh_CN.UTF-8",
+            "export LC_ALL=zh_CN.UTF-8",
+            "export LC_CTYPE=zh_CN.UTF-8",
+            "export TERM=xterm-256color",
+        ]
+        if let env = project.profile?.env {
+            for (k, v) in env {
+                let key = k.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !key.isEmpty else { continue }
+                exportLines.append("export \(key)=\(shellSingleQuoted(v))")
+            }
+        }
+        let exports = exportLines.joined(separator: "; ")
+        let invocation = buildResumeUsingProjectProfileCLIInvocation(
+            session: session, project: project, options: options)
+        let command = "PATH=\(injectedPATH) \(invocation)"
+        return cd + "\n" + exports + "\n" + command + "\n"
+    }
+
+    func buildExternalResumeUsingProjectProfileCommands(
+        session: SessionSummary, project: Project, executableURL: URL, options: ResumeOptions
+    ) -> String {
+        _ = executableURL
+        let cwd =
+            FileManager.default.fileExists(atPath: session.cwd)
+            ? session.cwd : session.fileURL.deletingLastPathComponent().path
+        let cd = "cd " + shellEscapedPath(cwd)
+        let cmd = buildResumeUsingProjectProfileCLIInvocation(
+            session: session, project: project, options: options)
+        return cd + "\n" + cmd + "\n"
+    }
+
+    func copyResumeUsingProjectProfileCommands(
+        session: SessionSummary, project: Project, executableURL: URL, options: ResumeOptions,
+        simplifiedForExternal: Bool = true
+    ) {
+        let commands =
+            simplifiedForExternal
+            ? buildExternalResumeUsingProjectProfileCommands(
+                session: session, project: project, executableURL: executableURL, options: options)
+            : buildResumeUsingProjectProfileCommandLines(
+                session: session, project: project, executableURL: executableURL, options: options)
         let pb = NSPasteboard.general
         pb.clearContents()
         pb.setString(commands, forType: .string)

@@ -289,6 +289,22 @@ final class SessionListViewModel: ObservableObject {
         )
     }
 
+    // Profile-aware variants (respect current session's project profile when available)
+    func copyResumeCommandsRespectingProject(session: SessionSummary) {
+        if let pid = projectIdForSession(session.id),
+           let p = projects.first(where: { $0.id == pid }),
+           p.profile != nil || (p.profileId?.isEmpty == false)
+        {
+            actions.copyResumeUsingProjectProfileCommands(
+                session: session, project: p, executableURL: preferences.codexExecutableURL,
+                options: preferences.resumeOptions)
+        } else {
+            actions.copyResumeCommands(
+                session: session, executableURL: preferences.codexExecutableURL,
+                options: preferences.resumeOptions, simplifiedForExternal: true)
+        }
+    }
+
     func openInTerminal(session: SessionSummary) -> Bool {
         actions.openInTerminal(
             session: session, executableURL: preferences.codexExecutableURL,
@@ -320,6 +336,24 @@ final class SessionListViewModel: ObservableObject {
             executablePath: execPath,
             options: preferences.resumeOptions
         )
+    }
+
+    func buildResumeCLIInvocationRespectingProject(session: SessionSummary) -> String {
+        if let pid = projectIdForSession(session.id),
+           let p = projects.first(where: { $0.id == pid }),
+           p.profile != nil || (p.profileId?.isEmpty == false)
+        {
+            let execPath =
+                actions.resolveExecutableURL(preferred: preferences.codexExecutableURL)?.path
+                ?? preferences.codexExecutableURL.path
+            return actions.buildResumeUsingProjectProfileCLIInvocation(
+                session: session, project: p, executablePath: execPath, options: preferences.resumeOptions)
+        }
+        let execPath =
+            actions.resolveExecutableURL(preferred: preferences.codexExecutableURL)?.path
+            ?? preferences.codexExecutableURL.path
+        return actions.buildResumeCLIInvocation(
+            session: session, executablePath: execPath, options: preferences.resumeOptions)
     }
 
     func copyNewSessionCommands(session: SessionSummary) {
