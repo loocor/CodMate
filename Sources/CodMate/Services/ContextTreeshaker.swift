@@ -5,6 +5,8 @@ struct TreeshakeOptions: Sendable, Equatable {
     var includeToolSummary: Bool = false
     var mergeConsecutiveAssistant: Bool = true
     var maxMessageBytes: Int = 2 * 1024 // 2KB default (faster preview)
+    // Optional override for visible message kinds; when nil, caller can inject app-wide defaults.
+    var visibleKinds: Set<MessageVisibilityKind>? = nil
 }
 
 actor ContextTreeshaker {
@@ -16,7 +18,13 @@ actor ContextTreeshaker {
     private let capacity = 32
 
     private func optSignature(_ o: TreeshakeOptions) -> String {
-        "r:\(o.includeReasoning ? 1 : 0);t:\(o.includeToolSummary ? 1 : 0);m:\(o.mergeConsecutiveAssistant ? 1 : 0);b:\(o.maxMessageBytes)"
+        let kindsSig: String = {
+            if let kinds = o.visibleKinds {
+                let items = kinds.map { $0.rawValue }.sorted().joined(separator: ",")
+                return "vk:[\(items)]"
+            } else { return "vk:-" }
+        }()
+        return "r:\(o.includeReasoning ? 1 : 0);t:\(o.includeToolSummary ? 1 : 0);m:\(o.mergeConsecutiveAssistant ? 1 : 0);b:\(o.maxMessageBytes);\(kindsSig)"
     }
 
     private func fileVersion(for s: SessionSummary) -> Date? {
@@ -38,10 +46,14 @@ actor ContextTreeshaker {
 
         // Build slim markdown for a single session (no header)
         let turns: [ConversationTurn]
-        if let loaded = try? loader.load(url: s.fileURL) { turns = loaded } else { turns = [] }
+        if let loaded = try? loader.load(url: s.fileURL) {
+            if let kinds = options.visibleKinds { turns = loaded.filtering(visibleKinds: kinds) } else { turns = loaded }
+        } else { turns = [] }
 
         var out: [String] = []
         var prevWasAssistant = false
+        let allowReasoning = options.includeReasoning && (options.visibleKinds?.contains(.reasoning) ?? true)
+        let allowInfoSummary = options.includeToolSummary && (options.visibleKinds?.contains(.infoOther) ?? true)
         for turn in turns {
             if Task.isCancelled { break }
             if let user = turn.userMessage, let text = user.text, !text.isEmpty {
@@ -49,6 +61,15 @@ actor ContextTreeshaker {
                 out.append(trim(text, limit: options.maxMessageBytes))
                 out.append("")
                 prevWasAssistant = false
+            }
+            // Optional: Reasoning block (if available and allowed)
+            if allowReasoning {
+                if let r = turn.outputs.last(where: { isReasoning($0) })?.text, !r.isEmpty {
+                    out.append("**Reasoning** · \(turn.timestamp)")
+                    out.append(trim(r, limit: options.maxMessageBytes))
+                    out.append("")
+                    prevWasAssistant = false
+                }
             }
             var assistantText: String? = nil
             for event in turn.outputs.reversed() {
@@ -64,6 +85,15 @@ actor ContextTreeshaker {
                 }
                 out.append("")
                 prevWasAssistant = true
+            }
+            // Optional: Info/Tool summary (best-effort from remaining info events)
+            if allowInfoSummary {
+                if let info = turn.outputs.last(where: { isInfoSummary($0) })?.text, !info.isEmpty {
+                    out.append("**Info** · \(turn.timestamp)")
+                    out.append(trim(info, limit: options.maxMessageBytes))
+                    out.append("")
+                    prevWasAssistant = false
+                }
             }
         }
         let text = out.joined(separator: "\n")
@@ -154,4 +184,19 @@ actor ContextTreeshaker {
         for _ in 0..<charCount { start = text.index(before: start) }
         return String(text[start...])
     }
+}
+
+// MARK: - Helpers
+private func isReasoning(_ e: TimelineEvent) -> Bool {
+    (e.title?.localizedCaseInsensitiveContains("agent reasoning") ?? false)
+}
+
+private func isInfoSummary(_ e: TimelineEvent) -> Bool {
+    guard e.actor == .info else { return false }
+    if e.title == TimelineEvent.environmentContextTitle { return false }
+    let lower = (e.title ?? "").lowercased()
+    if lower == "context updated" { return false }
+    if lower.contains("agent reasoning") { return false }
+    if lower.contains("token usage") { return false }
+    return true
 }

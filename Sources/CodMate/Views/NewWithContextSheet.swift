@@ -72,6 +72,7 @@ struct NewWithContextSheet: View {
         .onChange(of: options.includeReasoning) { _, _ in if showPreview { schedulePreview() } }
         .onChange(of: options.includeToolSummary) { _, _ in if showPreview { schedulePreview() } }
         .onChange(of: options.maxMessageBytes) { _, _ in if showPreview { schedulePreview() } }
+        .onChange(of: viewModel.preferences.markdownVisibleKinds) { _, _ in if showPreview { schedulePreview() } }
     }
 
     private var leftSessionPicker: some View {
@@ -220,13 +221,20 @@ struct NewWithContextSheet: View {
         previewTask?.cancel()
         let ids = selectedIDs
         let opt = options
-        let all = viewModel.sections.flatMap { $0.sessions }
+        // Use the same universe as the left list to avoid scope mismatch with middle list sections
+        let all = viewModel.allSessionsInSameProject(as: anchor)
         let lookup = Dictionary(uniqueKeysWithValues: all.map { ($0.id, $0) })
         let sessions = ids.compactMap { lookup[$0] }.sorted { $0.startedAt < $1.startedAt }
+        let kinds = viewModel.preferences.markdownVisibleKinds
         previewTask = Task.detached { [treeshaker] in
             try? await Task.sleep(nanoseconds: 220_000_000)
             if Task.isCancelled { return }
-            let text = await treeshaker.generateMarkdown(for: sessions, options: opt)
+            var use = opt
+            use.visibleKinds = kinds
+            // Respect visibility for reasoning/tool by AND-ing with toggles
+            if !(kinds.contains(.reasoning)) { use.includeReasoning = false }
+            if !(kinds.contains(.infoOther)) { use.includeToolSummary = false }
+            let text = await treeshaker.generateMarkdown(for: sessions, options: use)
             if Task.isCancelled { return }
             await MainActor.run { self.previewText = text }
         }

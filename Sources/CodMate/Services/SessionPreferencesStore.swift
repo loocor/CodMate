@@ -29,6 +29,8 @@ final class SessionPreferencesStore: ObservableObject {
         static let resumeFullAuto = "codex.resume.fullAuto"
         static let resumeDangerBypass = "codex.resume.dangerBypass"
         static let autoAssignNewToSameProject = "codex.projects.autoAssignNewToSame"
+        static let timelineVisibleKinds = "codex.timeline.visibleKinds"
+        static let markdownVisibleKinds = "codex.markdown.visibleKinds"
     }
 
     init(
@@ -106,6 +108,18 @@ final class SessionPreferencesStore: ObservableObject {
         self.defaultResumeDangerBypass = defaults.object(forKey: Keys.resumeDangerBypass) as? Bool ?? false
         // Projects behaviors
         self.autoAssignNewToSameProject = defaults.object(forKey: Keys.autoAssignNewToSameProject) as? Bool ?? true
+
+        // Message visibility defaults
+        if let storedTimeline = defaults.array(forKey: Keys.timelineVisibleKinds) as? [String] {
+            self.timelineVisibleKinds = Set(storedTimeline.compactMap { MessageVisibilityKind(rawValue: $0) })
+        } else {
+            self.timelineVisibleKinds = MessageVisibilityKind.timelineDefault
+        }
+        if let storedMarkdown = defaults.array(forKey: Keys.markdownVisibleKinds) as? [String] {
+            self.markdownVisibleKinds = Set(storedMarkdown.compactMap { MessageVisibilityKind(rawValue: $0) })
+        } else {
+            self.markdownVisibleKinds = MessageVisibilityKind.markdownDefault
+        }
     }
 
     private func persist() {
@@ -181,6 +195,14 @@ final class SessionPreferencesStore: ObservableObject {
     // Projects: auto-assign new sessions from detail to same project (default ON)
     @Published var autoAssignNewToSameProject: Bool {
         didSet { defaults.set(autoAssignNewToSameProject, forKey: Keys.autoAssignNewToSameProject) }
+    }
+
+    // Visibility for timeline and export markdown
+    @Published var timelineVisibleKinds: Set<MessageVisibilityKind> = MessageVisibilityKind.timelineDefault {
+        didSet { defaults.set(Array(timelineVisibleKinds.map { $0.rawValue }), forKey: Keys.timelineVisibleKinds) }
+    }
+    @Published var markdownVisibleKinds: Set<MessageVisibilityKind> = MessageVisibilityKind.markdownDefault {
+        didSet { defaults.set(Array(markdownVisibleKinds.map { $0.rawValue }), forKey: Keys.markdownVisibleKinds) }
     }
 
     var resumeOptions: ResumeOptions {

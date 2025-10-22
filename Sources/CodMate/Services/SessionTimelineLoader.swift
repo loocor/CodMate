@@ -275,15 +275,12 @@ struct SessionTimelineLoader {
         let rateDict = flatten(json: payload.rateLimits, prefix: "rate_")
         let combined = infoDict.merging(rateDict) { current, _ in current }
         guard !combined.isEmpty else { return nil }
-        let text = combined.sorted(by: { $0.key < $1.key })
-            .map { "\($0.key): \($0.value)" }
-            .joined(separator: "\n")
         return TimelineEvent(
             id: UUID().uuidString,
             timestamp: timestamp,
             actor: .info,
             title: "Token Usage",
-            text: text,
+            text: nil,
             metadata: combined
         )
     }

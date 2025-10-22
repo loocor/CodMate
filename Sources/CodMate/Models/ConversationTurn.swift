@@ -84,4 +84,21 @@ extension Array where Element == ConversationTurn {
             )
         }
     }
+
+    func filtering(visibleKinds: Set<MessageVisibilityKind>) -> [ConversationTurn] {
+        compactMap { turn in
+            let userAllowed: Bool = {
+                guard let u = turn.userMessage else { return false }
+                return visibleKinds.contains(event: u)
+            }()
+            let keptOutputs = turn.outputs.filter { visibleKinds.contains(event: $0) }
+            if !userAllowed && keptOutputs.isEmpty { return nil }
+            return ConversationTurn(
+                id: turn.id,
+                timestamp: turn.timestamp,
+                userMessage: userAllowed ? turn.userMessage : nil,
+                outputs: keptOutputs
+            )
+        }
+    }
 }

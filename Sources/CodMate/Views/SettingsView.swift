@@ -147,9 +147,91 @@ struct SettingsView: View {
                     }
                 }
 
+                // Timeline & Markdown visibility
+                VStack(alignment: .leading, spacing: 16) {
+                    Text("Timeline & Markdown")
+                        .font(.headline)
+                        .foregroundColor(.primary)
+
+                    // Timeline visibility section (full-width header + wrapping options)
+                    visibilitySection(
+                        title: "Timeline visibility",
+                        systemImage: "text.bubble",
+                        description: "Choose which message types appear in the conversation timeline",
+                        selection: $preferences.timelineVisibleKinds,
+                        defaults: MessageVisibilityKind.timelineDefault
+                    )
+
+                    // Markdown export section (same layout)
+                    visibilitySection(
+                        title: "Markdown export",
+                        systemImage: "doc.text",
+                        description: "Choose which message types are included when exporting Markdown",
+                        selection: $preferences.markdownVisibleKinds,
+                        defaults: MessageVisibilityKind.markdownDefault
+                    )
+                }
+
                 // Diagnostics (moved to Dialectics page)
             }
+            .padding(.bottom, 16)
         }
+    }
+
+    // MARK: - Visibility Section (full-width header + wrapping options)
+    @ViewBuilder
+    private func visibilitySection(
+        title: String,
+        systemImage: String,
+        description: String,
+        selection: Binding<Set<MessageVisibilityKind>>,
+        defaults: Set<MessageVisibilityKind>
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            // Header block: title + description with tighter spacing to match File Paths (4pt)
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(alignment: .firstTextBaseline) {
+                    Label(title, systemImage: systemImage)
+                        .font(.subheadline).fontWeight(.medium)
+                    Spacer(minLength: 8)
+                    Button("Restore Defaults") { selection.wrappedValue = defaults }
+                        .buttonStyle(.bordered)
+                }
+                Text(description)
+                    .font(.caption).foregroundColor(.secondary)
+            }
+
+            // Options: left-to-right, equal spacing, wrap to next line naturally
+            let order: [MessageVisibilityKind] = [
+                .user, .assistant, .tool, .syncing, .environment, .reasoning, .tokenUsage, .infoOther
+            ]
+            LazyVGrid(
+                columns: Array(
+                    repeating: GridItem(.flexible(minimum: 120), alignment: .leading),
+                    count: 4
+                ),
+                alignment: .leading,
+                spacing: 8
+            ) {
+                ForEach(order, id: \.self) { kind in
+                    Toggle(kind.title, isOn: binding(selection, kind))
+                        .toggleStyle(.checkbox)
+                        .controlSize(.small)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func binding(_ selection: Binding<Set<MessageVisibilityKind>>, _ kind: MessageVisibilityKind) -> Binding<Bool> {
+        Binding<Bool>(
+            get: { selection.wrappedValue.contains(kind) },
+            set: { newVal in
+                var s = selection.wrappedValue
+                if newVal { s.insert(kind) } else { s.remove(kind) }
+                selection.wrappedValue = s
+            }
+        )
     }
 
     private var codexSettings: some View {

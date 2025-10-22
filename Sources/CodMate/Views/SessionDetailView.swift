@@ -9,6 +9,7 @@ struct SessionDetailView: View {
     let onReveal: () -> Void
     let onDelete: () -> Void
 
+    @EnvironmentObject private var viewModel: SessionListViewModel
     @State private var turns: [ConversationTurn] = []           // filtered + sorted for display
     @State private var allTurns: [ConversationTurn] = []        // raw full timeline
     @State private var loadingTimeline = false
@@ -46,6 +47,10 @@ struct SessionDetailView: View {
         .task(id: summary.id) { await initialLoadAndMonitor() }
         .onChange(of: searchText) { _, _ in applyFilterAndSort() }
         .onChange(of: sortAscending) { _, _ in applyFilterAndSort() }
+        .onChange(of: viewModel.preferences.timelineVisibleKinds) { _, _ in
+            // Re-apply current search + sort with new visibility
+            applyFilterAndSort()
+        }
     }
 
     // moved actions to fixed top bar
@@ -344,7 +349,7 @@ extension SessionDetailView {
         loadingTimeline = true
         defer { loadingTimeline = false }
         do {
-            let loaded = try loader.load(url: summary.fileURL).removingEnvironmentContext()
+            let loaded = try loader.load(url: summary.fileURL)
             allTurns = loaded
             if resetUI {
                 expandedTurnIDs = []
@@ -379,7 +384,9 @@ extension SessionDetailView {
         let sorted = filtered.sorted { a, b in
             sortAscending ? (a.timestamp < b.timestamp) : (a.timestamp > b.timestamp)
         }
-        turns = sorted
+        // Apply visibility filter for timeline display
+        let kinds = viewModel.preferences.timelineVisibleKinds
+        turns = sorted.compactMap { filterTurn($0, visible: kinds) }
     }
 
     private func exportMarkdown() {
@@ -387,7 +394,8 @@ extension SessionDetailView {
         let panel = NSSavePanel()
         panel.title = "Export Markdown"
         panel.allowedContentTypes = [.plainText]
-        panel.nameFieldStringValue = summary.displayName + ".md"
+        let base = sanitizedExportFileName(summary.effectiveTitle, fallback: summary.displayName)
+        panel.nameFieldStringValue = base + ".md"
         if panel.runModal() == .OK, let url = panel.url {
             try? md.data(using: .utf8)?.write(to: url)
         }
@@ -402,12 +410,13 @@ extension SessionDetailView {
         if let model = summary.model { lines.append("- Model: \(model)") }
         if let approval = summary.approvalPolicy { lines.append("- Approval Policy: \(approval)") }
         lines.append("")
-        for turn in turns {
-            if let user = turn.userMessage {
+        // Use full timeline, filtered by markdown preferences (independent of UI search)
+        let kinds = viewModel.preferences.markdownVisibleKinds
+        let exportTurns = allTurns.compactMap { filterTurn($0, visible: kinds) }
+        for turn in exportTurns {
+            if let user = turn.userMessage { // already filtered
                 lines.append("**User** · \(user.timestamp)")
-                if let text = user.text, !text.isEmpty {
-                    lines.append(text)
-                }
+                if let text = user.text, !text.isEmpty { lines.append(text) }
             }
             for event in turn.outputs {
                 let prefix: String
@@ -422,18 +431,43 @@ extension SessionDetailView {
                 if let title = event.title { lines.append("> \(title)") }
                 if let text = event.text, !text.isEmpty { lines.append(text) }
                 if let meta = event.metadata, !meta.isEmpty {
-                    for key in meta.keys.sorted() {
-                        lines.append("- \(key): \(meta[key] ?? "")")
-                    }
+                    for key in meta.keys.sorted() { lines.append("- \(key): \(meta[key] ?? "")") }
                 }
-                if event.repeatCount > 1 {
-                    lines.append("- repeated: ×\(event.repeatCount)")
-                }
+                if event.repeatCount > 1 { lines.append("- repeated: ×\(event.repeatCount)") }
             }
             lines.append("")
         }
         return lines.joined(separator: "\n")
     }
+
+    // MARK: - Visibility filtering helpers
+    private func filterTurn(_ turn: ConversationTurn, visible: Set<MessageVisibilityKind>) -> ConversationTurn? {
+        let userAllowed = turn.userMessage.flatMap { visible.contains(event: $0) } ?? false
+        let keptOutputs = turn.outputs.filter { visible.contains(event: $0) }
+        if !userAllowed && keptOutputs.isEmpty { return nil }
+        return ConversationTurn(
+            id: turn.id,
+            timestamp: turn.timestamp,
+            userMessage: userAllowed ? turn.userMessage : nil,
+            outputs: keptOutputs
+        )
+    }
+}
+
+// MARK: - Helpers
+private func sanitizedExportFileName(_ s: String, fallback: String, maxLength: Int = 120) -> String {
+    var text = s.trimmingCharacters(in: .whitespacesAndNewlines)
+    if text.isEmpty { return fallback }
+    let disallowed = CharacterSet(charactersIn: "/:")
+        .union(.newlines)
+        .union(.controlCharacters)
+    text = text.unicodeScalars.map { disallowed.contains($0) ? Character(" ") : Character($0) }
+        .reduce(into: String(), { $0.append($1) })
+    while text.contains("  ") { text = text.replacingOccurrences(of: "  ", with: " ") }
+    text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    if text.isEmpty { text = fallback }
+    if text.count > maxLength { let idx = text.index(text.startIndex, offsetBy: maxLength); text = String(text[..<idx]) }
+    return text
 }
 
 #Preview {
