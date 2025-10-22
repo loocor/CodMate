@@ -1,4 +1,7 @@
 import SwiftUI
+#if os(macOS)
+import AppKit
+#endif
 
 struct SessionNavigationView: View {
     let totalCount: Int
@@ -107,14 +110,23 @@ struct SessionNavigationView: View {
             CalendarMonthView(
                 monthStart: monthStart,
                 counts: viewModel.calendarCounts(for: monthStart, dimension: dimension),
-                selectedDay: viewModel.selectedDay
+                selectedDays: viewModel.selectedDays
             ) { picked in
-                // Toggle behavior: clicking the same selected day clears the date filter
-                if let current = viewModel.selectedDay,
-                   Calendar.current.isDate(current, inSameDayAs: picked) {
-                    viewModel.setSelectedDay(nil)
+                // Cmd-click toggles selection; plain click selects single day / clears when same
+                #if os(macOS)
+                let useToggle = (NSApp.currentEvent?.modifierFlags.contains(.command) ?? false)
+                #else
+                let useToggle = false
+                #endif
+                if useToggle {
+                    viewModel.toggleSelectedDay(picked)
                 } else {
-                    viewModel.setSelectedDay(picked)
+                    if let current = viewModel.selectedDay,
+                       Calendar.current.isDate(current, inSameDayAs: picked) {
+                        viewModel.setSelectedDay(nil)
+                    } else {
+                        viewModel.setSelectedDay(picked)
+                    }
                 }
             }
         }
