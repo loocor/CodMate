@@ -207,6 +207,7 @@ struct SessionSummaryBuilder {
     private(set) var eventCount: Int = 0
     private(set) var lineCount: Int = 0
     private(set) var fileSizeBytes: UInt64?
+    private(set) var source: SessionSource = .codex
 
     var hasEssentialMetadata: Bool {
         id != nil && startedAt != nil && cliVersion != nil && cwd != nil
@@ -214,6 +215,10 @@ struct SessionSummaryBuilder {
 
     mutating func setFileSize(_ size: UInt64?) {
         fileSizeBytes = size
+    }
+
+    mutating func setSource(_ source: SessionSource) {
+        self.source = source
     }
 
     mutating func seedLastUpdated(_ date: Date) {
@@ -271,6 +276,12 @@ struct SessionSummaryBuilder {
         }
     }
 
+    mutating func setModelFallback(_ fallback: String) {
+        if model == nil || model?.isEmpty == true {
+            model = fallback
+        }
+    }
+
     func build(for url: URL) -> SessionSummary? {
         guard let id,
               let startedAt,
@@ -301,7 +312,15 @@ struct SessionSummaryBuilder {
             turnContextCount: turnContextCount,
             eventCount: eventCount,
             lineCount: lineCount,
-            lastUpdatedAt: lastUpdatedAt
+            lastUpdatedAt: lastUpdatedAt,
+            source: source
         )
+    }
+}
+
+extension SessionRow {
+    init(timestamp: Date, kind: SessionRow.Kind) {
+        self.timestamp = timestamp
+        self.kind = kind
     }
 }

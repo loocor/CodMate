@@ -1,5 +1,36 @@
 import SwiftUI
 
+struct SessionSourceBranding {
+    let displayName: String
+    let symbolName: String
+    let iconColor: Color
+    let badgeBackground: Color
+    let badgeAssetName: String?
+}
+
+extension SessionSource {
+    var branding: SessionSourceBranding {
+        switch self {
+        case .codex:
+            return SessionSourceBranding(
+                displayName: "Codex",
+                symbolName: "sparkles",
+                iconColor: Color.accentColor,
+                badgeBackground: Color.accentColor.opacity(0.08),
+                badgeAssetName: "ChatGPTIcon"
+            )
+        case .claude:
+            return SessionSourceBranding(
+                displayName: "Claude",
+                symbolName: "cloud.fill",
+                iconColor: Color.purple,
+                badgeBackground: Color.purple.opacity(0.10),
+                badgeAssetName: "ClaudeIcon"
+            )
+        }
+    }
+}
+
 struct SessionListRowView: View {
     let summary: SessionSummary
     var isRunning: Bool = false
@@ -10,15 +41,30 @@ struct SessionListRowView: View {
     var projectTip: String? = nil
 
     var body: some View {
+        let branding = summary.source.branding
         HStack(alignment: .top, spacing: 12) {
-            Circle()
-                .fill(isSelected ? Color.accentColor : Color.accentColor.opacity(0.12))
-                .frame(width: 28, height: 28)
-                .overlay(
-                    Image(systemName: "text.bubble")
-                        .font(.subheadline)
-                        .foregroundStyle(iconForeground)
-                )
+            let container = RoundedRectangle(cornerRadius: 9, style: .continuous)
+            ZStack {
+                container
+                    .fill(Color.white)
+                    .shadow(color: Color.black.opacity(0.08), radius: 1.5, x: 0, y: 1)
+                container
+                    .stroke(isSelected ? branding.iconColor.opacity(0.5) : Color.black.opacity(0.06), lineWidth: isSelected ? 1.5 : 1)
+
+                if let asset = branding.badgeAssetName {
+                    Image(asset)
+                        .resizable()
+                        .renderingMode(.original)
+                        .aspectRatio(contentMode: .fit)
+                        .padding(4)
+                } else {
+                    Image(systemName: branding.symbolName)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(branding.iconColor)
+                }
+            }
+            .frame(width: 32, height: 32)
+            .help("\(branding.displayName) session")
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(summary.effectiveTitle)
@@ -26,7 +72,7 @@ struct SessionListRowView: View {
                 HStack(spacing: 12) {
                     Text(summary.startedAt.formatted(date: .numeric, time: .shortened))
                     Text(summary.readableDuration)
-                    if let model = summary.model {
+                    if let model = summary.displayModel ?? summary.model {
                         Text(model)
                             .foregroundStyle(.secondary)
                     }
@@ -92,12 +138,6 @@ struct SessionListRowView: View {
     }
 }
 
-extension SessionListRowView {
-    fileprivate var iconForeground: some ShapeStyle {
-        isSelected ? AnyShapeStyle(Color.white) : AnyShapeStyle(Color.accentColor)
-    }
-}
-
 private func metric(icon: String, value: Int) -> some View {
     HStack(spacing: 4) {
         Image(systemName: icon)
@@ -127,7 +167,8 @@ private func metric(icon: String, value: Int) -> some View {
         turnContextCount: 8,
         eventCount: 12,
         lineCount: 156,
-        lastUpdatedAt: Date().addingTimeInterval(-1800)
+        lastUpdatedAt: Date().addingTimeInterval(-1800),
+        source: .codex
     )
 
     return SessionListRowView(summary: mockSummary)
@@ -156,7 +197,8 @@ private func metric(icon: String, value: Int) -> some View {
         turnContextCount: 3,
         eventCount: 3,
         lineCount: 45,
-        lastUpdatedAt: Date().addingTimeInterval(-6900)
+        lastUpdatedAt: Date().addingTimeInterval(-6900),
+        source: .codex
     )
 
     return SessionListRowView(summary: mockSummary)
@@ -186,7 +228,8 @@ private func metric(icon: String, value: Int) -> some View {
         turnContextCount: 2,
         eventCount: 2,
         lineCount: 20,
-        lastUpdatedAt: Date().addingTimeInterval(-10500)
+        lastUpdatedAt: Date().addingTimeInterval(-10500),
+        source: .codex
     )
 
     return SessionListRowView(summary: mockSummary)

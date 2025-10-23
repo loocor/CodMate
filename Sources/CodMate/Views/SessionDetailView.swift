@@ -71,7 +71,7 @@ struct SessionDetailView: View {
                     icon: "calendar")
                 infoRow(title: "DURATION", value: summary.readableDuration, icon: "clock")
 
-                if let model = summary.model {
+                if let model = summary.displayModel ?? summary.model {
                     infoRow(title: "MODEL", value: model, icon: "cpu")
                 }
                 if let approval = summary.approvalPolicy {
@@ -147,7 +147,13 @@ struct SessionDetailView: View {
                     }
                 }
                 .task(id: environmentExpanded) {
-                    guard environmentExpanded, environmentInfo == nil else { return }
+                    guard environmentExpanded else { return }
+                    guard summary.source == .codex else {
+                        environmentInfo = nil
+                        environmentLoading = false
+                        return
+                    }
+                    guard environmentInfo == nil else { return }
                     environmentLoading = true
                     defer { environmentLoading = false }
                     environmentInfo = try? loader.loadEnvironmentContext(url: summary.fileURL)
@@ -182,6 +188,11 @@ struct SessionDetailView: View {
                 }
                 .task(id: instructionsExpanded) {
                     guard instructionsExpanded else { return }
+                    guard summary.source == .codex else {
+                        instructionsText = nil
+                        instructionsLoading = false
+                        return
+                    }
                     if instructionsText == nil
                         && (summary.instructions == nil || summary.instructions?.isEmpty == true)
                     {
@@ -283,7 +294,8 @@ struct SessionDetailView: View {
                     ConversationTimelineView(
                         turns: turns,
                         expandedTurnIDs: $expandedTurnIDs,
-                        ascending: sortAscending
+                        ascending: sortAscending,
+                        branding: summary.source.branding
                     )
                 }
             }
@@ -348,20 +360,20 @@ extension SessionDetailView {
     private func reloadConversation(resetUI: Bool = false) async {
         loadingTimeline = true
         defer { loadingTimeline = false }
-        do {
-            let loaded = try loader.load(url: summary.fileURL)
-            allTurns = loaded
-            if resetUI {
-                expandedTurnIDs = []
-                environmentExpanded = false
-                environmentInfo = nil
-                environmentLoading = false
-            }
-            applyFilterAndSort()
-        } catch {
-            allTurns = []
-            turns = []
+        let loaded: [ConversationTurn]
+        if summary.source == .claude {
+            loaded = await viewModel.timeline(for: summary)
+        } else {
+            loaded = (try? loader.load(url: summary.fileURL)) ?? []
         }
+        allTurns = loaded
+        if resetUI {
+            expandedTurnIDs = []
+            environmentExpanded = false
+            environmentInfo = nil
+            environmentLoading = false
+        }
+        applyFilterAndSort()
     }
 
     @MainActor
@@ -407,7 +419,7 @@ extension SessionDetailView {
         lines.append("")
         lines.append("- Started: \(summary.startedAt)")
         if let end = summary.lastUpdatedAt { lines.append("- Last Updated: \(end)") }
-        if let model = summary.model { lines.append("- Model: \(model)") }
+        if let model = summary.displayModel ?? summary.model { lines.append("- Model: \(model)") }
         if let approval = summary.approvalPolicy { lines.append("- Approval Policy: \(approval)") }
         lines.append("")
         // Use full timeline, filtered by markdown preferences (independent of UI search)
@@ -418,10 +430,11 @@ extension SessionDetailView {
                 lines.append("**User** · \(user.timestamp)")
                 if let text = user.text, !text.isEmpty { lines.append(text) }
             }
+            let assistantLabel = summary.source.branding.displayName
             for event in turn.outputs {
                 let prefix: String
                 switch event.actor {
-                case .assistant: prefix = "**Codex**"
+                case .assistant: prefix = "**\(assistantLabel)**"
                 case .tool: prefix = "**Tool**"
                 case .info: prefix = "**Info**"
                 case .user: prefix = "**User**"
@@ -493,7 +506,8 @@ private func sanitizedExportFileName(_ s: String, fallback: String, maxLength: I
         turnContextCount: 8,
         eventCount: 12,
         lineCount: 156,
-        lastUpdatedAt: Date().addingTimeInterval(-1800)
+        lastUpdatedAt: Date().addingTimeInterval(-1800),
+        source: .codex
     )
 
     return SessionDetailView(
@@ -527,7 +541,8 @@ private func sanitizedExportFileName(_ s: String, fallback: String, maxLength: I
         turnContextCount: 5,
         eventCount: 6,
         lineCount: 89,
-        lastUpdatedAt: Date().addingTimeInterval(-300)
+        lastUpdatedAt: Date().addingTimeInterval(-300),
+        source: .codex
     )
 
     return SessionDetailView(

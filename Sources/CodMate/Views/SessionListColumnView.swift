@@ -87,12 +87,14 @@ struct SessionListColumnView: View {
                                 }
                                 .listRowInsets(EdgeInsets())
                                 .contextMenu {
-                                    Button { onResume(session) } label: {
-                                        Label("Resume", systemImage: "play.fill")
-                                    }
-                                    if let openEmbedded = onOpenEmbedded {
-                                        Button { openEmbedded(session) } label: {
-                                            Label("Open Embedded Terminal", systemImage: "rectangle.badge.plus")
+                                    if session.source == .codex {
+                                        Button { onResume(session) } label: {
+                                            Label("Resume", systemImage: "play.fill")
+                                        }
+                                        if let openEmbedded = onOpenEmbedded {
+                                            Button { openEmbedded(session) } label: {
+                                                Label("Open Embedded Terminal", systemImage: "rectangle.badge.plus")
+                                            }
                                         }
                                     }
                                     Divider()
@@ -452,7 +454,8 @@ extension TimeInterval {
                     turnContextCount: 5,
                     eventCount: 6,
                     lineCount: 89,
-                    lastUpdatedAt: Date().addingTimeInterval(-3600)
+                    lastUpdatedAt: Date().addingTimeInterval(-3600),
+                    source: .codex
                 ),
                 SessionSummary(
                     id: "session-2",
@@ -475,7 +478,8 @@ extension TimeInterval {
                     turnContextCount: 7,
                     eventCount: 9,
                     lineCount: 120,
-                    lastUpdatedAt: Date().addingTimeInterval(-9000)
+                    lastUpdatedAt: Date().addingTimeInterval(-9000),
+                    source: .codex
                 ),
             ]
         ),
@@ -506,7 +510,8 @@ extension TimeInterval {
                     turnContextCount: 11,
                     eventCount: 14,
                     lineCount: 200,
-                    lastUpdatedAt: Date().addingTimeInterval(-158400)
+                    lastUpdatedAt: Date().addingTimeInterval(-158400),
+                    source: .codex
                 )
             ]
         ),

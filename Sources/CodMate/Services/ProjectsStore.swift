@@ -15,6 +15,7 @@ struct ProjectMeta: Codable, Hashable, Sendable {
     var profileId: String?
     var profile: ProjectProfile?
     var parentId: String?
+    var sources: [ProjectSessionSource]?
     var createdAt: Date
     var updatedAt: Date
 
@@ -28,12 +29,25 @@ struct ProjectMeta: Codable, Hashable, Sendable {
         self.profileId = project.profileId
         self.profile = project.profile
         self.parentId = project.parentId
+        self.sources = Array(project.sources).sorted { $0.rawValue < $1.rawValue }
         self.createdAt = Date()
         self.updatedAt = Date()
     }
 
     func asProject() -> Project {
-        Project(id: id, name: name, directory: directory, trustLevel: trustLevel, overview: overview, instructions: instructions, profileId: profileId, profile: profile, parentId: parentId)
+        let sourceSet = Set(sources ?? ProjectSessionSource.allCases)
+        return Project(
+            id: id,
+            name: name,
+            directory: directory,
+            trustLevel: trustLevel,
+            overview: overview,
+            instructions: instructions,
+            profileId: profileId,
+            profile: profile,
+            parentId: parentId,
+            sources: sourceSet
+        )
     }
 }
 
@@ -101,6 +115,7 @@ actor ProjectsStore {
         meta.profileId = p.profileId
         meta.profile = p.profile
         meta.parentId = p.parentId
+        meta.sources = Array(p.sources).sorted { $0.rawValue < $1.rawValue }
         meta.updatedAt = Date()
         projects[p.id] = meta
         saveProjectMeta(meta)

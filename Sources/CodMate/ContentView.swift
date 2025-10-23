@@ -262,150 +262,141 @@ struct ContentView: View {
             Spacer()
 
             HStack(spacing: 8) {
-                if let focused = focusedSummary {
-                    Menu {
+                let focused = focusedSummary
+
+                Menu {
+                    if let focused {
                         Button {
                             showNewWithContext = true
                         } label: {
                             Label("New With Context…", systemImage: "text.append")
                         }
 
-                        // New in Terminal (copy + open at path)
-                        Button {
-                            let f = focused
-                            let dir =
-                                FileManager.default.fileExists(atPath: f.cwd)
-                                ? f.cwd : f.fileURL.deletingLastPathComponent().path
-                            viewModel.recordIntentForDetailNew(anchor: f)
-                            viewModel.copyNewSessionCommandsRespectingProject(session: f)
-                            _ = viewModel.openAppleTerminal(at: dir)
-                            Task {
-                                await SystemNotifier.shared.notify(
-                                    title: "CodMate",
-                                    body: "Command copied. Paste it in the opened terminal.")
+                        let providers = viewModel.allowedSources(for: focused)
+                        if !providers.isEmpty {
+                            Divider()
+                            ForEach(providers, id: \.self) { provider in
+                                let sessionSource = provider.sessionSource
+                                Menu {
+                                    Button {
+                                        launchNewSession(for: focused, using: sessionSource, style: .preferred)
+                                    } label: {
+                                        Label("Use Preferred Launch", systemImage: "gearshape")
+                                    }
+                                    Button {
+                                        launchNewSession(for: focused, using: sessionSource, style: .terminal)
+                                    } label: {
+                                        Label("Open in Terminal", systemImage: "terminal")
+                                    }
+                                    Button {
+                                        launchNewSession(for: focused, using: sessionSource, style: .iterm)
+                                    } label: {
+                                        Label("Open in iTerm2", systemImage: "app.fill")
+                                    }
+                                    Button {
+                                        launchNewSession(for: focused, using: sessionSource, style: .warp)
+                                    } label: {
+                                        Label("Open in Warp", systemImage: "app.gift.fill")
+                                    }
+                                    if viewModel.preferences.defaultResumeUseEmbeddedTerminal {
+                                        Button {
+                                            launchNewSession(for: focused, using: sessionSource, style: .embedded)
+                                        } label: {
+                                            Label("Open Embedded Terminal", systemImage: "rectangle.badge.plus")
+                                        }
+                                    }
+                                } label: {
+                                    providerMenuLabel(prefix: "New", source: sessionSource)
+                                }
                             }
-                        } label: {
-                            Label("New in Terminal", systemImage: "terminal")
                         }
-
-                        // New in iTerm2 (Direct)
-                        Button {
-                            let f = focused
-                            let dir =
-                                FileManager.default.fileExists(atPath: f.cwd)
-                                ? f.cwd : f.fileURL.deletingLastPathComponent().path
-                            viewModel.recordIntentForDetailNew(anchor: f)
-                            let cmd = viewModel.buildNewSessionCLIInvocationRespectingProject(session: f)
-                            viewModel.openPreferredTerminalViaScheme(
-                                app: .iterm2, directory: dir, command: cmd)
-                        } label: {
-                            Label("New in iTerm2 (Direct)", systemImage: "app.fill")
-                        }
-
-                        // New in Warp (Path)
-                        Button {
-                            let f = focused
-                            let dir =
-                                FileManager.default.fileExists(atPath: f.cwd)
-                                ? f.cwd : f.fileURL.deletingLastPathComponent().path
-                            viewModel.recordIntentForDetailNew(anchor: f)
-                            viewModel.copyNewSessionCommandsRespectingProject(session: f)
-                            viewModel.openPreferredTerminalViaScheme(app: .warp, directory: dir)
-                            Task {
-                                await SystemNotifier.shared.notify(
-                                    title: "CodMate",
-                                    body: "Command copied. Paste it in the opened terminal.")
-                            }
-                        } label: {
-                            Label("New in Warp (Path)", systemImage: "app.gift.fill")
-                        }
-                    } label: {
-                        Label("New", systemImage: "plus")
-                    } primaryAction: {
-                        if viewModel.preferences.defaultResumeUseEmbeddedTerminal {
-                            startEmbeddedNew(for: focused)
-                        } else {
-                            startNewSession(for: focused)
-                        }
+                    } else {
+                        Text("Select a session to start a new conversation")
                     }
-                    .disabled(isPerformingAction)
-                    .help("Start a new Codex session (use project profile when available)")
-                    .menuStyle(.borderedButton)
-                    .controlSize(.small)
+                } label: {
+                    if let focused {
+                        sourceButtonLabel(
+                            title: "New \(focused.source.branding.displayName)",
+                            source: focused.source
+                        )
+                    } else {
+                        Label("New", systemImage: "plus")
+                    }
+                } primaryAction: {
+                    if let focused {
+                        launchNewSession(for: focused, using: focused.source, style: .preferred)
+                    }
                 }
+                .disabled(isPerformingAction || focused == nil)
+                .help(
+                    focused.map { "Start a new \($0.source.branding.displayName) session" }
+                        ?? "Select a session to start new conversations"
+                )
+                .menuStyle(.borderedButton)
+                .controlSize(.small)
 
                 Menu {
-                    // 1) Terminal (copy + open at path)
-                    Button {
-                        if let f = focusedSummary {
-                            let dir =
-                                FileManager.default.fileExists(atPath: f.cwd)
-                                ? f.cwd : f.fileURL.deletingLastPathComponent().path
-                            viewModel.copyResumeCommandsRespectingProject(session: f)
-                            _ = viewModel.openAppleTerminal(at: dir)
+                    if let focused {
+                        Button {
+                            viewModel.copyResumeCommandsRespectingProject(session: focused)
+                            _ = viewModel.openAppleTerminal(at: workingDirectory(for: focused))
                             Task {
                                 await SystemNotifier.shared.notify(
                                     title: "CodMate",
                                     body: "Command copied. Paste it in the opened terminal.")
                             }
+                        } label: {
+                            Label("Open in Terminal", systemImage: "terminal")
                         }
-                    } label: {
-                        Label("Open in Terminal", systemImage: "terminal")
-                    }
 
-                    // 2) iTerm2 via scheme (direct)
-                    Button {
-                        if let f = focusedSummary {
-                            let dir =
-                                FileManager.default.fileExists(atPath: f.cwd)
-                                ? f.cwd : f.fileURL.deletingLastPathComponent().path
-                            let cmd = viewModel.buildResumeCLIInvocationRespectingProject(session: f)
+                        Button {
+                            let dir = workingDirectory(for: focused)
+                            let cmd = viewModel.buildResumeCLIInvocationRespectingProject(session: focused)
                             viewModel.openPreferredTerminalViaScheme(
                                 app: .iterm2, directory: dir, command: cmd)
+                        } label: {
+                        Label("Open in iTerm2", systemImage: "app.fill")
                         }
-                    } label: {
-                        Label("Open in iTerm2 (Direct)", systemImage: "app.fill")
-                    }
 
-                    // 3) Warp via path (copy + open tab)
-                    Button {
-                        if let f = focusedSummary {
-                            let dir =
-                                FileManager.default.fileExists(atPath: f.cwd)
-                                ? f.cwd : f.fileURL.deletingLastPathComponent().path
-                            viewModel.copyResumeCommandsRespectingProject(session: f)
-                            viewModel.openPreferredTerminalViaScheme(app: .warp, directory: dir)
+                        Button {
+                            viewModel.copyResumeCommandsRespectingProject(session: focused)
+                            viewModel.openPreferredTerminalViaScheme(
+                                app: .warp, directory: workingDirectory(for: focused))
                             Task {
                                 await SystemNotifier.shared.notify(
                                     title: "CodMate",
                                     body: "Command copied. Paste it in the opened terminal.")
                             }
-                        }
-                    } label: {
-                        Label("Open in Warp (Path)", systemImage: "app.gift.fill")
-                    }
-
-                    // Embedded terminal (respect preference)
-                    if viewModel.preferences.defaultResumeUseEmbeddedTerminal {
-                        Button {
-                            if let f = focusedSummary { startEmbedded(for: f) }
                         } label: {
-                            Label("Open Embedded Terminal", systemImage: "rectangle.badge.plus")
+                        Label("Open in Warp", systemImage: "app.gift.fill")
                         }
+
+                        if viewModel.preferences.defaultResumeUseEmbeddedTerminal {
+                            Button {
+                                startEmbedded(for: focused)
+                            } label: {
+                                Label("Open Embedded Terminal", systemImage: "rectangle.badge.plus")
+                            }
+                        }
+                    } else {
+                        Text("Select a session to resume")
                     }
                 } label: {
                     Label("Resume", systemImage: "play.fill")
                 } primaryAction: {
-                    if let f = focusedSummary {
+                    if let focused {
                         if viewModel.preferences.defaultResumeUseEmbeddedTerminal {
-                            startEmbedded(for: f)
+                            startEmbedded(for: focused)
                         } else {
-                            openPreferredExternal(for: f)
+                            openPreferredExternal(for: focused)
                         }
                     }
                 }
-                .disabled(isPerformingAction || focusedSummary == nil)
-                .help("Resume and more options")
+                .disabled(isPerformingAction || focused == nil)
+                .help(
+                    focused.map { "Resume \($0.source.branding.displayName) session" }
+                        ?? "Select a session to resume"
+                )
                 .menuStyle(.borderedButton)
                 .controlSize(.small)
 
@@ -559,38 +550,51 @@ struct ContentView: View {
         return "'" + path.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 
-    private func startEmbeddedNew(for session: SessionSummary) {
+    private func workingDirectory(for session: SessionSummary) -> String {
+        if FileManager.default.fileExists(atPath: session.cwd) {
+            return session.cwd
+        }
+        return session.fileURL.deletingLastPathComponent().path
+    }
+
+    private func startEmbeddedNew(for session: SessionSummary, using source: SessionSource? = nil) {
+        let target = source.map { session.overridingSource($0) } ?? session
         // Build the 'new session' commands (respecting project profile when present)
         let cwd =
-            FileManager.default.fileExists(atPath: session.cwd)
-            ? session.cwd : session.fileURL.deletingLastPathComponent().path
+            FileManager.default.fileExists(atPath: target.cwd)
+            ? target.cwd : target.fileURL.deletingLastPathComponent().path
         let cd = "cd " + shellEscapeForCD(cwd)
         let injectedPATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:${PATH}"
-        let exports =
-            "export LANG=zh_CN.UTF-8; export LC_ALL=zh_CN.UTF-8; export LC_CTYPE=zh_CN.UTF-8; export TERM=xterm-256color; export CODEX_DISABLE_COLOR_QUERY=1"
-        let invocation = viewModel.buildNewSessionCLIInvocationRespectingProject(session: session)
+        var exportLines = [
+            "export LANG=zh_CN.UTF-8",
+            "export LC_ALL=zh_CN.UTF-8",
+            "export LC_CTYPE=zh_CN.UTF-8",
+            "export TERM=xterm-256color",
+        ]
+        if target.source == .codex {
+            exportLines.append("export CODEX_DISABLE_COLOR_QUERY=1")
+        }
+        let exports = exportLines.joined(separator: "; ")
+        let invocation = viewModel.buildNewSessionCLIInvocationRespectingProject(session: target)
         let command = "PATH=\(injectedPATH) \(invocation)"
         // Enter alternate screen and clear for a truly clean view (cursor home);
         // avoids reflow artifacts and isolates scrollback while the new session runs.
         let preclear = "printf '\\033[?1049h\\033[H\\033[2J'"
 
-        embeddedInitialCommands[session.id] =
+        embeddedInitialCommands[target.id] =
             preclear + "\n" + cd + "\n" + exports + "\n" + command + "\n"
-        runningSessionIDs.insert(session.id)
+        runningSessionIDs.insert(target.id)
         // Record pending rekey so that when the new session appears, we can move this PTY to the real id
         pendingEmbeddedRekeys.append(
             PendingEmbeddedRekey(
-                anchorId: session.id, expectedCwd: canonicalizePath(cwd), t0: Date())
+                anchorId: target.id, expectedCwd: canonicalizePath(cwd), t0: Date())
         )
     }
 
     private func openPreferredExternal(for session: SessionSummary) {
         viewModel.copyResumeCommandsRespectingProject(session: session)
         let app = viewModel.preferences.defaultResumeExternalApp
-        let dir =
-            FileManager.default.fileExists(atPath: session.cwd)
-            ? session.cwd
-            : session.fileURL.deletingLastPathComponent().path
+        let dir = workingDirectory(for: session)
         switch app {
         case .iterm2:
             let cmd = viewModel.buildResumeCLIInvocationRespectingProject(session: session)
@@ -612,10 +616,7 @@ struct ContentView: View {
         // Record pending intent for auto-assign before launching
         viewModel.recordIntentForDetailNew(anchor: session)
         let app = viewModel.preferences.defaultResumeExternalApp
-        let dir =
-            FileManager.default.fileExists(atPath: session.cwd)
-            ? session.cwd
-            : session.fileURL.deletingLastPathComponent().path
+        let dir = workingDirectory(for: session)
         switch app {
         case .iterm2:
             let cmd = viewModel.buildNewSessionCLIInvocationRespectingProject(session: session)
@@ -634,9 +635,70 @@ struct ContentView: View {
         }
     }
 
-    private func startNewSession(for session: SessionSummary) {
-        viewModel.copyNewSessionCommandsRespectingProject(session: session)
-        openPreferredExternalForNew(session: session)
+    private func startNewSession(for session: SessionSummary, using source: SessionSource? = nil) {
+        let target = source.map { session.overridingSource($0) } ?? session
+        viewModel.copyNewSessionCommandsRespectingProject(session: target)
+        openPreferredExternalForNew(session: target)
+    }
+
+    private enum NewLaunchStyle {
+        case preferred
+        case terminal
+        case iterm
+        case warp
+        case embedded
+    }
+
+    private func launchNewSession(
+        for session: SessionSummary, using source: SessionSource, style: NewLaunchStyle
+    ) {
+        let target = source == session.source ? session : session.overridingSource(source)
+        switch style {
+        case .preferred:
+            if viewModel.preferences.defaultResumeUseEmbeddedTerminal {
+                viewModel.recordIntentForDetailNew(anchor: target)
+                startEmbeddedNew(for: target)
+            } else {
+                startNewSession(for: target)
+            }
+        case .terminal:
+            viewModel.recordIntentForDetailNew(anchor: target)
+            viewModel.copyNewSessionCommandsRespectingProject(session: target)
+            _ = viewModel.openAppleTerminal(at: workingDirectory(for: target))
+            Task {
+                await SystemNotifier.shared.notify(
+                    title: "CodMate",
+                    body: "Command copied. Paste it in the opened terminal.")
+            }
+        case .iterm:
+            viewModel.recordIntentForDetailNew(anchor: target)
+            let cmd = viewModel.buildNewSessionCLIInvocationRespectingProject(session: target)
+            viewModel.openPreferredTerminalViaScheme(
+                app: .iterm2, directory: workingDirectory(for: target), command: cmd)
+        case .warp:
+            viewModel.recordIntentForDetailNew(anchor: target)
+            viewModel.copyNewSessionCommandsRespectingProject(session: target)
+            viewModel.openPreferredTerminalViaScheme(
+                app: .warp, directory: workingDirectory(for: target))
+            Task {
+                await SystemNotifier.shared.notify(
+                    title: "CodMate",
+                    body: "Command copied. Paste it in the opened terminal.")
+            }
+        case .embedded:
+            viewModel.recordIntentForDetailNew(anchor: target)
+            startEmbeddedNew(for: target)
+        }
+    }
+
+    @ViewBuilder
+    private func sourceButtonLabel(title: String, source: SessionSource) -> some View {
+        Text(title)
+    }
+
+    @ViewBuilder
+    private func providerMenuLabel(prefix: String, source: SessionSource) -> some View {
+        Text("\(prefix) \(source.branding.displayName)")
     }
 
     private func toggleDetailMaximized() {
@@ -790,10 +852,11 @@ extension ContentView {
                 lines.append("**User** · \(user.timestamp)")
                 if let text = user.text, !text.isEmpty { lines.append(text) }
             }
+            let assistantLabel = session.source.branding.displayName
             for event in turn.outputs {
                 let prefix: String
                 switch event.actor {
-                case .assistant: prefix = "**Codex**"
+                case .assistant: prefix = "**\(assistantLabel)**"
                 case .tool: prefix = "**Tool**"
                 case .info: prefix = "**Info**"
                 case .user: prefix = "**User**"

@@ -34,6 +34,8 @@
 		311247A42EA3A51D00D8D33E /* ResumeOptions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 311247A32EA3A51D00D8D33E /* ResumeOptions.swift */; };
 		311247AA2EA3BBCE00D8D33E /* SessionNotesStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 311247A92EA3BBCE00D8D33E /* SessionNotesStore.swift */; };
 		311247AC2EA3BBED00D8D33E /* EditSessionMetaView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 311247AB2EA3BBED00D8D33E /* EditSessionMetaView.swift */; };
+		41A001302B40000100000002 /* ClaudeSessionParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41A001302B40000100000001 /* ClaudeSessionParser.swift */; };
+		41A001312B40000100000002 /* ClaudeSessionProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41A001312B40000100000001 /* ClaudeSessionProvider.swift */; };
 		318405A32EA337CE00409C33 /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = 318405A22EA337CE00409C33 /* SwiftTerm */; };
 		31B626702EA24A22008CA40F /* TerminalApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31B6266F2EA24A22008CA40F /* TerminalApp.swift */; };
 		31B626722EA24A9E008CA40F /* EmbeddedTerminalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31B626712EA24A9E008CA40F /* EmbeddedTerminalView.swift */; };
@@ -199,6 +201,8 @@
                 41A0010C2B00000900000001 /* CodexConfigService.swift */,
                 41A001162B20010E00000001 /* ProjectsStore.swift */,
                 41A0011E2B2002A000000003 /* ContextTreeshaker.swift */,
+                41A001302B40000100000001 /* ClaudeSessionParser.swift */,
+                41A001312B40000100000001 /* ClaudeSessionProvider.swift */,
             );
             name = Services;
             sourceTree = SOURCE_ROOT;
@@ -345,6 +349,8 @@
                 41A0011C2B20026000000003 /* SandboxApprovalEditor.swift in Sources */,
                 41A0011D2B2002A000000002 /* NewWithContextSheet.swift in Sources */,
                 41A0011F2B2002A000000004 /* ContextTreeshaker.swift in Sources */,
+                41A001302B40000100000002 /* ClaudeSessionParser.swift in Sources */,
+                41A001312B40000100000002 /* ClaudeSessionProvider.swift in Sources */,
                 41A001252B30050000000001 /* CodMateTerminalView.swift in Sources */,
             );
 			runOnlyForDeploymentPostprocessing = 0;
@@ -352,8 +358,10 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXFileReference section */
-        41A0010F2B00000A00000001 /* SessionsDiagnosticsService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SessionsDiagnosticsService.swift; path = Sources/CodMate/Services/SessionsDiagnosticsService.swift; sourceTree = SOURCE_ROOT; };
-        41A001232B30040000000001 /* THIRD-PARTY-NOTICES.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = THIRD-PARTY-NOTICES.md; sourceTree = SOURCE_ROOT; };
+		41A0010F2B00000A00000001 /* SessionsDiagnosticsService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SessionsDiagnosticsService.swift; path = Sources/CodMate/Services/SessionsDiagnosticsService.swift; sourceTree = SOURCE_ROOT; };
+		41A001302B40000100000001 /* ClaudeSessionParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ClaudeSessionParser.swift; path = Sources/CodMate/Services/ClaudeSessionParser.swift; sourceTree = SOURCE_ROOT; };
+		41A001312B40000100000001 /* ClaudeSessionProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ClaudeSessionProvider.swift; path = Sources/CodMate/Services/ClaudeSessionProvider.swift; sourceTree = SOURCE_ROOT; };
+		41A001232B30040000000001 /* THIRD-PARTY-NOTICES.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = THIRD-PARTY-NOTICES.md; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin XCBuildConfiguration section */

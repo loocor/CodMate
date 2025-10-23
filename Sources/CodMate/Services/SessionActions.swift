@@ -85,11 +85,14 @@ struct SessionActions {
         return "profiles.\(id)={ \(pairs.joined(separator: ", ")) }"
     }
 
-    func resolveExecutableURL(preferred: URL?) -> URL? {
+    func resolveExecutableURL(preferred: URL?, executableName: String = "codex") -> URL? {
         if let preferred, fileManager.isExecutableFile(atPath: preferred.path) { return preferred }
         // Try /opt/homebrew/bin, /usr/local/bin, PATH via /usr/bin/which
         let candidates = [
-            "/opt/homebrew/bin/codex", "/usr/local/bin/codex", "/usr/bin/codex", "/bin/codex",
+            "/opt/homebrew/bin/\(executableName)",
+            "/usr/local/bin/\(executableName)",
+            "/usr/bin/\(executableName)",
+            "/bin/\(executableName)",
         ]
         for path in candidates {
             if fileManager.isExecutableFile(atPath: path) { return URL(fileURLWithPath: path) }
@@ -97,7 +100,7 @@ struct SessionActions {
         // which codex
         let which = Process()
         which.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        which.arguments = ["which", "codex"]
+        which.arguments = ["which", executableName]
         let pipe = Pipe()
         which.standardOutput = pipe
         which.standardError = Pipe()
@@ -117,12 +120,20 @@ struct SessionActions {
     func resume(session: SessionSummary, executableURL: URL, options: ResumeOptions) async throws
         -> ProcessResult
     {
-        guard let exec = resolveExecutableURL(preferred: executableURL) else {
+        let exeName = session.source == .codex ? "codex" : "claude"
+        guard let exec = resolveExecutableURL(preferred: executableURL, executableName: exeName)
+        else {
             throw SessionActionError.executableNotFound(executableURL)
         }
         return try await withCheckedThrowingContinuation { continuation in
             // Run process work off the main actor without capturing self across concurrency boundaries
-            let args = buildResumeArguments(session: session, options: options)
+            let args: [String]
+            switch session.source {
+            case .codex:
+                args = buildResumeArguments(session: session, options: options)
+            case .claude:
+                args = ["--resume", session.id]
+            }
             let cwd: URL = {
                 if FileManager.default.fileExists(atPath: session.cwd) {
                     return URL(fileURLWithPath: session.cwd, isDirectory: true)
@@ -185,6 +196,19 @@ struct SessionActions {
         return s
     }
 
+    private func embeddedExportLines(for source: SessionSource) -> [String] {
+        var lines: [String] = [
+            "export LANG=zh_CN.UTF-8",
+            "export LC_ALL=zh_CN.UTF-8",
+            "export LC_CTYPE=zh_CN.UTF-8",
+            "export TERM=xterm-256color",
+        ]
+        if source == .codex {
+            lines.append("export CODEX_DISABLE_COLOR_QUERY=1")
+        }
+        return lines
+    }
+
     private func flags(from options: ResumeOptions) -> [String] {
         // Highest precedence: dangerously bypass
         if options.dangerouslyBypass { return ["--dangerously-bypass-approvals-and-sandbox"] }
@@ -201,8 +225,14 @@ struct SessionActions {
         session: SessionSummary, executablePath: String, options: ResumeOptions
     ) -> String {
         let exe = shellQuoteIfNeeded(executablePath)
-        // Resume should preserve original session semantics; do not override sandbox/approval/model via flags.
-        return "\(exe) resume \(session.id)"
+        switch session.source {
+        case .codex:
+            // Resume should preserve original session semantics; do not override flags.
+            return "\(exe) resume \(session.id)"
+        case .claude:
+            let args = ["--resume", session.id].map(shellQuoteIfNeeded)
+            return ([exe] + args).joined(separator: " ")
+        }
     }
 
     private func buildNewSessionArguments(session: SessionSummary, options: ResumeOptions)
@@ -217,22 +247,34 @@ struct SessionActions {
     func buildNewSessionCLIInvocation(
         session: SessionSummary, options: ResumeOptions, initialPrompt: String? = nil
     ) -> String {
-        // Launch a fresh Codex session by invoking `codex` directly
-        // (do not pass a literal "new" subcommand).
-        let exe = "codex"
-        var parts: [String] = [exe]
-        let args = buildNewSessionArguments(session: session, options: options).map {
-            arg -> String in
-            if arg.contains(where: { $0.isWhitespace || $0 == "'" }) {
-                return shellEscapedPath(arg)
+        switch session.source {
+        case .codex:
+            // Launch a fresh Codex session by invoking `codex` directly (no "new" subcommand).
+            let exe = "codex"
+            var parts: [String] = [exe]
+            let args = buildNewSessionArguments(session: session, options: options).map {
+                arg -> String in
+                if arg.contains(where: { $0.isWhitespace || $0 == "'" }) {
+                    return shellEscapedPath(arg)
+                }
+                return arg
             }
-            return arg
+            parts.append(contentsOf: args)
+            if let prompt = initialPrompt, !prompt.isEmpty {
+                parts.append(shellSingleQuoted(prompt))
+            }
+            return parts.joined(separator: " ")
+        case .claude:
+            var parts: [String] = ["claude"]
+            if let model = session.model, !model.trimmingCharacters(in: .whitespaces).isEmpty {
+                parts.append("--model")
+                parts.append(shellQuoteIfNeeded(model))
+            }
+            if let prompt = initialPrompt, !prompt.isEmpty {
+                parts.append(shellSingleQuoted(prompt))
+            }
+            return parts.joined(separator: " ")
         }
-        parts.append(contentsOf: args)
-        if let prompt = initialPrompt, !prompt.isEmpty {
-            parts.append(shellSingleQuoted(prompt))
-        }
-        return parts.joined(separator: " ")
     }
 
     func buildResumeArguments(session: SessionSummary, options: ResumeOptions) -> [String] {
@@ -248,11 +290,10 @@ struct SessionActions {
             ? session.cwd : session.fileURL.deletingLastPathComponent().path
         let cd = "cd " + shellEscapedPath(cwd)
         let injectedPATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:${PATH}"
-        // Use bare 'codex' for embedded terminal to respect user's PATH resolution
-        let execPath = "codex"
-        // Embedded terminal: keep environment exports for robustness
-        let exports =
-            "export LANG=zh_CN.UTF-8; export LC_ALL=zh_CN.UTF-8; export LC_CTYPE=zh_CN.UTF-8; export TERM=xterm-256color; export CODEX_DISABLE_COLOR_QUERY=1"
+        // Use bare executable name for embedded terminal to respect user's PATH resolution
+        let execPath = session.source == .codex ? "codex" : "claude"
+        // Embedded terminal: keep environment exports for robustness (source-specific)
+        let exports = embeddedExportLines(for: session.source).joined(separator: "; ")
         let invocation = buildResumeCLIInvocation(
             session: session, executablePath: execPath, options: options)
         let resume = "PATH=\(injectedPATH) \(invocation)"
@@ -268,8 +309,7 @@ struct SessionActions {
             ? session.cwd : session.fileURL.deletingLastPathComponent().path
         let cd = "cd " + shellEscapedPath(cwd)
         let injectedPATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:${PATH}"
-        let exports =
-            "export LANG=zh_CN.UTF-8; export LC_ALL=zh_CN.UTF-8; export LC_CTYPE=zh_CN.UTF-8; export TERM=xterm-256color; export CODEX_DISABLE_COLOR_QUERY=1"
+        let exports = embeddedExportLines(for: session.source).joined(separator: "; ")
         let invocation = buildNewSessionCLIInvocation(session: session, options: options)
         let command = "PATH=\(injectedPATH) \(invocation)"
         return cd + "\n" + exports + "\n" + command + "\n"
@@ -295,7 +335,9 @@ struct SessionActions {
             FileManager.default.fileExists(atPath: session.cwd)
             ? session.cwd : session.fileURL.deletingLastPathComponent().path
         let cd = "cd " + shellEscapedPath(cwd)
-        let execPath = resolveExecutableURL(preferred: executableURL)?.path ?? "codex"
+        let execName = session.source == .codex ? "codex" : "claude"
+        let execPath = resolveExecutableURL(preferred: executableURL, executableName: execName)?.path
+            ?? execName
         let resume = buildResumeCLIInvocation(
             session: session, executablePath: execPath, options: options)
         return cd + "\n" + resume + "\n"
@@ -608,9 +650,23 @@ struct SessionActions {
         session: SessionSummary, project: Project, options: ResumeOptions,
         initialPrompt: String? = nil
     ) -> String {
-        // Launch using project profile by invoking `codex` directly without a "new" subcommand.
-        let exe = "codex"
+        // Launch using project profile; choose executable based on session source.
+        let exe = session.source == .codex ? "codex" : "claude"
         var parts: [String] = [exe]
+
+        // For Claude, only include model if specified; profile settings don't apply.
+        if session.source == .claude {
+            if let model = session.model, !model.trimmingCharacters(in: .whitespaces).isEmpty {
+                parts.append("--model")
+                parts.append(shellQuoteIfNeeded(model))
+            }
+            if let prompt = initialPrompt, !prompt.isEmpty {
+                parts.append(shellSingleQuoted(prompt))
+            }
+            return parts.joined(separator: " ")
+        }
+
+        // For Codex, use full project profile arguments
         let args = buildNewSessionArguments(
             using: project, fallbackModel: session.model, options: options
         ).map { arg -> String in
@@ -743,9 +799,18 @@ struct SessionActions {
     func buildResumeUsingProjectProfileCLIInvocation(
         session: SessionSummary, project: Project, options: ResumeOptions
     ) -> String {
-        // Invoke `codex` directly and select profile (no flags)
-        let exe = "codex"
+        // Choose executable based on session source; select profile (no flags for Claude).
+        let exe = session.source == .codex ? "codex" : "claude"
         var parts: [String] = [exe]
+
+        // For Claude, profiles don't apply; use simple resume command.
+        if session.source == .claude {
+            parts.append("--resume")
+            parts.append(session.id)
+            return parts.joined(separator: " ")
+        }
+
+        // For Codex, include project profile arguments.
         let args = buildResumeArguments(
             using: project, fallbackModel: session.model, options: options
         ).map {
@@ -766,6 +831,15 @@ struct SessionActions {
     ) -> String {
         let exe = shellQuoteIfNeeded(executablePath)
         var parts: [String] = [exe]
+
+        // For Claude, profiles don't apply; use simple resume command.
+        if session.source == .claude {
+            parts.append("--resume")
+            parts.append(session.id)
+            return parts.joined(separator: " ")
+        }
+
+        // For Codex, include project profile arguments.
         let args = buildResumeArguments(
             using: project, fallbackModel: session.model, options: options
         ).map {
@@ -880,7 +954,9 @@ struct SessionActions {
     func copyRealResumeInvocation(
         session: SessionSummary, executableURL: URL, options: ResumeOptions
     ) {
-        let execPath = resolveExecutableURL(preferred: executableURL)?.path ?? executableURL.path
+        let execName = session.source == .codex ? "codex" : "claude"
+        let execPath = resolveExecutableURL(preferred: executableURL, executableName: execName)?.path
+            ?? executableURL.path
         let cmd = buildResumeCLIInvocation(
             session: session, executablePath: execPath, options: options)
         let pb = NSPasteboard.general

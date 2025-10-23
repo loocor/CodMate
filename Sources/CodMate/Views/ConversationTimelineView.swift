@@ -11,6 +11,7 @@ struct ConversationTimelineView: View {
     let turns: [ConversationTurn]
     @Binding var expandedTurnIDs: Set<String>
     var ascending: Bool = false
+    var branding: SessionSourceBranding = SessionSource.codex.branding
 
     var body: some View {
         LazyVStack(alignment: .leading, spacing: 20) {
@@ -22,6 +23,7 @@ struct ConversationTimelineView: View {
                     isFirst: index == turns.startIndex,
                     isLast: index == turns.count - 1,
                     isExpanded: expandedTurnIDs.contains(turn.id),
+                    branding: branding,
                     toggleExpanded: { toggle(turn) }
                 )
             }
@@ -43,6 +45,7 @@ private struct ConversationTurnRow: View {
     let isFirst: Bool
     let isLast: Bool
     let isExpanded: Bool
+    let branding: SessionSourceBranding
     let toggleExpanded: () -> Void
 
     var body: some View {
@@ -54,7 +57,12 @@ private struct ConversationTurnRow: View {
                 isLast: isLast
             )
 
-            ConversationCard(turn: turn, isExpanded: isExpanded, toggle: toggleExpanded)
+            ConversationCard(
+                turn: turn,
+                isExpanded: isExpanded,
+                branding: branding,
+                toggle: toggleExpanded
+            )
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
@@ -105,6 +113,7 @@ private struct TimelineMarker: View {
 private struct ConversationCard: View {
     let turn: ConversationTurn
     let isExpanded: Bool
+    let branding: SessionSourceBranding
     let toggle: () -> Void
 
     var body: some View {
@@ -140,7 +149,7 @@ private struct ConversationCard: View {
 
     private var header: some View {
         HStack {
-            Text(turn.actorSummary)
+            Text(turn.actorSummary(using: branding.displayName))
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.primary)
             Spacer()
@@ -171,20 +180,21 @@ private struct ConversationCard: View {
     @ViewBuilder
     private var expandedBody: some View {
         if let user = turn.userMessage {
-            EventSegmentView(event: user)
+            EventSegmentView(event: user, branding: branding)
         }
 
         ForEach(Array(turn.outputs.enumerated()), id: \.offset) { index, event in
             if index > 0 || turn.userMessage != nil {
                 Divider()
             }
-            EventSegmentView(event: event)
+            EventSegmentView(event: event, branding: branding)
         }
     }
 }
 
 private struct EventSegmentView: View {
     let event: TimelineEvent
+    let branding: SessionSourceBranding
     @State private var isHover = false
 
     var body: some View {
@@ -290,7 +300,7 @@ private struct EventSegmentView: View {
         }
         switch event.actor {
         case .user: return "User"
-        case .assistant: return "Codex"
+        case .assistant: return branding.displayName
         case .tool: return "Tool"
         case .info: return "Info"
         }
@@ -306,7 +316,7 @@ private struct EventSegmentView: View {
         }
         switch event.actor {
         case .user: return "person.fill"
-        case .assistant: return "sparkles"
+        case .assistant: return branding.symbolName
         case .tool: return "hammer.fill"
         case .info: return "info.circle"
         }
@@ -322,7 +332,7 @@ private struct EventSegmentView: View {
         }
         switch event.actor {
         case .user: return .accentColor
-        case .assistant: return .blue
+        case .assistant: return branding.iconColor
         case .tool: return .yellow
         case .info: return .gray
         }
@@ -390,7 +400,8 @@ private struct ConversationTimelinePreview: View {
     var body: some View {
         ConversationTimelineView(
             turns: [sampleTurn],
-            expandedTurnIDs: $expanded
+            expandedTurnIDs: $expanded,
+            branding: SessionSource.codex.branding
         )
         .padding()
         .frame(width: 540)
