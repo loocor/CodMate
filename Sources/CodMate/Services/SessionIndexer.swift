@@ -556,6 +556,7 @@ actor SessionIndexer {
             eventCount: base.eventCount,
             lineCount: base.lineCount,
             lastUpdatedAt: base.lastUpdatedAt,
+            source: base.source,
             userTitle: base.userTitle,
             userComment: base.userComment
         )

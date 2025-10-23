@@ -16,6 +16,10 @@ struct ConversationTurn: Identifiable, Hashable {
     }
 
     var actorSummary: String {
+        actorSummary(using: "Codex")
+    }
+
+    func actorSummary(using assistantName: String) -> String {
         var parts: [String] = []
         if userMessage != nil {
             parts.append("User")
@@ -23,11 +27,11 @@ struct ConversationTurn: Identifiable, Hashable {
         var seen: Set<TimelineActor> = []
         for event in outputs {
             if seen.insert(event.actor).inserted {
-                parts.append(event.actor.displayName)
+                parts.append(event.actor.displayName(assistantName: assistantName))
             }
         }
         if parts.isEmpty, let first = outputs.first {
-            parts.append(first.actor.displayName)
+            parts.append(first.actor.displayName(assistantName: assistantName))
         }
         return parts.joined(separator: " → ")
     }
@@ -54,10 +58,10 @@ struct ConversationTurn: Identifiable, Hashable {
 }
 
 private extension TimelineActor {
-    var displayName: String {
+    func displayName(assistantName: String = "Codex") -> String {
         switch self {
         case .user: return "User"
-        case .assistant: return "Codex"
+        case .assistant: return assistantName
         case .tool: return "Tool"
         case .info: return "Info"
         }

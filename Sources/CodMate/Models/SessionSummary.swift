@@ -24,6 +24,7 @@ struct SessionSummary: Identifiable, Hashable, Sendable, Codable {
     let eventCount: Int
     let lineCount: Int
     let lastUpdatedAt: Date?
+    let source: SessionSource
 
     // User-provided metadata (rename/comment)
     var userTitle: String? = nil
@@ -79,12 +80,27 @@ struct SessionSummary: Identifiable, Hashable, Sendable, Codable {
         return formatter.string(from: duration) ?? "—"
     }
 
+    var displayModel: String? {
+        guard let model else { return nil }
+        return source.friendlyModelName(for: model)
+    }
+
     var fileSizeDisplay: String {
-        guard let fileSizeBytes else { return "—" }
+        guard let bytes = resolvedFileSizeBytes else { return "—" }
         let formatter = ByteCountFormatter()
         formatter.allowedUnits = [.useKB, .useMB]
         formatter.countStyle = .file
-        return formatter.string(fromByteCount: Int64(fileSizeBytes))
+        return formatter.string(fromByteCount: Int64(bytes))
+    }
+
+    var resolvedFileSizeBytes: UInt64? {
+        if let fileSizeBytes { return fileSizeBytes }
+        if let attributes = try? FileManager.default.attributesOfItem(atPath: fileURL.path),
+           let number = attributes[.size] as? NSNumber
+        {
+            return number.uint64Value
+        }
+        return nil
     }
 
     func matches(search term: String) -> Bool {
@@ -104,6 +120,37 @@ struct SessionSummary: Identifiable, Hashable, Sendable, Codable {
 
         let needle = term.lowercased()
         return haystack.contains { $0.contains(needle) }
+    }
+}
+
+extension SessionSummary {
+    func overridingSource(_ newSource: SessionSource) -> SessionSummary {
+        if newSource == source { return self }
+        return SessionSummary(
+            id: id,
+            fileURL: fileURL,
+            fileSizeBytes: fileSizeBytes,
+            startedAt: startedAt,
+            endedAt: endedAt,
+            activeDuration: activeDuration,
+            cliVersion: cliVersion,
+            cwd: cwd,
+            originator: originator,
+            instructions: instructions,
+            model: model,
+            approvalPolicy: approvalPolicy,
+            userMessageCount: userMessageCount,
+            assistantMessageCount: assistantMessageCount,
+            toolInvocationCount: toolInvocationCount,
+            responseCounts: responseCounts,
+            turnContextCount: turnContextCount,
+            eventCount: eventCount,
+            lineCount: lineCount,
+            lastUpdatedAt: lastUpdatedAt,
+            source: newSource,
+            userTitle: userTitle,
+            userComment: userComment
+        )
     }
 }
 
@@ -166,4 +213,9 @@ struct SessionDaySection: Identifiable, Hashable {
     let totalDuration: TimeInterval
     let totalEvents: Int
     let sessions: [SessionSummary]
+}
+
+enum SessionSource: String, Codable, Sendable {
+    case codex
+    case claude
 }

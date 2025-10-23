@@ -208,6 +208,7 @@ struct ProjectEditorSheet: View {
     @State private var profilePathPrependText: String = ""
     @State private var profileEnvText: String = ""
     @State private var parentProjectId: String? = nil
+    @State private var sources: Set<ProjectSessionSource> = ProjectSessionSource.allSet
 
     private struct Snapshot: Equatable {
         var name: String
@@ -223,6 +224,7 @@ struct ProjectEditorSheet: View {
         var profilePathPrependText: String
         var profileEnvText: String
         var parentProjectId: String?
+        var sources: Set<ProjectSessionSource>
     }
 
     // Unified layout constants for aligned labels/fields across tabs
@@ -281,6 +283,18 @@ struct ProjectEditorSheet: View {
                                 .labelsHidden()
                                 .pickerStyle(.segmented)
                                 .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            GridRow {
+                                Text("Sources")
+                                    .font(.subheadline)
+                                    .frame(width: labelColWidth, alignment: .trailing)
+                                HStack(spacing: 16) {
+                                    ForEach(ProjectSessionSource.allCases) { source in
+                                        Toggle(source.displayName, isOn: binding(for: source))
+                                            .toggleStyle(.checkbox)
+                                    }
+                                }
+                                .frame(width: fieldColWidth, alignment: .leading)
                             }
                             GridRow(alignment: .top) {
                                 Text("Overview")
@@ -447,6 +461,8 @@ struct ProjectEditorSheet: View {
             overview = p.overview ?? ""
             instructions = p.instructions ?? ""
             profileId = p.profileId ?? ""
+            let initialSources = p.sources.isEmpty ? ProjectSessionSource.allSet : p.sources
+            sources = initialSources
             if let pr = p.profile {
                 profileModel = pr.model
                 profileSandbox = pr.sandbox
@@ -463,6 +479,7 @@ struct ProjectEditorSheet: View {
                 }
             }
         case .new:
+            sources = ProjectSessionSource.allSet
             if let pf = prefill {
                 if let v = pf.name { name = v }
                 if let v = pf.directory { directory = v }
@@ -518,13 +535,25 @@ struct ProjectEditorSheet: View {
             let d = directory.trimmingCharacters(in: .whitespacesAndNewlines)
             return d.isEmpty ? nil : directory
         }()
+        let finalSources = sources.isEmpty ? ProjectSessionSource.allSet : sources
 
         switch mode {
         case .new:
             let id = generateId()
             let projProfile = buildProjectProfile()
             let finalProfileId = profile ?? id
-            let p = Project(id: id, name: (name.isEmpty ? id : name), directory: dirOpt, trustLevel: trust, overview: ov, instructions: instr, profileId: finalProfileId, profile: projProfile, parentId: parentProjectId)
+            let p = Project(
+                id: id,
+                name: (name.isEmpty ? id : name),
+                directory: dirOpt,
+                trustLevel: trust,
+                overview: ov,
+                instructions: instr,
+                profileId: finalProfileId,
+                profile: projProfile,
+                parentId: parentProjectId,
+                sources: finalSources
+            )
             Task {
                 await viewModel.createOrUpdateProject(p)
                 if let ids = autoAssignSessionIDs, !ids.isEmpty {
@@ -535,7 +564,18 @@ struct ProjectEditorSheet: View {
         case .edit(let old):
             let projProfile = buildProjectProfile()
             let finalProfileId = profile ?? old.id
-            let p = Project(id: old.id, name: name, directory: dirOpt, trustLevel: trust, overview: ov, instructions: instr, profileId: finalProfileId, profile: projProfile, parentId: parentProjectId)
+            let p = Project(
+                id: old.id,
+                name: name,
+                directory: dirOpt,
+                trustLevel: trust,
+                overview: ov,
+                instructions: instr,
+                profileId: finalProfileId,
+                profile: projProfile,
+                parentId: parentProjectId,
+                sources: finalSources
+            )
             Task { await viewModel.createOrUpdateProject(p); isPresented = false }
         }
     }
@@ -545,6 +585,20 @@ struct ProjectEditorSheet: View {
         Binding<String>(
             get: { trustLevelSegment },
             set: { newValue in trustLevel = (newValue == "untrusted") ? "untrusted" : "trusted" }
+        )
+    }
+
+    private func binding(for source: ProjectSessionSource) -> Binding<Bool> {
+        Binding<Bool>(
+            get: { sources.contains(source) },
+            set: { newValue in
+                if newValue {
+                    sources.insert(source)
+                } else {
+                    if sources.count == 1 && sources.contains(source) { return }
+                    sources.remove(source)
+                }
+            }
         )
     }
 
@@ -607,7 +661,8 @@ struct ProjectEditorSheet: View {
             profileDangerBypass: profileDangerBypass,
             profilePathPrependText: profilePathPrependText,
             profileEnvText: profileEnvText,
-            parentProjectId: parentProjectId
+            parentProjectId: parentProjectId,
+            sources: sources
         )
     }
 

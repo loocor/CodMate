@@ -17,6 +17,11 @@ struct SessionTimelineLoader {
         return group(events: events)
     }
 
+    func turns(from rows: [SessionRow]) -> [ConversationTurn] {
+        let events = rows.compactMap { makeEvent(from: $0) }
+        return group(events: events)
+    }
+
     private func decodeEvents(url: URL) throws -> [TimelineEvent] {
         let data = try Data(contentsOf: url, options: [.mappedIfSafe])
         guard !data.isEmpty else { return [] }

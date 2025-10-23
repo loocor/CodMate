@@ -103,6 +103,7 @@ final class SessionListViewModel: ObservableObject {
     // Projects
     private let configService = CodexConfigService()
     private let projectsStore = ProjectsStore()
+    private let claudeProvider = ClaudeSessionProvider()
     @Published private(set) var projects: [Project] = []
     private var projectCounts: [String: Int] = [:]
     private var projectMemberships: [String: String] = [:]
@@ -171,8 +172,29 @@ final class SessionListViewModel: ObservableObject {
 
         do {
             let scope = currentScope()
-            var sessions = try await indexer.refreshSessions(
+            async let codexTask = indexer.refreshSessions(
                 root: preferences.sessionsRoot, scope: scope)
+            async let claudeTask = claudeProvider.sessions(scope: scope)
+
+            var sessions = try await codexTask
+            let claudeSessions = await claudeTask
+            if !claudeSessions.isEmpty {
+                let existingIDs = Set(sessions.map(\.id))
+                let filteredClaude = claudeSessions.filter { !existingIDs.contains($0.id) }
+                sessions.append(contentsOf: filteredClaude)
+            }
+            if !sessions.isEmpty {
+                var seen: Set<String> = []
+                var unique: [SessionSummary] = []
+                unique.reserveCapacity(sessions.count)
+                for summary in sessions {
+                    if seen.insert(summary.id).inserted {
+                        unique.append(summary)
+                    }
+                }
+                sessions = unique
+            }
+
             guard token == activeRefreshToken else { return }
             let previousIDs = Set(allSessions.map { $0.id })
             let notes = await notesStore.all()
@@ -190,6 +212,7 @@ final class SessionListViewModel: ObservableObject {
             }
             registerActivityHeartbeat(previous: allSessions, current: sessions)
             allSessions = sessions
+            recomputeProjectCounts()
             rebuildCanonicalCwdCache()
             invalidateCalendarCaches()
             await computeCalendarCaches()
@@ -200,7 +223,13 @@ final class SessionListViewModel: ObservableObject {
             Task { await self.refreshGlobalCount() }
             // Refresh path tree to ensure newly created files appear via refresh
             Task {
-                let counts = await indexer.collectCWDCounts(root: preferences.sessionsRoot)
+                async let codex = indexer.collectCWDCounts(root: preferences.sessionsRoot)
+                async let claude = claudeProvider.collectCWDCounts()
+                var counts = await codex
+                let claudeCounts = await claude
+                for (key, value) in claudeCounts {
+                    counts[key, default: 0] += value
+                }
                 let tree = counts.buildPathTreeFromCounts()
                 await MainActor.run { self.pathTreeRootPublished = tree }
             }
@@ -276,7 +305,7 @@ final class SessionListViewModel: ObservableObject {
         do {
             let result = try await actions.resume(
                 session: session,
-                executableURL: preferences.codexExecutableURL,
+                executableURL: preferredExecutableURL(for: session.source),
                 options: preferences.resumeOptions)
             return .success(result)
         } catch {
@@ -284,10 +313,17 @@ final class SessionListViewModel: ObservableObject {
         }
     }
 
+    private func preferredExecutableURL(for source: SessionSource) -> URL {
+        switch source {
+        case .codex: return preferences.codexExecutableURL
+        case .claude: return preferences.claudeExecutableURL
+        }
+    }
+
     func copyResumeCommands(session: SessionSummary) {
         actions.copyResumeCommands(
             session: session,
-            executableURL: preferences.codexExecutableURL,
+            executableURL: preferredExecutableURL(for: session.source),
             options: preferences.resumeOptions,
             simplifiedForExternal: true
         )
@@ -295,46 +331,60 @@ final class SessionListViewModel: ObservableObject {
 
     // Profile-aware variants (respect current session's project profile when available)
     func copyResumeCommandsRespectingProject(session: SessionSummary) {
+        if session.source != .codex {
+            actions.copyResumeCommands(
+                session: session,
+                executableURL: preferredExecutableURL(for: session.source),
+                options: preferences.resumeOptions,
+                simplifiedForExternal: true
+            )
+            return
+        }
         if let pid = projectIdForSession(session.id),
             let p = projects.first(where: { $0.id == pid }),
             p.profile != nil || (p.profileId?.isEmpty == false)
         {
             actions.copyResumeUsingProjectProfileCommands(
-                session: session, project: p, executableURL: preferences.codexExecutableURL,
+                session: session, project: p,
+                executableURL: preferredExecutableURL(for: .codex),
                 options: preferences.resumeOptions)
         } else {
             actions.copyResumeCommands(
-                session: session, executableURL: preferences.codexExecutableURL,
+                session: session,
+                executableURL: preferredExecutableURL(for: .codex),
                 options: preferences.resumeOptions, simplifiedForExternal: true)
         }
     }
 
     func openInTerminal(session: SessionSummary) -> Bool {
         actions.openInTerminal(
-            session: session, executableURL: preferences.codexExecutableURL,
+            session: session,
+            executableURL: preferredExecutableURL(for: session.source),
             options: preferences.resumeOptions)
     }
 
     func buildResumeCommands(session: SessionSummary) -> String {
-        actions.buildResumeCommandLines(
+        return actions.buildResumeCommandLines(
             session: session,
-            executableURL: preferences.codexExecutableURL,
+            executableURL: preferredExecutableURL(for: session.source),
             options: preferences.resumeOptions
         )
     }
 
     func buildExternalResumeCommands(session: SessionSummary) -> String {
-        actions.buildExternalResumeCommands(
+        return actions.buildExternalResumeCommands(
             session: session,
-            executableURL: preferences.codexExecutableURL,
+            executableURL: preferredExecutableURL(for: session.source),
             options: preferences.resumeOptions
         )
     }
 
     func buildResumeCLIInvocation(session: SessionSummary) -> String {
         let execPath =
-            actions.resolveExecutableURL(preferred: preferences.codexExecutableURL)?.path
-            ?? preferences.codexExecutableURL.path
+            actions.resolveExecutableURL(
+                preferred: preferredExecutableURL(for: session.source),
+                executableName: session.source == .codex ? "codex" : "claude")?.path
+            ?? preferredExecutableURL(for: session.source).path
         return actions.buildResumeCLIInvocation(
             session: session,
             executablePath: execPath,
@@ -343,20 +393,24 @@ final class SessionListViewModel: ObservableObject {
     }
 
     func buildResumeCLIInvocationRespectingProject(session: SessionSummary) -> String {
-        if let pid = projectIdForSession(session.id),
+        if session.source == .codex,
+            let pid = projectIdForSession(session.id),
             let p = projects.first(where: { $0.id == pid }),
             p.profile != nil || (p.profileId?.isEmpty == false)
         {
             let execPath =
-                actions.resolveExecutableURL(preferred: preferences.codexExecutableURL)?.path
-                ?? preferences.codexExecutableURL.path
+                actions.resolveExecutableURL(
+                    preferred: preferredExecutableURL(for: .codex), executableName: "codex")?.path
+                ?? preferredExecutableURL(for: .codex).path
             return actions.buildResumeUsingProjectProfileCLIInvocation(
                 session: session, project: p, executablePath: execPath,
                 options: preferences.resumeOptions)
         }
         let execPath =
-            actions.resolveExecutableURL(preferred: preferences.codexExecutableURL)?.path
-            ?? preferences.codexExecutableURL.path
+            actions.resolveExecutableURL(
+                preferred: preferredExecutableURL(for: session.source),
+                executableName: session.source == .codex ? "codex" : "claude")?.path
+            ?? preferredExecutableURL(for: session.source).path
         return actions.buildResumeCLIInvocation(
             session: session, executablePath: execPath, options: preferences.resumeOptions)
     }
@@ -364,13 +418,13 @@ final class SessionListViewModel: ObservableObject {
     func copyNewSessionCommands(session: SessionSummary) {
         actions.copyNewSessionCommands(
             session: session,
-            executableURL: preferences.codexExecutableURL,
+            executableURL: preferredExecutableURL(for: session.source),
             options: preferences.resumeOptions
         )
     }
 
     func buildNewSessionCLIInvocation(session: SessionSummary) -> String {
-        actions.buildNewSessionCLIInvocation(
+        return actions.buildNewSessionCLIInvocation(
             session: session,
             options: preferences.resumeOptions
         )
@@ -379,7 +433,7 @@ final class SessionListViewModel: ObservableObject {
     func openNewSession(session: SessionSummary) {
         _ = actions.openNewSession(
             session: session,
-            executableURL: preferences.codexExecutableURL,
+            executableURL: preferredExecutableURL(for: session.source),
             options: preferences.resumeOptions
         )
     }
@@ -425,7 +479,8 @@ final class SessionListViewModel: ObservableObject {
 
     // MARK: - New (detail) respecting Project Profile
     func buildNewSessionCLIInvocationRespectingProject(session: SessionSummary) -> String {
-        if let pid = projectIdForSession(session.id),
+        if session.source == .codex,
+            let pid = projectIdForSession(session.id),
             let p = projects.first(where: { $0.id == pid }),
             p.profile != nil || (p.profileId?.isEmpty == false)
         {
@@ -439,7 +494,8 @@ final class SessionListViewModel: ObservableObject {
     func buildNewSessionCLIInvocationRespectingProject(
         session: SessionSummary, initialPrompt: String
     ) -> String {
-        if let pid = projectIdForSession(session.id),
+        if session.source == .codex,
+            let pid = projectIdForSession(session.id),
             let p = projects.first(where: { $0.id == pid }),
             p.profile != nil || (p.profileId?.isEmpty == false)
         {
@@ -452,27 +508,30 @@ final class SessionListViewModel: ObservableObject {
     }
 
     func copyNewSessionCommandsRespectingProject(session: SessionSummary) {
-        if let pid = projectIdForSession(session.id),
+        if session.source == .codex,
+            let pid = projectIdForSession(session.id),
             let p = projects.first(where: { $0.id == pid }),
             p.profile != nil || (p.profileId?.isEmpty == false)
         {
             actions.copyNewSessionUsingProjectProfileCommands(
-                session: session, project: p, executableURL: preferences.codexExecutableURL,
+                session: session, project: p, executableURL: preferredExecutableURL(for: session.source),
                 options: preferences.resumeOptions)
         } else {
             actions.copyNewSessionCommands(
-                session: session, executableURL: preferences.codexExecutableURL,
+                session: session,
+                executableURL: preferredExecutableURL(for: session.source),
                 options: preferences.resumeOptions)
         }
     }
 
     func copyNewSessionCommandsRespectingProject(session: SessionSummary, initialPrompt: String) {
-        if let pid = projectIdForSession(session.id),
+        if session.source == .codex,
+            let pid = projectIdForSession(session.id),
             let p = projects.first(where: { $0.id == pid }),
             p.profile != nil || (p.profileId?.isEmpty == false)
         {
             actions.copyNewSessionUsingProjectProfileCommands(
-                session: session, project: p, executableURL: preferences.codexExecutableURL,
+                session: session, project: p, executableURL: preferredExecutableURL(for: session.source),
                 options: preferences.resumeOptions, initialPrompt: initialPrompt)
         } else {
             let cmd = actions.buildNewSessionCLIInvocation(
@@ -484,32 +543,36 @@ final class SessionListViewModel: ObservableObject {
     }
 
     func openNewSessionRespectingProject(session: SessionSummary) {
-        if let pid = projectIdForSession(session.id),
+        if session.source == .codex,
+            let pid = projectIdForSession(session.id),
             let p = projects.first(where: { $0.id == pid }),
             p.profile != nil || (p.profileId?.isEmpty == false)
         {
             _ = actions.openNewSessionUsingProjectProfile(
-                session: session, project: p, executableURL: preferences.codexExecutableURL,
+                session: session, project: p, executableURL: preferredExecutableURL(for: session.source),
                 options: preferences.resumeOptions)
         } else {
             _ = actions.openNewSession(
-                session: session, executableURL: preferences.codexExecutableURL,
+                session: session,
+                executableURL: preferredExecutableURL(for: session.source),
                 options: preferences.resumeOptions)
         }
     }
 
     func openNewSessionRespectingProject(session: SessionSummary, initialPrompt: String) {
-        if let pid = projectIdForSession(session.id),
+        if session.source == .codex,
+            let pid = projectIdForSession(session.id),
             let p = projects.first(where: { $0.id == pid }),
             p.profile != nil || (p.profileId?.isEmpty == false)
         {
             _ = actions.openNewSessionUsingProjectProfile(
-                session: session, project: p, executableURL: preferences.codexExecutableURL,
+                session: session, project: p, executableURL: preferredExecutableURL(for: session.source),
                 options: preferences.resumeOptions, initialPrompt: initialPrompt)
         } else {
             // Terminal-only variant is not implemented for non-project case; open generic new then user pastes.
             _ = actions.openNewSession(
-                session: session, executableURL: preferences.codexExecutableURL,
+                session: session,
+                executableURL: preferredExecutableURL(for: session.source),
                 options: preferences.resumeOptions)
         }
     }
@@ -523,10 +586,20 @@ final class SessionListViewModel: ObservableObject {
         await projectsStore.getProject(id: id)
     }
 
+    func allowedSources(for session: SessionSummary) -> [ProjectSessionSource] {
+        if let pid = projectIdForSession(session.id),
+            let p = projects.first(where: { $0.id == pid })
+        {
+            let allowed = p.sources.isEmpty ? ProjectSessionSource.allSet : p.sources
+            return Array(allowed).sorted { $0.displayName < $1.displayName }
+        }
+        return ProjectSessionSource.allCases
+    }
+
     func copyRealResumeCommand(session: SessionSummary) {
         actions.copyRealResumeInvocation(
             session: session,
-            executableURL: preferences.codexExecutableURL,
+            executableURL: preferredExecutableURL(for: session.source),
             options: preferences.resumeOptions
         )
     }
@@ -659,7 +732,13 @@ final class SessionListViewModel: ObservableObject {
     func ensurePathTree() {
         if pathTreeRootPublished != nil { return }
         Task {
-            let counts = await indexer.collectCWDCounts(root: preferences.sessionsRoot)
+            async let codex = indexer.collectCWDCounts(root: preferences.sessionsRoot)
+            async let claude = claudeProvider.collectCWDCounts()
+            var counts = await codex
+            let claudeCounts = await claude
+            for (key, value) in claudeCounts {
+                counts[key, default: 0] += value
+            }
             let tree = counts.buildPathTreeFromCounts()
             await MainActor.run { self.pathTreeRootPublished = tree }
         }
@@ -759,9 +838,14 @@ final class SessionListViewModel: ObservableObject {
             let memberships = projectMemberships
             // include descendants of selected project
             let descendants = Set(self.collectDescendants(of: pid, in: self.projects))
+            let allowedSourcesByProject = projects.reduce(into: [String: Set<ProjectSessionSource>]()) {
+                $0[$1.id] = $1.sources
+            }
             filtered = filtered.filter { summary in
                 guard let assigned = memberships[summary.id] else { return false }
-                return assigned == pid || descendants.contains(assigned)
+                guard assigned == pid || descendants.contains(assigned) else { return false }
+                let allowed = allowedSourcesByProject[assigned] ?? ProjectSessionSource.allSet
+                return allowed.contains(summary.source.projectSource)
             }
         }
 
@@ -924,15 +1008,20 @@ final class SessionListViewModel: ObservableObject {
 
                 func addNext(_ n: Int) {
                     for _ in 0..<n {
-                        guard let s = iterator.next() else { return }
-                        group.addTask { [weak self] in
-                            guard let self else { return nil }
-                            if let enriched = try await self.indexer.enrich(url: s.fileURL) {
-                                return (s.id, enriched)
-                            }
-                            return nil
-                        }
+            guard let s = iterator.next() else { return }
+            group.addTask { [weak self] in
+                guard let self else { return nil }
+                if s.source == .claude {
+                    if let enriched = await self.claudeProvider.enrich(summary: s) {
+                        return (s.id, enriched)
                     }
+                    return (s.id, s)
+                } else if let enriched = try await self.indexer.enrich(url: s.fileURL) {
+                    return (s.id, enriched)
+                }
+                return (s.id, s)
+            }
+        }
                 }
                 addNext(concurrency)
                 var updatesBuffer: [(String, SessionSummary)] = []
@@ -1187,8 +1276,34 @@ extension SessionListViewModel {
     }
 
     func refreshGlobalCount() async {
-        let count = await indexer.countAllSessions(root: preferences.sessionsRoot)
-        await MainActor.run { self.globalSessionCount = count }
+        async let codex = indexer.countAllSessions(root: preferences.sessionsRoot)
+        async let claude = claudeProvider.countAllSessions()
+        let total = await codex + claude
+        await MainActor.run { self.globalSessionCount = total }
+    }
+
+    @MainActor
+    private func recomputeProjectCounts() {
+        var counts: [String: Int] = [:]
+        let allowed = projects.reduce(into: [String: Set<ProjectSessionSource>]()) {
+            $0[$1.id] = $1.sources
+        }
+        for session in allSessions {
+            guard let pid = projectMemberships[session.id] else { continue }
+            let allowedSources = allowed[pid] ?? ProjectSessionSource.allSet
+            if allowedSources.contains(session.source.projectSource) {
+                counts[pid, default: 0] += 1
+            }
+        }
+        projectCounts = counts
+    }
+
+    func timeline(for summary: SessionSummary) async -> [ConversationTurn] {
+        if summary.source == .claude {
+            return await claudeProvider.timeline(for: summary) ?? []
+        }
+        let loader = SessionTimelineLoader()
+        return (try? loader.load(url: summary.fileURL)) ?? []
     }
 
     // Invalidate all cached monthly counts; next access will recompute
@@ -1213,6 +1328,8 @@ extension SessionListViewModel {
             self.projects = list
             self.projectCounts = counts
             self.projectMemberships = memberships
+            self.recomputeProjectCounts()
+            self.applyFilters()
         }
     }
 
@@ -1227,6 +1344,7 @@ extension SessionListViewModel {
         await MainActor.run {
             self.projectCounts = counts
             self.projectMemberships = memberships
+            self.recomputeProjectCounts()
         }
         applyFilters()
     }
@@ -1238,6 +1356,9 @@ extension SessionListViewModel {
     func visibleProjectCountsForDateScope() -> [String: Int] {
         var visible: [String: Int] = [:]
         let cal = Calendar.current
+        let allowed = projects.reduce(into: [String: Set<ProjectSessionSource>]()) {
+            $0[$1.id] = $1.sources
+        }
         for s in allSessions {
             // Date filter
             let refDate: Date =
@@ -1255,6 +1376,8 @@ extension SessionListViewModel {
                 if !cal.isDate(refDate, inSameDayAs: day) { continue }
             }
             if let pid = projectMemberships[s.id] {
+                let allowedSources = allowed[pid] ?? ProjectSessionSource.allSet
+                if !allowedSources.contains(s.source.projectSource) { continue }
                 visible[pid, default: 0] += 1
             }
         }
@@ -1321,7 +1444,10 @@ extension SessionListViewModel {
     // If the anchor has no project, return all sessions (fallback).
     func allSessionsInSameProject(as anchor: SessionSummary) -> [SessionSummary] {
         if let pid = projectMemberships[anchor.id] {
-            return allSessions.filter { projectMemberships[$0.id] == pid }
+            let allowed = projects.first(where: { $0.id == pid })?.sources ?? ProjectSessionSource.allSet
+            return allSessions.filter {
+                projectMemberships[$0.id] == pid && allowed.contains($0.source.projectSource)
+            }
         }
         return allSessions
     }
@@ -1388,6 +1514,7 @@ extension SessionListViewModel {
         await MainActor.run {
             self.projectCounts = counts
             self.projectMemberships = memberships
+            self.recomputeProjectCounts()
         }
     }
 }
@@ -1491,6 +1618,7 @@ extension SessionListViewModel {
             await MainActor.run {
                 self.projectCounts = counts
                 self.projectMemberships = memberships
+                self.recomputeProjectCounts()
                 self.applyFilters()
             }
             await SystemNotifier.shared.notify(

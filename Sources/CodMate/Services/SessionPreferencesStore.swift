@@ -1,7 +1,5 @@
 import Foundation
 
-import Foundation
-
 @MainActor
 final class SessionPreferencesStore: ObservableObject {
     @Published var sessionsRoot: URL {
@@ -16,11 +14,16 @@ final class SessionPreferencesStore: ObservableObject {
         didSet { persist() }
     }
 
+    @Published var claudeExecutableURL: URL {
+        didSet { persist() }
+    }
+
     private let defaults: UserDefaults
     private struct Keys {
         static let sessionsRootPath = "codex.sessions.rootPath"
         static let notesRootPath = "codex.notes.rootPath"
         static let executablePath = "codex.sessions.executablePath"
+        static let claudeExecutablePath = "codex.sessions.claudeExecutablePath"
         static let resumeUseEmbedded = "codex.resume.useEmbedded"
         static let resumeCopyClipboard = "codex.resume.copyClipboard"
         static let resumeExternalApp = "codex.resume.externalApp"
@@ -82,7 +85,21 @@ final class SessionPreferencesStore: ObservableObject {
         // Assign after all are computed to avoid using self before init completes
         self.sessionsRoot = resolvedSessionsRoot
         self.notesRoot = resolvedNotesRoot
+        // Resolve claude executable path
+        let resolvedClaudeExec: URL = {
+            if let storedExec = defaults.string(forKey: Keys.claudeExecutablePath) {
+                let url = URL(fileURLWithPath: storedExec)
+                if fileManager.isExecutableFile(atPath: url.path) {
+                    return url
+                } else {
+                    defaults.removeObject(forKey: Keys.claudeExecutablePath)
+                }
+            }
+            return SessionPreferencesStore.defaultClaudeExecutableURL()
+        }()
+
         self.codexExecutableURL = resolvedExec
+        self.claudeExecutableURL = resolvedClaudeExec
         // Resume defaults
         self.defaultResumeUseEmbeddedTerminal =
             defaults.object(forKey: Keys.resumeUseEmbedded) as? Bool ?? true
@@ -126,6 +143,7 @@ final class SessionPreferencesStore: ObservableObject {
         defaults.set(sessionsRoot.path, forKey: Keys.sessionsRootPath)
         defaults.set(notesRoot.path, forKey: Keys.notesRootPath)
         defaults.set(codexExecutableURL.path, forKey: Keys.executablePath)
+        defaults.set(claudeExecutableURL.path, forKey: Keys.claudeExecutablePath)
     }
 
     convenience init(defaults: UserDefaults = .standard) {
@@ -144,6 +162,10 @@ final class SessionPreferencesStore: ObservableObject {
 
     static func defaultExecutableURL() -> URL {
         URL(fileURLWithPath: "/usr/local/bin/codex")
+    }
+
+    static func defaultClaudeExecutableURL() -> URL {
+        URL(fileURLWithPath: "/usr/local/bin/claude")
     }
 
     // MARK: - Legacy coercion helpers

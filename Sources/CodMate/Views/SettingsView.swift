@@ -192,7 +192,24 @@ struct SettingsView: View {
                                 .truncationMode(.middle)
                                 .frame(maxWidth: .infinity, alignment: .trailing)
 
-                            Button("Change…", action: selectExecutable)
+                            Button("Change…", action: selectCodexExecutable)
+                                .buttonStyle(.bordered)
+                        }
+
+                        GridRow {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Label("Claude CLI Path", systemImage: "terminal")
+                                    .font(.subheadline).fontWeight(.medium)
+                                Text("Path to the claude executable")
+                                    .font(.caption).foregroundColor(.secondary)
+                            }
+
+                            Text(preferences.claudeExecutableURL.path)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                                .frame(maxWidth: .infinity, alignment: .trailing)
+
+                            Button("Change…", action: selectClaudeExecutable)
                                 .buttonStyle(.bordered)
                         }
                     }
@@ -1087,7 +1104,7 @@ struct SettingsView: View {
         }
     }
 
-    private func selectExecutable() {
+    private func selectCodexExecutable() {
         let panel = NSOpenPanel()
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
@@ -1099,6 +1116,21 @@ struct SettingsView: View {
         panel.begin { response in
             guard response == .OK, let url = panel.url else { return }
             preferences.codexExecutableURL = url
+        }
+    }
+
+    private func selectClaudeExecutable() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [.unixExecutable, .executable]
+        panel.directoryURL = preferences.claudeExecutableURL.deletingLastPathComponent()
+        panel.message = "Select the claude executable"
+
+        panel.begin { response in
+            guard response == .OK, let url = panel.url else { return }
+            preferences.claudeExecutableURL = url
         }
     }
 
@@ -1121,6 +1153,7 @@ struct SettingsView: View {
         preferences.sessionsRoot = SessionPreferencesStore.defaultSessionsRoot(
             for: FileManager.default.homeDirectoryForCurrentUser)
         preferences.codexExecutableURL = SessionPreferencesStore.defaultExecutableURL()
+        preferences.claudeExecutableURL = SessionPreferencesStore.defaultClaudeExecutableURL()
         preferences.defaultResumeUseEmbeddedTerminal = true
         preferences.defaultResumeCopyToClipboard = true
         preferences.defaultResumeExternalApp = .terminal
