@@ -41,13 +41,20 @@ struct SessionListColumnView: View {
                     .padding(.vertical)
             }
 
-            List(selection: $selection) {
-                if sections.isEmpty && !isLoading {
+            if sections.isEmpty && !isLoading {
+                // Center the empty state within the middle column area.
+                VStack {
+                    Spacer(minLength: 12)
                     ContentUnavailableView(
                         "No Sessions", systemImage: "tray",
                         description: Text(
                             "Adjust directories or launch Codex CLI to generate new session logs."))
-                } else {
+                        .frame(maxWidth: .infinity)
+                    Spacer()
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                List(selection: $selection) {
                     ForEach(sections) { section in
                         Section {
                             ForEach(section.sessions, id: \.id) { session in
@@ -80,24 +87,16 @@ struct SessionListColumnView: View {
                                 }
                                 .listRowInsets(EdgeInsets())
                                 .contextMenu {
-                                    Button {
-                                        onResume(session)
-                                    } label: {
+                                    Button { onResume(session) } label: {
                                         Label("Resume", systemImage: "play.fill")
                                     }
                                     if let openEmbedded = onOpenEmbedded {
-                                        Button {
-                                            openEmbedded(session)
-                                        } label: {
-                                            Label(
-                                                "Open Embedded Terminal",
-                                                systemImage: "rectangle.badge.plus")
+                                        Button { openEmbedded(session) } label: {
+                                            Label("Open Embedded Terminal", systemImage: "rectangle.badge.plus")
                                         }
                                     }
                                     Divider()
-                                    Button {
-                                        Task { await viewModel.beginEditing(session: session) }
-                                    } label: {
+                                    Button { Task { await viewModel.beginEditing(session: session) } } label: {
                                         Label("Edit Title & Comment", systemImage: "pencil")
                                     }
                                     // Assign to Project submenu
@@ -111,34 +110,21 @@ struct SessionListColumnView: View {
                                             Divider()
                                             ForEach(viewModel.projects) { p in
                                                 Button(p.name.isEmpty ? p.id : p.name) {
-                                                    Task {
-                                                        await viewModel.assignSessions(
-                                                            to: p.id, ids: [session.id])
-                                                    }
+                                                    Task { await viewModel.assignSessions(to: p.id, ids: [session.id]) }
                                                 }
                                             }
                                         } label: {
-                                            Label(
-                                                "Assign to Project…",
-                                                systemImage: "folder.badge.plus")
+                                            Label("Assign to Project…", systemImage: "folder.badge.plus")
                                         }
                                     }
-                                    Button {
-                                        onReveal(session)
-                                    } label: {
+                                    Button { onReveal(session) } label: {
                                         Label("Reveal in Finder", systemImage: "folder")
                                     }
-                                    Button {
-                                        onExportMarkdown(session)
-                                    } label: {
-                                        Label(
-                                            "Export Markdown",
-                                            systemImage: "square.and.arrow.down")
+                                    Button { onExportMarkdown(session) } label: {
+                                        Label("Export Markdown", systemImage: "square.and.arrow.down")
                                     }
                                     Divider()
-                                    Button(role: .destructive) {
-                                        onDeleteRequest(session)
-                                    } label: {
+                                    Button(role: .destructive) { onDeleteRequest(session) } label: {
                                         Label("Delete Session", systemImage: "trash")
                                     }
                                 }
@@ -147,9 +133,7 @@ struct SessionListColumnView: View {
                             HStack {
                                 Text(section.title)
                                 Spacer()
-                                Label(
-                                    section.totalDuration.readableFormattedDuration,
-                                    systemImage: "clock")
+                                Label(section.totalDuration.readableFormattedDuration, systemImage: "clock")
                                 Label("\(section.totalEvents)", systemImage: "chart.bar")
                             }
                             .font(.subheadline)
@@ -157,8 +141,8 @@ struct SessionListColumnView: View {
                         }
                     }
                 }
+                .listStyle(.inset)
             }
-            .listStyle(.inset)
         }
         .padding(.vertical, 16)
         .padding(.horizontal, 8)
@@ -183,19 +167,11 @@ struct SessionListColumnView: View {
             )
             .frame(maxWidth: .infinity)
 
-            HStack(alignment: .center, spacing: 12) {
-                Picker("", selection: $sortOrder) {
-                    ForEach(SessionSortOrder.allCases) { order in
-                        Text(order.title)
-                            .lineLimit(1)
-                            .truncationMode(.tail)
-                            .tag(order)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .frame(maxWidth: .infinity)
-            }
+            EqualWidthSegmentedControl(
+                items: Array(SessionSortOrder.allCases),
+                selection: $sortOrder,
+                title: { $0.title }
+            )
             .frame(maxWidth: .infinity)
         }
         .frame(maxWidth: .infinity)
@@ -358,6 +334,72 @@ private struct SearchField: NSViewRepresentable {
                 return true
             }
             return false
+        }
+    }
+}
+
+// MARK: - Equal-width segmented control backed by NSSegmentedControl
+private struct EqualWidthSegmentedControl<Item: Identifiable & Hashable>: NSViewRepresentable {
+    let items: [Item]
+    @Binding var selection: Item
+    var title: (Item) -> String
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    func makeNSView(context: Context) -> NSView {
+        let container = NSView()
+        container.translatesAutoresizingMaskIntoConstraints = false
+        let control = NSSegmentedControl()
+        control.translatesAutoresizingMaskIntoConstraints = false
+        control.segmentStyle = .rounded
+        control.trackingMode = .selectOne
+        control.target = context.coordinator
+        control.action = #selector(Coordinator.changed(_:))
+        rebuildSegments(control)
+        if #available(macOS 13.0, *) { control.segmentDistribution = .fillEqually }
+        container.addSubview(control)
+        NSLayoutConstraint.activate([
+            control.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            control.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            control.topAnchor.constraint(equalTo: container.topAnchor),
+            control.bottomAnchor.constraint(equalTo: container.bottomAnchor)
+        ])
+        context.coordinator.control = control
+        return container
+    }
+
+    func updateNSView(_ container: NSView, context: Context) {
+        guard let control = context.coordinator.control else { return }
+        if control.segmentCount != items.count { rebuildSegments(control) }
+        // Update labels if needed
+        for (i, it) in items.enumerated() { control.setLabel(title(it), forSegment: i) }
+        // Selection
+        if let idx = items.firstIndex(of: selection) { control.selectedSegment = idx }
+        else { control.selectedSegment = -1 }
+        if #available(macOS 13.0, *) {
+            control.segmentDistribution = .fillEqually
+        } else {
+            // Fallback: try to equalize manually
+            let width = max(60.0, (control.superview?.bounds.width ?? 480.0) / CGFloat(max(1, items.count)))
+            for i in 0..<control.segmentCount { control.setWidth(width, forSegment: i) }
+        }
+    }
+
+    private func rebuildSegments(_ control: NSSegmentedControl) {
+        control.segmentCount = items.count
+        for (i, it) in items.enumerated() {
+            control.setLabel(title(it), forSegment: i)
+        }
+    }
+
+    final class Coordinator: NSObject {
+        weak var control: NSSegmentedControl?
+        var parent: EqualWidthSegmentedControl
+        init(_ parent: EqualWidthSegmentedControl) { self.parent = parent }
+        @objc func changed(_ sender: NSSegmentedControl) {
+            let idx = sender.selectedSegment
+            guard idx >= 0 && idx < parent.items.count else { return }
+            parent.selection = parent.items[idx]
         }
     }
 }

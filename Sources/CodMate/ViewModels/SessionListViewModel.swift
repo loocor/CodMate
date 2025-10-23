@@ -128,7 +128,9 @@ final class SessionListViewModel: ObservableObject {
         let today = Date()
         let cal = Calendar.current
         suppressFilterNotifications = true
-        self.selectedDay = cal.startOfDay(for: today)
+        let start = cal.startOfDay(for: today)
+        self.selectedDay = start
+        self.selectedDays = [start]
         suppressFilterNotifications = false
         configureDirectoryMonitor()
         Task { await loadProjects() }
@@ -294,8 +296,8 @@ final class SessionListViewModel: ObservableObject {
     // Profile-aware variants (respect current session's project profile when available)
     func copyResumeCommandsRespectingProject(session: SessionSummary) {
         if let pid = projectIdForSession(session.id),
-           let p = projects.first(where: { $0.id == pid }),
-           p.profile != nil || (p.profileId?.isEmpty == false)
+            let p = projects.first(where: { $0.id == pid }),
+            p.profile != nil || (p.profileId?.isEmpty == false)
         {
             actions.copyResumeUsingProjectProfileCommands(
                 session: session, project: p, executableURL: preferences.codexExecutableURL,
@@ -342,14 +344,15 @@ final class SessionListViewModel: ObservableObject {
 
     func buildResumeCLIInvocationRespectingProject(session: SessionSummary) -> String {
         if let pid = projectIdForSession(session.id),
-           let p = projects.first(where: { $0.id == pid }),
-           p.profile != nil || (p.profileId?.isEmpty == false)
+            let p = projects.first(where: { $0.id == pid }),
+            p.profile != nil || (p.profileId?.isEmpty == false)
         {
             let execPath =
                 actions.resolveExecutableURL(preferred: preferences.codexExecutableURL)?.path
                 ?? preferences.codexExecutableURL.path
             return actions.buildResumeUsingProjectProfileCLIInvocation(
-                session: session, project: p, executablePath: execPath, options: preferences.resumeOptions)
+                session: session, project: p, executablePath: execPath,
+                options: preferences.resumeOptions)
         }
         let execPath =
             actions.resolveExecutableURL(preferred: preferences.codexExecutableURL)?.path

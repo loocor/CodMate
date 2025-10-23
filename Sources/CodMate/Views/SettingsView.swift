@@ -16,13 +16,28 @@ struct SettingsView: View {
 
     var body: some View {
         ZStack(alignment: .topLeading) {
-            // Hidden view for window configuration
             WindowConfigurator { window in
                 window.isMovableByWindowBackground = true
+                if window.toolbar == nil {
+                    let toolbar = NSToolbar(identifier: "CodMateSettingsToolbar")
+                    SettingsToolbarCoordinator.shared.configure(toolbar: toolbar)
+                    window.toolbar = toolbar
+                }
+                window.title = "Settings"
+
+                var minSize = window.contentMinSize
+                minSize.width = max(minSize.width, 800)
+                minSize.height = max(minSize.height, 560)
+                window.contentMinSize = minSize
+
+                var maxSize = window.contentMaxSize
+                if maxSize.width > 0 { maxSize.width = max(maxSize.width, 2000) }
+                if maxSize.height > 0 { maxSize.height = max(maxSize.height, 1400) }
+                window.contentMaxSize = maxSize
             }
             .frame(width: 0, height: 0)
 
-            HStack(spacing: 0) {
+            NavigationSplitView {
                 List(SettingCategory.allCases, selection: $selectedCategory) { category in
                     let isSelected = (category == selectedCategory)
                     HStack(alignment: .center, spacing: 8) {
@@ -37,23 +52,59 @@ struct SettingsView: View {
                         }
                         Spacer(minLength: 0)
                     }
-                    .padding(.vertical, 8)
+                    .padding(.vertical, 6)
                     .tag(category)
                 }
                 .listStyle(.sidebar)
-                .frame(minWidth: 200, idealWidth: 200, maxWidth: 200, alignment: .top)
-                .frame(maxHeight: .infinity, alignment: .top)
-
-                ScrollView {
-                    selectedCategoryView
-                        .frame(maxWidth: .infinity, alignment: .topLeading)
-                        .padding(.horizontal, 16)
-                        .padding(.top, 16)
-                        .task { await codexVM.loadAll() }
-                }
+                .controlSize(.small)
+                .environment(\.defaultMinListRowHeight, 18)
+                .navigationSplitViewColumnWidth(min: 240, ideal: 260, max: 300)
+            } detail: {
+                selectedCategoryView
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                    .task { await codexVM.loadAll() }
+                    .navigationSplitViewColumnWidth(min: 460, ideal: 640, max: 1200)
             }
+            .navigationSplitViewStyle(.balanced)
+            .toolbar(removing: .sidebarToggle)
         }
-        .frame(minWidth: 600, minHeight: 560)
+        .frame(minWidth: 800, minHeight: 560)
+    }
+
+    private final class SettingsToolbarCoordinator: NSObject, NSToolbarDelegate {
+        static let shared = SettingsToolbarCoordinator()
+        private let spacerID = NSToolbarItem.Identifier("CodMateSettingsSpacer")
+
+        func configure(toolbar: NSToolbar) {
+            toolbar.delegate = self
+            toolbar.allowsUserCustomization = false
+            toolbar.allowsExtensionItems = false
+            toolbar.displayMode = .iconOnly
+        }
+
+        func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+            [spacerID]
+        }
+
+        func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+            [spacerID]
+        }
+
+        func toolbar(
+            _ toolbar: NSToolbar,
+            itemForItemIdentifier itemIdentifier: NSToolbarItem.Identifier,
+            willBeInsertedIntoToolbar flag: Bool
+        ) -> NSToolbarItem? {
+            guard itemIdentifier == spacerID else { return nil }
+            let item = NSToolbarItem(itemIdentifier: itemIdentifier)
+            let view = NSView(frame: .zero)
+            view.translatesAutoresizingMaskIntoConstraints = false
+            view.isHidden = true
+            view.widthAnchor.constraint(equalToConstant: 1).isActive = true
+            view.heightAnchor.constraint(equalToConstant: 1).isActive = true
+            item.view = view
+            return item
+        }
     }
 
     @ViewBuilder
@@ -77,7 +128,7 @@ struct SettingsView: View {
     }
 
     private var generalSettings: some View {
-        ScrollView {
+        settingsScroll {
             VStack(alignment: .leading, spacing: 20) {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("General Settings")
@@ -157,7 +208,8 @@ struct SettingsView: View {
                     visibilitySection(
                         title: "Timeline visibility",
                         systemImage: "text.bubble",
-                        description: "Choose which message types appear in the conversation timeline",
+                        description:
+                            "Choose which message types appear in the conversation timeline",
                         selection: $preferences.timelineVisibleKinds,
                         defaults: MessageVisibilityKind.timelineDefault
                     )
@@ -166,7 +218,8 @@ struct SettingsView: View {
                     visibilitySection(
                         title: "Markdown export",
                         systemImage: "doc.text",
-                        description: "Choose which message types are included when exporting Markdown",
+                        description:
+                            "Choose which message types are included when exporting Markdown",
                         selection: $preferences.markdownVisibleKinds,
                         defaults: MessageVisibilityKind.markdownDefault
                     )
@@ -203,7 +256,8 @@ struct SettingsView: View {
 
             // Options: left-to-right, equal spacing, wrap to next line naturally
             let order: [MessageVisibilityKind] = [
-                .user, .assistant, .tool, .syncing, .environment, .reasoning, .tokenUsage, .infoOther
+                .user, .assistant, .tool, .syncing, .environment, .reasoning, .tokenUsage,
+                .infoOther,
             ]
             LazyVGrid(
                 columns: Array(
@@ -223,7 +277,9 @@ struct SettingsView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func binding(_ selection: Binding<Set<MessageVisibilityKind>>, _ kind: MessageVisibilityKind) -> Binding<Bool> {
+    private func binding(
+        _ selection: Binding<Set<MessageVisibilityKind>>, _ kind: MessageVisibilityKind
+    ) -> Binding<Bool> {
         Binding<Bool>(
             get: { selection.wrappedValue.contains(kind) },
             set: { newVal in
@@ -235,7 +291,8 @@ struct SettingsView: View {
     }
 
     private var codexSettings: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        settingsScroll {
+            VStack(alignment: .leading, spacing: 12) {
             // Header for visual consistency with other settings pages
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 6) {
@@ -270,18 +327,20 @@ struct SettingsView: View {
             .controlSize(.regular)
             .padding(.bottom, 16)
         }
+        }
     }
 
     // MARK: - Dialectics
     private var dialecticsSettings: some View {
-        DialecticsPane(preferences: preferences)
-            .frame(maxWidth: .infinity, alignment: .topLeading)
-            .padding(.bottom, 16)
+        settingsScroll {
+            DialecticsPane(preferences: preferences)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+        }
     }
 
     // MARK: - Providers Pane
     private var providersPane: some View {
-        paneContainer {
+        codexTabContent {
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
                     Spacer()
@@ -297,13 +356,11 @@ struct SettingsView: View {
                 }
                 Divider()
 
-                // Built-in default row (non-editable, index 0)
                 providerRow(
                     index: 0, id: nil, name: "Codex Default (built-in)", url: "Built‑in",
                     editable: false)
                 Divider()
 
-                // Custom providers with alternating stripes
                 ForEach(Array(codexVM.providers.enumerated()), id: \.1.id) { idx, p in
                     let rowIndex = idx + 1
                     providerRow(
@@ -377,7 +434,7 @@ struct SettingsView: View {
 
     // MARK: - Runtime Pane
     private var runtimePane: some View {
-        paneContainer {
+        codexTabContent {
             Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 18) {
                 GridRow {
                     VStack(alignment: .leading, spacing: 4) {
@@ -461,9 +518,12 @@ struct SettingsView: View {
                 }
                 GridRow {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("Auto-assign new sessions to same project").font(.subheadline).fontWeight(.medium)
-                        Text("When starting New from detail, auto-assign the created session to that project.")
-                            .font(.caption).foregroundStyle(.secondary)
+                        Text("Auto-assign new sessions to same project").font(.subheadline)
+                            .fontWeight(.medium)
+                        Text(
+                            "When starting New from detail, auto-assign the created session to that project."
+                        )
+                        .font(.caption).foregroundStyle(.secondary)
                     }
                     Toggle("", isOn: $preferences.autoAssignNewToSameProject)
                         .labelsHidden()
@@ -475,7 +535,7 @@ struct SettingsView: View {
 
     // MARK: - Notifications Pane
     private var notificationsPane: some View {
-        paneContainer {
+        codexTabContent {
             Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 18) {
                 GridRow {
                     VStack(alignment: .leading, spacing: 4) {
@@ -523,7 +583,7 @@ struct SettingsView: View {
 
     // MARK: - Privacy Pane
     private var privacyPane: some View {
-        paneContainer {
+        codexTabContent {
             VStack(alignment: .leading, spacing: 16) {
                 Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 18) {
                     GridRow {
@@ -691,7 +751,7 @@ struct SettingsView: View {
 
     // MARK: - Raw Config Pane (read-only preview + open in editor)
     private var rawConfigPane: some View {
-        paneContainer {
+        codexTabContent {
             ZStack(alignment: .topTrailing) {
                 ScrollView {
                     Text(
@@ -724,17 +784,29 @@ struct SettingsView: View {
     }
 
     // Consistent insets for all tabs
-    @ViewBuilder
-    private func paneContainer<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
-        content()
-            .padding(.top, 16)
-            .padding(.horizontal, 16)
-            .padding(.bottom, 16)
-            .frame(maxWidth: .infinity, alignment: .topLeading)
+    private func settingsScroll<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        ScrollView {
+            content()
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+                .padding(.top, 24)
+                .padding(.horizontal, 24)
+                .padding(.bottom, 32)
+        }
+        .scrollClipDisabled()
+    }
+
+    private func codexTabContent<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            content()
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 8)
     }
 
     private var terminalSettings: some View {
-        ScrollView {
+        settingsScroll {
             VStack(alignment: .leading, spacing: 20) {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Terminal Settings")
@@ -807,7 +879,7 @@ struct SettingsView: View {
     }
 
     private var commandSettings: some View {
-        ScrollView {
+        settingsScroll {
             VStack(alignment: .leading, spacing: 20) {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Command Options")
@@ -882,7 +954,7 @@ struct SettingsView: View {
     }
 
     private var aboutSettings: some View {
-        ScrollView {
+        settingsScroll {
             VStack(alignment: .leading, spacing: 20) {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("About CodMate")
@@ -948,7 +1020,7 @@ struct SettingsView: View {
     }()
 
     private var mcpServerSettings: some View {
-        ScrollView {
+        settingsScroll {
             VStack(alignment: .leading, spacing: 20) {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("MCP Server Integration")
@@ -986,7 +1058,7 @@ struct SettingsView: View {
                     Text("Quickly download MCPMate to configure MCP servers alongside CodMate.")
                         .font(.subheadline)
                         .foregroundColor(.secondary)
-
+           
                     Button(action: openMCPMateDownload) {
                         Label("Download MCPMate", systemImage: "arrow.down.circle.fill")
                             .labelStyle(.titleAndIcon)
