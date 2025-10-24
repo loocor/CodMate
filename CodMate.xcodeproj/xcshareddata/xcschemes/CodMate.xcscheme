@@ -18,7 +18,7 @@
                BlueprintIdentifier = "1A0000022A00000100000001"
                BuildableName = "CodMate.app"
                BlueprintName = "CodMate"
-               ReferencedContainer = "container:CodMate.xcodeproj">
+               ReferencedContainer = "container:codmate.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
       </BuildActionEntries>
@@ -47,7 +47,7 @@
             BlueprintIdentifier = "1A0000022A00000100000001"
             BuildableName = "CodMate.app"
             BlueprintName = "CodMate"
-            ReferencedContainer = "container:CodMate.xcodeproj">
+            ReferencedContainer = "container:codmate.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
    </LaunchAction>
@@ -64,7 +64,7 @@
             BlueprintIdentifier = "1A0000022A00000100000001"
             BuildableName = "CodMate.app"
             BlueprintName = "CodMate"
-            ReferencedContainer = "container:CodMate.xcodeproj">
+            ReferencedContainer = "container:codmate.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
    </ProfileAction>

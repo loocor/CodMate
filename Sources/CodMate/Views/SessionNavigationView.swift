@@ -51,7 +51,7 @@ struct SessionNavigationView: View {
             calendarSection
                 .padding(.top, 8)
         }
-        .frame(idealWidth: 260)
+        .frame(idealWidth: 240)
         .task {
             _ = viewModel.calendarCounts(for: monthStart, dimension: dimension)
             // Ensure dimension is synced on startup
