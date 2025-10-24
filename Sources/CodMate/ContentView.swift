@@ -222,14 +222,19 @@ struct ContentView: View {
                             summary: focused,
                             isProcessing: isPerformingAction,
                             onResume: {
+                                guard let current = focusedSummary else { return }
                                 if viewModel.preferences.defaultResumeUseEmbeddedTerminal {
-                                    startEmbedded(for: focused)
+                                    startEmbedded(for: current)
                                 } else {
-                                    openPreferredExternal(for: focused)
+                                    openPreferredExternal(for: current)
                                 }
                             },
-                            onReveal: { viewModel.reveal(session: focused) },
-                            onDelete: presentDeleteConfirmation
+                            onReveal: {
+                                guard let current = focusedSummary else { return }
+                                viewModel.reveal(session: current)
+                            },
+                            onDelete: presentDeleteConfirmation,
+                            columnVisibility: $columnVisibility
                         )
                         .environmentObject(viewModel)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -265,7 +270,7 @@ struct ContentView: View {
                 let focused = focusedSummary
 
                 Menu {
-                    if let focused {
+                    if let focused = focusedSummary {
                         Button {
                             showNewWithContext = true
                         } label: {
@@ -279,33 +284,38 @@ struct ContentView: View {
                                 let sessionSource = provider.sessionSource
                                 Menu {
                                     Button {
+                                        guard let current = focusedSummary else { return }
                                         launchNewSession(
-                                            for: focused, using: sessionSource, style: .preferred)
+                                            for: current, using: sessionSource, style: .preferred)
                                     } label: {
                                         Label("Use Preferred Launch", systemImage: "gearshape")
                                     }
                                     Button {
+                                        guard let current = focusedSummary else { return }
                                         launchNewSession(
-                                            for: focused, using: sessionSource, style: .terminal)
+                                            for: current, using: sessionSource, style: .terminal)
                                     } label: {
                                         Label("Open in Terminal", systemImage: "terminal")
                                     }
                                     Button {
+                                        guard let current = focusedSummary else { return }
                                         launchNewSession(
-                                            for: focused, using: sessionSource, style: .iterm)
+                                            for: current, using: sessionSource, style: .iterm)
                                     } label: {
                                         Label("Open in iTerm2", systemImage: "app.fill")
                                     }
                                     Button {
+                                        guard let current = focusedSummary else { return }
                                         launchNewSession(
-                                            for: focused, using: sessionSource, style: .warp)
+                                            for: current, using: sessionSource, style: .warp)
                                     } label: {
                                         Label("Open in Warp", systemImage: "app.gift.fill")
                                     }
                                     if viewModel.preferences.defaultResumeUseEmbeddedTerminal {
                                         Button {
+                                            guard let current = focusedSummary else { return }
                                             launchNewSession(
-                                                for: focused, using: sessionSource, style: .embedded
+                                                for: current, using: sessionSource, style: .embedded
                                             )
                                         } label: {
                                             Label(
@@ -331,9 +341,8 @@ struct ContentView: View {
                         Label("New", systemImage: "plus")
                     }
                 } primaryAction: {
-                    if let focused {
-                        launchNewSession(for: focused, using: focused.source, style: .preferred)
-                    }
+                    guard let current = focusedSummary else { return }
+                    launchNewSession(for: current, using: current.source, style: .preferred)
                 }
                 .disabled(isPerformingAction || focused == nil)
                 .help(
@@ -344,10 +353,11 @@ struct ContentView: View {
                 .controlSize(.small)
 
                 Menu {
-                    if let focused {
+                    if let focused = focusedSummary {
                         Button {
-                            viewModel.copyResumeCommandsRespectingProject(session: focused)
-                            _ = viewModel.openAppleTerminal(at: workingDirectory(for: focused))
+                            guard let current = focusedSummary else { return }
+                            viewModel.copyResumeCommandsRespectingProject(session: current)
+                            _ = viewModel.openAppleTerminal(at: workingDirectory(for: current))
                             Task {
                                 await SystemNotifier.shared.notify(
                                     title: "CodMate",
@@ -358,9 +368,10 @@ struct ContentView: View {
                         }
 
                         Button {
-                            let dir = workingDirectory(for: focused)
+                            guard let current = focusedSummary else { return }
+                            let dir = workingDirectory(for: current)
                             let cmd = viewModel.buildResumeCLIInvocationRespectingProject(
-                                session: focused)
+                                session: current)
                             viewModel.openPreferredTerminalViaScheme(
                                 app: .iterm2, directory: dir, command: cmd)
                         } label: {
@@ -368,9 +379,10 @@ struct ContentView: View {
                         }
 
                         Button {
-                            viewModel.copyResumeCommandsRespectingProject(session: focused)
+                            guard let current = focusedSummary else { return }
+                            viewModel.copyResumeCommandsRespectingProject(session: current)
                             viewModel.openPreferredTerminalViaScheme(
-                                app: .warp, directory: workingDirectory(for: focused))
+                                app: .warp, directory: workingDirectory(for: current))
                             Task {
                                 await SystemNotifier.shared.notify(
                                     title: "CodMate",
@@ -382,7 +394,8 @@ struct ContentView: View {
 
                         if viewModel.preferences.defaultResumeUseEmbeddedTerminal {
                             Button {
-                                startEmbedded(for: focused)
+                                guard let current = focusedSummary else { return }
+                                startEmbedded(for: current)
                             } label: {
                                 Label("Open Embedded Terminal", systemImage: "rectangle.badge.plus")
                             }
@@ -393,12 +406,11 @@ struct ContentView: View {
                 } label: {
                     Label("Resume", systemImage: "play.fill")
                 } primaryAction: {
-                    if let focused {
-                        if viewModel.preferences.defaultResumeUseEmbeddedTerminal {
-                            startEmbedded(for: focused)
-                        } else {
-                            openPreferredExternal(for: focused)
-                        }
+                    guard let current = focusedSummary else { return }
+                    if viewModel.preferences.defaultResumeUseEmbeddedTerminal {
+                        startEmbedded(for: current)
+                    } else {
+                        openPreferredExternal(for: current)
                     }
                 }
                 .disabled(isPerformingAction || focused == nil)
