@@ -67,7 +67,10 @@ struct SessionActions {
             guard t.hasPrefix(key + " ") || t.hasPrefix(key + "=") else { continue }
             guard let eq = t.firstIndex(of: "=") else { continue }
             var value = String(t[t.index(after: eq)...]).trimmingCharacters(in: .whitespaces)
-            if value.hasPrefix("\"") && value.hasSuffix("\"") { value.removeFirst(); value.removeLast() }
+            if value.hasPrefix("\"") && value.hasSuffix("\"") {
+                value.removeFirst()
+                value.removeLast()
+            }
             return value
         }
         return nil
@@ -77,7 +80,9 @@ struct SessionActions {
     // - Prefer global Codex config model
     // - Else, only fall back to session.model when the origin is Codex
     private func effectiveCodexModel(for session: SessionSummary) -> String? {
-        if let configured = readTopLevelConfigString("model")?.trimmingCharacters(in: .whitespacesAndNewlines), !configured.isEmpty {
+        if let configured = readTopLevelConfigString("model")?.trimmingCharacters(
+            in: .whitespacesAndNewlines), !configured.isEmpty
+        {
             return configured
         }
         if session.source == .codex {
@@ -227,6 +232,11 @@ struct SessionActions {
         return s
     }
 
+    // Reliable conversation id for resume commands: always use the session_meta id
+    // parsed from the log (SessionSummary.id). This matches Codex CLI's
+    // expectation (UUID) and Claude's native id semantics.
+    private func conversationId(for session: SessionSummary) -> String { session.id }
+
     private func embeddedExportLines(for source: SessionSource) -> [String] {
         var lines: [String] = [
             "export LANG=zh_CN.UTF-8",
@@ -259,7 +269,7 @@ struct SessionActions {
         switch session.source {
         case .codex:
             // Resume should preserve original session semantics; do not override flags.
-            return "\(exe) resume \(session.id)"
+            return "\(exe) resume \(conversationId(for: session))"
         case .claude:
             let args = ["--resume", session.id].map(shellQuoteIfNeeded)
             return ([exe] + args).joined(separator: " ")
@@ -310,7 +320,7 @@ struct SessionActions {
 
     func buildResumeArguments(session: SessionSummary, options: ResumeOptions) -> [String] {
         // Do not append flags; resume should restore original semantics.
-        ["resume", session.id]
+        ["resume", conversationId(for: session)]
     }
 
     func buildResumeCommandLines(
@@ -367,7 +377,8 @@ struct SessionActions {
             ? session.cwd : session.fileURL.deletingLastPathComponent().path
         let cd = "cd " + shellEscapedPath(cwd)
         let execName = session.source == .codex ? "codex" : "claude"
-        let execPath = resolveExecutableURL(preferred: executableURL, executableName: execName)?.path
+        let execPath =
+            resolveExecutableURL(preferred: executableURL, executableName: execName)?.path
             ?? execName
         let resume = buildResumeCLIInvocation(
             session: session, executablePath: execPath, options: options)
@@ -412,9 +423,6 @@ struct SessionActions {
         let pp = project.profile
         let profileId = project.profileId?.trimmingCharacters(in: .whitespaces)
 
-        // Decide whether to use a persisted profile, or inject a temporary one
-        let hasPersistedProfile = persistedProfileExists(profileId)
-
         // Flags only; avoid explicit --model for Codex new to keep behavior consistent
         if let pp {
             if pp.dangerouslyBypass == true {
@@ -430,39 +438,36 @@ struct SessionActions {
             args += flags(from: options)
         }
 
+        // Always use -c to inject inline profile (zero-write approach)
         if let profileId, !profileId.isEmpty {
-            if hasPersistedProfile {
-                args += ["--profile", profileId]
-            } else {
-                // Resolve effective approval/sandbox for project-level new inline profile
-                var approvalRaw: String? = pp?.approval?.rawValue
-                var sandboxRaw: String? = pp?.sandbox?.rawValue
-                if sandboxRaw == nil {
-                    if pp?.dangerouslyBypass == true {
-                        sandboxRaw = SandboxMode.dangerFullAccess.rawValue
-                    } else if let opt = options.sandbox?.rawValue {
-                        sandboxRaw = opt
-                    }
+            // Resolve effective approval/sandbox for project-level new inline profile
+            var approvalRaw: String? = pp?.approval?.rawValue
+            var sandboxRaw: String? = pp?.sandbox?.rawValue
+            if sandboxRaw == nil {
+                if pp?.dangerouslyBypass == true {
+                    sandboxRaw = SandboxMode.dangerFullAccess.rawValue
+                } else if let opt = options.sandbox?.rawValue {
+                    sandboxRaw = opt
                 }
-                if approvalRaw == nil {
-                    if let opt = options.approval?.rawValue {
-                        approvalRaw = opt
-                    } else {
-                        approvalRaw = ApprovalPolicy.onRequest.rawValue
-                    }
-                }
-                if sandboxRaw == nil { sandboxRaw = SandboxMode.workspaceWrite.rawValue }
-
-                if let inline = renderInlineProfileConfig(
-                    key: profileId,
-                    model: pp?.model, // include model only inside profile injection
-                    approvalPolicy: approvalRaw,
-                    sandboxMode: sandboxRaw
-                ) {
-                    args += ["--profile", profileId, "-c", inline]
+            }
+            if approvalRaw == nil {
+                if let opt = options.approval?.rawValue {
+                    approvalRaw = opt
                 } else {
-                    // profile id provided but nothing to inject; omit --profile to avoid referring to a non-existent profile
+                    approvalRaw = ApprovalPolicy.onRequest.rawValue
                 }
+            }
+            if sandboxRaw == nil { sandboxRaw = SandboxMode.workspaceWrite.rawValue }
+
+            if let inline = renderInlineProfileConfig(
+                key: profileId,
+                model: pp?.model,  // include model only inside profile injection
+                approvalPolicy: approvalRaw,
+                sandboxMode: sandboxRaw
+            ) {
+                args += ["--profile", profileId, "-c", inline]
+            } else {
+                // profile id provided but nothing to inject; omit --profile to avoid referring to a non-existent profile
             }
         }
         return args
@@ -612,7 +617,6 @@ struct SessionActions {
     ) -> [String] {
         var args: [String] = []
         let pid = project.profileId?.trimmingCharacters(in: .whitespaces)
-        let hasPersisted = persistedProfileExists(pid)
 
         // Flags precedence: danger -> full-auto -> explicit -s/-a when present in project profile
         if project.profile?.dangerouslyBypass == true {
@@ -624,35 +628,33 @@ struct SessionActions {
             if let a = project.profile?.approval { args += ["-a", a.rawValue] }
         }
 
-        // Do not append explicit --model for Codex new; rely on project profile (persisted or inline) or global config
-        let modelFromProject = project.profile?.model
-
-        // Effective policies for inline profile injection (New using project):
-        // - approval: prefer explicit; otherwise prefer options; else default to on-request
-        // - sandbox: prefer explicit; otherwise Danger Bypass => danger-full-access; otherwise options; else default to workspace-write
-        var approvalRaw: String? = project.profile?.approval?.rawValue
-        var sandboxRaw: String? = project.profile?.sandbox?.rawValue
-        if sandboxRaw == nil {
-            if project.profile?.dangerouslyBypass == true {
-                sandboxRaw = SandboxMode.dangerFullAccess.rawValue
-            } else if let opt = options.sandbox?.rawValue {
-                sandboxRaw = opt
-            }
-        }
-        if approvalRaw == nil {
-            if let opt = options.approval?.rawValue {
-                approvalRaw = opt
-            } else {
-                approvalRaw = ApprovalPolicy.onRequest.rawValue
-            }
-        }
-        if sandboxRaw == nil { sandboxRaw = SandboxMode.workspaceWrite.rawValue }
-
-        // Profile selection
+        // Always use -c to inject inline profile (zero-write approach)
         if let pid, !pid.isEmpty {
-            if hasPersisted {
-                args += ["--profile", pid]
-            } else if let inline = renderInlineProfileConfig(
+            // Do not append explicit --model for Codex new; rely on project profile (persisted or inline) or global config
+            let modelFromProject = project.profile?.model
+
+            // Effective policies for inline profile injection (New using project):
+            // - approval: prefer explicit; otherwise prefer options; else default to on-request
+            // - sandbox: prefer explicit; otherwise Danger Bypass => danger-full-access; otherwise options; else default to workspace-write
+            var approvalRaw: String? = project.profile?.approval?.rawValue
+            var sandboxRaw: String? = project.profile?.sandbox?.rawValue
+            if sandboxRaw == nil {
+                if project.profile?.dangerouslyBypass == true {
+                    sandboxRaw = SandboxMode.dangerFullAccess.rawValue
+                } else if let opt = options.sandbox?.rawValue {
+                    sandboxRaw = opt
+                }
+            }
+            if approvalRaw == nil {
+                if let opt = options.approval?.rawValue {
+                    approvalRaw = opt
+                } else {
+                    approvalRaw = ApprovalPolicy.onRequest.rawValue
+                }
+            }
+            if sandboxRaw == nil { sandboxRaw = SandboxMode.workspaceWrite.rawValue }
+
+            if let inline = renderInlineProfileConfig(
                 key: pid,
                 model: modelFromProject ?? fallbackModel,
                 approvalPolicy: approvalRaw,
@@ -775,34 +777,32 @@ struct SessionActions {
     ) -> [String] {
         var args: [String] = []
         let pid = project.profileId?.trimmingCharacters(in: .whitespaces)
-        let hasPersisted = persistedProfileExists(pid)
 
-        // Compute effective approval/sandbox for resume inline profile
-        // approval: prefer explicit; else options; else default on-request
-        // sandbox: prefer explicit; else Danger Bypass => danger-full-access; else options; else default workspace-write
-        var approvalRaw: String? = project.profile?.approval?.rawValue
-        var sandboxRaw: String? = project.profile?.sandbox?.rawValue
-        if sandboxRaw == nil {
-            if project.profile?.dangerouslyBypass == true {
-                sandboxRaw = SandboxMode.dangerFullAccess.rawValue
-            } else if let opt = options.sandbox?.rawValue {
-                sandboxRaw = opt
-            }
-        }
-        if approvalRaw == nil {
-            if let opt = options.approval?.rawValue {
-                approvalRaw = opt
-            } else {
-                approvalRaw = ApprovalPolicy.onRequest.rawValue
-            }
-        }
-        if sandboxRaw == nil { sandboxRaw = SandboxMode.workspaceWrite.rawValue }
-
+        // Always use -c to inject inline profile (zero-write approach)
         // Only select profile; do not pass flags to preserve original resume semantics
         if let pid, !pid.isEmpty {
-            if hasPersisted {
-                args += ["--profile", pid]
-            } else if let inline = renderInlineProfileConfig(
+            // Compute effective approval/sandbox for resume inline profile
+            // approval: prefer explicit; else options; else default on-request
+            // sandbox: prefer explicit; else Danger Bypass => danger-full-access; else options; else default workspace-write
+            var approvalRaw: String? = project.profile?.approval?.rawValue
+            var sandboxRaw: String? = project.profile?.sandbox?.rawValue
+            if sandboxRaw == nil {
+                if project.profile?.dangerouslyBypass == true {
+                    sandboxRaw = SandboxMode.dangerFullAccess.rawValue
+                } else if let opt = options.sandbox?.rawValue {
+                    sandboxRaw = opt
+                }
+            }
+            if approvalRaw == nil {
+                if let opt = options.approval?.rawValue {
+                    approvalRaw = opt
+                } else {
+                    approvalRaw = ApprovalPolicy.onRequest.rawValue
+                }
+            }
+            if sandboxRaw == nil { sandboxRaw = SandboxMode.workspaceWrite.rawValue }
+
+            if let inline = renderInlineProfileConfig(
                 key: pid,
                 model: project.profile?.model ?? fallbackModel,
                 approvalPolicy: approvalRaw,
@@ -829,11 +829,10 @@ struct SessionActions {
             return parts.joined(separator: " ")
         }
 
-        // For Codex, include project profile arguments.
+        // For Codex, place global flags before subcommand: codex --profile <pid> resume <id>
         let args = buildResumeArguments(
-            using: project, fallbackModel: session.model, options: options
-        ).map {
-            arg -> String in
+            using: project, fallbackModel: effectiveCodexModel(for: session), options: options
+        ).map { arg -> String in
             if arg.contains(where: { $0.isWhitespace || $0 == "'" }) {
                 return shellEscapedPath(arg)
             }
@@ -841,7 +840,7 @@ struct SessionActions {
         }
         parts.append(contentsOf: args)
         parts.append("resume")
-        parts.append(session.id)
+        parts.append(conversationId(for: session))
         return parts.joined(separator: " ")
     }
 
@@ -858,11 +857,10 @@ struct SessionActions {
             return parts.joined(separator: " ")
         }
 
-        // For Codex, include project profile arguments.
+        // For Codex, place global flags before subcommand: codex --profile <pid> resume <id>
         let args = buildResumeArguments(
-            using: project, fallbackModel: session.model, options: options
-        ).map {
-            arg -> String in
+            using: project, fallbackModel: effectiveCodexModel(for: session), options: options
+        ).map { arg -> String in
             if arg.contains(where: { $0.isWhitespace || $0 == "'" }) {
                 return shellEscapedPath(arg)
             }
@@ -870,7 +868,7 @@ struct SessionActions {
         }
         parts.append(contentsOf: args)
         parts.append("resume")
-        parts.append(session.id)
+        parts.append(conversationId(for: session))
         return parts.joined(separator: " ")
     }
 
@@ -974,7 +972,8 @@ struct SessionActions {
         session: SessionSummary, executableURL: URL, options: ResumeOptions
     ) {
         let execName = session.source == .codex ? "codex" : "claude"
-        let execPath = resolveExecutableURL(preferred: executableURL, executableName: execName)?.path
+        let execPath =
+            resolveExecutableURL(preferred: executableURL, executableName: execName)?.path
             ?? executableURL.path
         let cmd = buildResumeCLIInvocation(
             session: session, executablePath: execPath, options: options)

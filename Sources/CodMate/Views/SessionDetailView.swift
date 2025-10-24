@@ -8,10 +8,11 @@ struct SessionDetailView: View {
     let onResume: () -> Void
     let onReveal: () -> Void
     let onDelete: () -> Void
+    @Binding var columnVisibility: NavigationSplitViewVisibility
 
     @EnvironmentObject private var viewModel: SessionListViewModel
-    @State private var turns: [ConversationTurn] = []           // filtered + sorted for display
-    @State private var allTurns: [ConversationTurn] = []        // raw full timeline
+    @State private var turns: [ConversationTurn] = []  // filtered + sorted for display
+    @State private var allTurns: [ConversationTurn] = []  // raw full timeline
     @State private var loadingTimeline = false
     @State private var isConversationExpanded = false
     @State private var expandedTurnIDs: Set<String> = []
@@ -134,9 +135,11 @@ struct SessionDetailView: View {
                                     .font(.body)
                                     .textSelection(.enabled)
                             }
-                            Text("Captured · \(info.timestamp.formatted(date: .abbreviated, time: .shortened))")
-                                .font(.caption2)
-                                .foregroundStyle(.tertiary)
+                            Text(
+                                "Captured · \(info.timestamp.formatted(date: .abbreviated, time: .shortened))"
+                            )
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.top, 2)
@@ -245,8 +248,11 @@ struct SessionDetailView: View {
                     expandedTurnIDs = Set(turns.map(\.id))
                 }
             } label: {
-                Label(allExpanded ? "Collapse All" : "Expand All", systemImage: allExpanded ? "chevron.up" : "chevron.down")
-                    .font(.callout)
+                Label(
+                    allExpanded ? "Collapse All" : "Expand All",
+                    systemImage: allExpanded ? "chevron.up" : "chevron.down"
+                )
+                .font(.callout)
             }
             .buttonStyle(.borderless)
             .disabled(turns.isEmpty)
@@ -254,7 +260,9 @@ struct SessionDetailView: View {
             .hoverHand()
 
             // Refresh current conversation file (match borderless style for consistency)
-            Button { Task { await reloadConversation() } } label: {
+            Button {
+                Task { await reloadConversation() }
+            } label: {
                 Label("Refresh", systemImage: "arrow.clockwise")
                     .font(.callout)
             }
@@ -265,6 +273,8 @@ struct SessionDetailView: View {
             Button {
                 withAnimation(.easeInOut(duration: 0.2)) {
                     isConversationExpanded.toggle()
+                    // Also toggle sidebar visibility when expanding/restoring conversation
+                    columnVisibility = isConversationExpanded ? .doubleColumn : .all
                 }
             } label: {
                 Image(
@@ -317,7 +327,9 @@ extension SessionDetailView {
                 .textFieldStyle(.plain)
                 .frame(minWidth: 160)
             if !searchText.isEmpty {
-                Button { searchText = "" } label: {
+                Button {
+                    searchText = ""
+                } label: {
                     Image(systemName: "xmark.circle.fill")
                         .foregroundStyle(.tertiary)
                 }
@@ -348,7 +360,7 @@ extension SessionDetailView {
             // Debounce rapid write events
             debounceReloadTask?.cancel()
             debounceReloadTask = Task { @MainActor in
-                try? await Task.sleep(nanoseconds: 300_000_000) // 300ms
+                try? await Task.sleep(nanoseconds: 300_000_000)  // 300ms
                 // Confirm file still the same session file
                 guard fileURL == summary.fileURL else { return }
                 await reloadConversation()
@@ -388,7 +400,11 @@ extension SessionDetailView {
                 if contains(turn.userMessage?.text) { return true }
                 for e in turn.outputs {
                     if contains(e.title) || contains(e.text) { return true }
-                    if let md = e.metadata, md.values.contains(where: { $0.lowercased().contains(term) }) { return true }
+                    if let md = e.metadata,
+                        md.values.contains(where: { $0.lowercased().contains(term) })
+                    {
+                        return true
+                    }
                 }
                 return false
             }
@@ -398,7 +414,13 @@ extension SessionDetailView {
         }
         // Apply visibility filter for timeline display
         let kinds = viewModel.preferences.timelineVisibleKinds
-        turns = sorted.compactMap { filterTurn($0, visible: kinds) }
+
+        // Find the first Environment Context to exclude (already shown in dedicated section)
+        let firstEnvContextID = findFirstEnvironmentContextID(in: sorted)
+
+        turns = sorted.compactMap {
+            filterTurn($0, visible: kinds, excludingFirstEnvContext: firstEnvContextID)
+        }
     }
 
     private func exportMarkdown() {
@@ -424,9 +446,13 @@ extension SessionDetailView {
         lines.append("")
         // Use full timeline, filtered by markdown preferences (independent of UI search)
         let kinds = viewModel.preferences.markdownVisibleKinds
-        let exportTurns = allTurns.compactMap { filterTurn($0, visible: kinds) }
+        // Also exclude first Environment Context from export (already shown in header)
+        let firstEnvContextID = findFirstEnvironmentContextID(in: allTurns)
+        let exportTurns = allTurns.compactMap {
+            filterTurn($0, visible: kinds, excludingFirstEnvContext: firstEnvContextID)
+        }
         for turn in exportTurns {
-            if let user = turn.userMessage { // already filtered
+            if let user = turn.userMessage {  // already filtered
                 lines.append("**User** · \(user.timestamp)")
                 if let text = user.text, !text.isEmpty { lines.append(text) }
             }
@@ -454,9 +480,34 @@ extension SessionDetailView {
     }
 
     // MARK: - Visibility filtering helpers
-    private func filterTurn(_ turn: ConversationTurn, visible: Set<MessageVisibilityKind>) -> ConversationTurn? {
+
+    /// Finds the ID of the first Environment Context event in the timeline
+    /// (to exclude it since it's already shown in the dedicated section above)
+    private func findFirstEnvironmentContextID(in turns: [ConversationTurn]) -> String? {
+        for turn in turns {
+            // Check outputs for Environment Context
+            for output in turn.outputs {
+                if output.title == TimelineEvent.environmentContextTitle {
+                    return output.id
+                }
+            }
+        }
+        return nil
+    }
+
+    private func filterTurn(
+        _ turn: ConversationTurn,
+        visible: Set<MessageVisibilityKind>,
+        excludingFirstEnvContext firstEnvContextID: String? = nil
+    ) -> ConversationTurn? {
         let userAllowed = turn.userMessage.flatMap { visible.contains(event: $0) } ?? false
-        let keptOutputs = turn.outputs.filter { visible.contains(event: $0) }
+        let keptOutputs = turn.outputs.filter { output in
+            // Always exclude the first Environment Context (shown in dedicated section)
+            if let firstID = firstEnvContextID, output.id == firstID {
+                return false
+            }
+            return visible.contains(event: output)
+        }
         if !userAllowed && keptOutputs.isEmpty { return nil }
         return ConversationTurn(
             id: turn.id,
@@ -468,7 +519,8 @@ extension SessionDetailView {
 }
 
 // MARK: - Helpers
-private func sanitizedExportFileName(_ s: String, fallback: String, maxLength: Int = 120) -> String {
+private func sanitizedExportFileName(_ s: String, fallback: String, maxLength: Int = 120) -> String
+{
     var text = s.trimmingCharacters(in: .whitespacesAndNewlines)
     if text.isEmpty { return fallback }
     let disallowed = CharacterSet(charactersIn: "/:")
@@ -479,7 +531,10 @@ private func sanitizedExportFileName(_ s: String, fallback: String, maxLength: I
     while text.contains("  ") { text = text.replacingOccurrences(of: "  ", with: " ") }
     text = text.trimmingCharacters(in: .whitespacesAndNewlines)
     if text.isEmpty { text = fallback }
-    if text.count > maxLength { let idx = text.index(text.startIndex, offsetBy: maxLength); text = String(text[..<idx]) }
+    if text.count > maxLength {
+        let idx = text.index(text.startIndex, offsetBy: maxLength)
+        text = String(text[..<idx])
+    }
     return text
 }
 
@@ -510,12 +565,15 @@ private func sanitizedExportFileName(_ s: String, fallback: String, maxLength: I
         source: .codex
     )
 
+    @State var visibility: NavigationSplitViewVisibility = .all
+
     return SessionDetailView(
         summary: mockSummary,
         isProcessing: false,
         onResume: { print("Resume session") },
         onReveal: { print("Reveal in Finder") },
-        onDelete: { print("Delete session") }
+        onDelete: { print("Delete session") },
+        columnVisibility: $visibility
     )
     .frame(width: 600, height: 800)
 }
@@ -545,12 +603,15 @@ private func sanitizedExportFileName(_ s: String, fallback: String, maxLength: I
         source: .codex
     )
 
+    @State var visibility: NavigationSplitViewVisibility = .all
+
     return SessionDetailView(
         summary: mockSummary,
         isProcessing: true,
         onResume: { print("Resume session") },
         onReveal: { print("Reveal in Finder") },
-        onDelete: { print("Delete session") }
+        onDelete: { print("Delete session") },
+        columnVisibility: $visibility
     )
     .frame(width: 600, height: 800)
 }

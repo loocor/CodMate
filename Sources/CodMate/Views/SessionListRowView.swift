@@ -49,7 +49,9 @@ struct SessionListRowView: View {
                     .fill(Color.white)
                     .shadow(color: Color.black.opacity(0.08), radius: 1.5, x: 0, y: 1)
                 container
-                    .stroke(isSelected ? branding.iconColor.opacity(0.5) : Color.black.opacity(0.06), lineWidth: isSelected ? 1.5 : 1)
+                    .stroke(
+                        isSelected ? branding.iconColor.opacity(0.5) : Color.black.opacity(0.06),
+                        lineWidth: isSelected ? 1.5 : 1)
 
                 if let asset = branding.badgeAssetName {
                     Image(asset)
@@ -202,7 +204,7 @@ private func metric(icon: String, value: Int) -> some View {
     )
 
     return SessionListRowView(summary: mockSummary)
-        .frame(width: 400, height: 100)
+        .frame(width: 300, height: 100)
         .padding()
 }
 
