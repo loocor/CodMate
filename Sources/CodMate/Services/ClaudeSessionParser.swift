@@ -64,6 +64,11 @@ struct ClaudeSessionParser {
         guard let timestamp = line.timestamp else { return [] }
         guard let type = line.type else { return [] }
 
+        // Skip sidechain messages (warmup, etc.)
+        if line.isSidechain == true {
+            return []
+        }
+
         switch type {
         case "user":
             return convertUser(line, timestamp: timestamp)
@@ -313,16 +318,10 @@ struct ClaudeSessionParser {
         }
 
         func makeContextRow() -> SessionRow? {
-            guard let model else { return nil }
-            let payload = TurnContextPayload(
-                cwd: nil,
-                approvalPolicy: nil,
-                model: model,
-                effort: nil,
-                summary: nil
-            )
-            let ts = firstTimestamp ?? Date()
-            return SessionRow(timestamp: ts, kind: .turnContext(payload))
+            // For Claude sessions, we don't generate context update rows.
+            // Model info is already shown in the session info card at the top.
+            // This avoids duplicate "Syncing / Context Updated / model: xxx" entries in the timeline.
+            return nil
         }
     }
 
@@ -337,6 +336,7 @@ struct ClaudeSessionParser {
         let summary: String?
         let isMeta: Bool?
         let subtype: String?
+        let isSidechain: Bool?
     }
 
     private struct ClaudeMessage: Decodable {

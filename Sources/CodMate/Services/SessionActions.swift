@@ -57,6 +57,37 @@ struct SessionActions {
         return listPersistedProfiles().contains(id)
     }
 
+    // MARK: - Codex model resolution (global settings)
+    // Read a top-level string key from ~/.codex/config.toml (naïve line-based parser)
+    private func readTopLevelConfigString(_ key: String) -> String? {
+        let url = codexHome.appendingPathComponent("config.toml", isDirectory: false)
+        guard let text = try? String(contentsOf: url, encoding: .utf8) else { return nil }
+        for raw in text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init) {
+            let t = raw.trimmingCharacters(in: .whitespaces)
+            guard t.hasPrefix(key + " ") || t.hasPrefix(key + "=") else { continue }
+            guard let eq = t.firstIndex(of: "=") else { continue }
+            var value = String(t[t.index(after: eq)...]).trimmingCharacters(in: .whitespaces)
+            if value.hasPrefix("\"") && value.hasSuffix("\"") { value.removeFirst(); value.removeLast() }
+            return value
+        }
+        return nil
+    }
+
+    // Effective model for new Codex sessions:
+    // - Prefer global Codex config model
+    // - Else, only fall back to session.model when the origin is Codex
+    private func effectiveCodexModel(for session: SessionSummary) -> String? {
+        if let configured = readTopLevelConfigString("model")?.trimmingCharacters(in: .whitespacesAndNewlines), !configured.isEmpty {
+            return configured
+        }
+        if session.source == .codex {
+            if let m = session.model?.trimmingCharacters(in: .whitespacesAndNewlines), !m.isEmpty {
+                return m
+            }
+        }
+        return nil
+    }
+
     private func renderInlineProfileConfig(
         key id: String,
         model: String?,
@@ -239,7 +270,7 @@ struct SessionActions {
         -> [String]
     {
         var args: [String] = []
-        if let model = session.model, !model.isEmpty { args += ["--model", model] }
+        // Do not append --model for Codex new sessions; rely on project profile or global config
         args += flags(from: options)
         return args
     }
@@ -384,13 +415,8 @@ struct SessionActions {
         // Decide whether to use a persisted profile, or inject a temporary one
         let hasPersistedProfile = persistedProfileExists(profileId)
 
-        // Flags and model: when we are injecting a temporary profile and selecting it with --profile,
-        // we avoid passing --model redundantly to keep precedence simple. Otherwise include it.
+        // Flags only; avoid explicit --model for Codex new to keep behavior consistent
         if let pp {
-            if !(profileId?.isEmpty == false && !hasPersistedProfile) {
-                // Either no profile id, or persisted profile exists: keep explicit model flag
-                if let model = pp.model, !model.isEmpty { args += ["--model", model] }
-            }
             if pp.dangerouslyBypass == true {
                 args += ["--dangerously-bypass-approvals-and-sandbox"]
             } else if pp.fullAuto == true {
@@ -429,7 +455,7 @@ struct SessionActions {
 
                 if let inline = renderInlineProfileConfig(
                     key: profileId,
-                    model: pp?.model,
+                    model: pp?.model, // include model only inside profile injection
                     approvalPolicy: approvalRaw,
                     sandboxMode: sandboxRaw
                 ) {
@@ -598,15 +624,8 @@ struct SessionActions {
             if let a = project.profile?.approval { args += ["-a", a.rawValue] }
         }
 
-        // Model: include explicit --model unless we are injecting a temporary profile (to avoid precedence overlap)
+        // Do not append explicit --model for Codex new; rely on project profile (persisted or inline) or global config
         let modelFromProject = project.profile?.model
-        if !(pid?.isEmpty == false && !hasPersisted) {
-            if let pm = modelFromProject, !pm.isEmpty {
-                args += ["--model", pm]
-            } else if let fm = fallbackModel, !fm.isEmpty {
-                args += ["--model", fm]
-            }
-        }
 
         // Effective policies for inline profile injection (New using project):
         // - approval: prefer explicit; otherwise prefer options; else default to on-request
@@ -668,7 +687,7 @@ struct SessionActions {
 
         // For Codex, use full project profile arguments
         let args = buildNewSessionArguments(
-            using: project, fallbackModel: session.model, options: options
+            using: project, fallbackModel: effectiveCodexModel(for: session), options: options
         ).map { arg -> String in
             if arg.contains(where: { $0.isWhitespace || $0 == "'" }) {
                 return shellEscapedPath(arg)

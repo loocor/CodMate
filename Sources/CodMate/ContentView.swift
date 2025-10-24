@@ -135,7 +135,7 @@ struct ContentView: View {
         )
         .environmentObject(viewModel)
         .navigationSplitViewColumnWidth(
-            min: 250, ideal: 270, max: max(250, sidebarMaxWidth))
+            min: 260, ideal: 260, max: 260)
     }
 
     private var listContent: some View {
@@ -159,7 +159,7 @@ struct ContentView: View {
             onPrimarySelect: { s in selectionPrimaryId = s.id }
         )
         .environmentObject(viewModel)
-        .navigationSplitViewColumnWidth(min: 420, ideal: 480, max: 600)
+        .navigationSplitViewColumnWidth(min: 480, ideal: 480, max: 480)
         .sheet(item: $viewModel.editingSession, onDismiss: { viewModel.cancelEdits() }) { _ in
             EditSessionMetaView(viewModel: viewModel)
         }
@@ -279,30 +279,38 @@ struct ContentView: View {
                                 let sessionSource = provider.sessionSource
                                 Menu {
                                     Button {
-                                        launchNewSession(for: focused, using: sessionSource, style: .preferred)
+                                        launchNewSession(
+                                            for: focused, using: sessionSource, style: .preferred)
                                     } label: {
                                         Label("Use Preferred Launch", systemImage: "gearshape")
                                     }
                                     Button {
-                                        launchNewSession(for: focused, using: sessionSource, style: .terminal)
+                                        launchNewSession(
+                                            for: focused, using: sessionSource, style: .terminal)
                                     } label: {
                                         Label("Open in Terminal", systemImage: "terminal")
                                     }
                                     Button {
-                                        launchNewSession(for: focused, using: sessionSource, style: .iterm)
+                                        launchNewSession(
+                                            for: focused, using: sessionSource, style: .iterm)
                                     } label: {
                                         Label("Open in iTerm2", systemImage: "app.fill")
                                     }
                                     Button {
-                                        launchNewSession(for: focused, using: sessionSource, style: .warp)
+                                        launchNewSession(
+                                            for: focused, using: sessionSource, style: .warp)
                                     } label: {
                                         Label("Open in Warp", systemImage: "app.gift.fill")
                                     }
                                     if viewModel.preferences.defaultResumeUseEmbeddedTerminal {
                                         Button {
-                                            launchNewSession(for: focused, using: sessionSource, style: .embedded)
+                                            launchNewSession(
+                                                for: focused, using: sessionSource, style: .embedded
+                                            )
                                         } label: {
-                                            Label("Open Embedded Terminal", systemImage: "rectangle.badge.plus")
+                                            Label(
+                                                "Open Embedded Terminal",
+                                                systemImage: "rectangle.badge.plus")
                                         }
                                     }
                                 } label: {
@@ -351,11 +359,12 @@ struct ContentView: View {
 
                         Button {
                             let dir = workingDirectory(for: focused)
-                            let cmd = viewModel.buildResumeCLIInvocationRespectingProject(session: focused)
+                            let cmd = viewModel.buildResumeCLIInvocationRespectingProject(
+                                session: focused)
                             viewModel.openPreferredTerminalViaScheme(
                                 app: .iterm2, directory: dir, command: cmd)
                         } label: {
-                        Label("Open in iTerm2", systemImage: "app.fill")
+                            Label("Open in iTerm2", systemImage: "app.fill")
                         }
 
                         Button {
@@ -368,7 +377,7 @@ struct ContentView: View {
                                     body: "Command copied. Paste it in the opened terminal.")
                             }
                         } label: {
-                        Label("Open in Warp", systemImage: "app.gift.fill")
+                            Label("Open in Warp", systemImage: "app.gift.fill")
                         }
 
                         if viewModel.preferences.defaultResumeUseEmbeddedTerminal {
@@ -888,7 +897,9 @@ extension ContentView {
     }
 
     // Local helper to avoid Xcode target membership issues for utility files
-    private func sanitizedExportFileName(_ s: String, fallback: String, maxLength: Int = 120) -> String {
+    private func sanitizedExportFileName(_ s: String, fallback: String, maxLength: Int = 120)
+        -> String
+    {
         var text = s.trimmingCharacters(in: .whitespacesAndNewlines)
         if text.isEmpty { return fallback }
         let disallowed = CharacterSet(charactersIn: "/:")
@@ -899,7 +910,10 @@ extension ContentView {
         while text.contains("  ") { text = text.replacingOccurrences(of: "  ", with: " ") }
         text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if text.isEmpty { text = fallback }
-        if text.count > maxLength { let idx = text.index(text.startIndex, offsetBy: maxLength); text = String(text[..<idx]) }
+        if text.count > maxLength {
+            let idx = text.index(text.startIndex, offsetBy: maxLength)
+            text = String(text[..<idx])
+        }
         return text
     }
 }
