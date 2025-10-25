@@ -359,6 +359,10 @@ private struct EqualWidthSegmentedControl<Item: Identifiable & Hashable>: NSView
         control.action = #selector(Coordinator.changed(_:))
         rebuildSegments(control)
         if #available(macOS 13.0, *) { control.segmentDistribution = .fillEqually }
+
+        control.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        control.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
         container.addSubview(control)
         NSLayoutConstraint.activate([
             control.leadingAnchor.constraint(equalTo: container.leadingAnchor),
@@ -382,8 +386,10 @@ private struct EqualWidthSegmentedControl<Item: Identifiable & Hashable>: NSView
             control.segmentDistribution = .fillEqually
         } else {
             // Fallback: try to equalize manually
-            let width = max(60.0, (control.superview?.bounds.width ?? 480.0) / CGFloat(max(1, items.count)))
-            for i in 0..<control.segmentCount { control.setWidth(width, forSegment: i) }
+            if let superWidth = control.superview?.bounds.width {
+                let width = max(60.0, superWidth / CGFloat(max(1, items.count)))
+                for i in 0..<control.segmentCount { control.setWidth(width, forSegment: i) }
+            }
         }
     }
 

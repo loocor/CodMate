@@ -159,7 +159,7 @@ struct ContentView: View {
             onPrimarySelect: { s in selectionPrimaryId = s.id }
         )
         .environmentObject(viewModel)
-        .navigationSplitViewColumnWidth(min: 480, ideal: 480, max: 480)
+        .navigationSplitViewColumnWidth(min: 360, ideal: 420, max: 480)
         .sheet(item: $viewModel.editingSession, onDismiss: { viewModel.cancelEdits() }) { _ in
             EditSessionMetaView(viewModel: viewModel)
         }
