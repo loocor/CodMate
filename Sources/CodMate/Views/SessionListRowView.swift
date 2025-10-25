@@ -71,16 +71,21 @@ struct SessionListRowView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(summary.effectiveTitle)
                     .font(.headline)
-                HStack(spacing: 12) {
+                    .lineLimit(1)
+                HStack(spacing: 8) {
                     Text(summary.startedAt.formatted(date: .numeric, time: .shortened))
+                        .layoutPriority(1)
                     Text(summary.readableDuration)
+                        .layoutPriority(1)
                     if let model = summary.displayModel ?? summary.model {
                         Text(model)
                             .foregroundStyle(.secondary)
+                            .lineLimit(1)
                     }
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)
+                .lineLimit(1)
 
                 Text(summary.commentSnippet)
                     .font(.caption)
@@ -88,7 +93,7 @@ struct SessionListRowView: View {
                     .lineLimit(2)
 
                 // Compact metrics moved from detail view
-                HStack(spacing: 12) {
+                HStack(spacing: 8) {
                     metric(icon: "person", value: summary.userMessageCount)
                     metric(icon: "sparkles", value: summary.assistantMessageCount)
                     metric(icon: "hammer", value: summary.toolInvocationCount)
@@ -99,8 +104,9 @@ struct SessionListRowView: View {
                 .font(.caption2.monospacedDigit())
                 .foregroundStyle(.secondary)
             }
+            .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
 
-            Spacer()
+            Spacer(minLength: 0)
         }
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .padding(.vertical, 8)

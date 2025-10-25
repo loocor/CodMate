@@ -165,11 +165,11 @@ enum SessionSortOrder: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .mostRecent: return "Most Recent"
+        case .mostRecent: return "Recent"
         case .longestDuration: return "Duration"
         case .mostActivity: return "Activity"
-        case .alphabetical: return "Alphabetical"
-        case .largestSize: return "File Size"
+        case .alphabetical: return "Name"
+        case .largestSize: return "Size"
         }
     }
 
