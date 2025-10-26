@@ -126,6 +126,8 @@ struct SessionSummary: Identifiable, Hashable, Sendable, Codable {
 extension SessionSummary {
     func overridingSource(_ newSource: SessionSource) -> SessionSummary {
         if newSource == source { return self }
+        // Cross-provider new session should NOT inherit provider-specific model names.
+        // Drop model when switching source to avoid leaking e.g. GPT-5 to Claude or vice versa.
         return SessionSummary(
             id: id,
             fileURL: fileURL,
@@ -137,7 +139,7 @@ extension SessionSummary {
             cwd: cwd,
             originator: originator,
             instructions: instructions,
-            model: model,
+            model: nil,
             approvalPolicy: approvalPolicy,
             userMessageCount: userMessageCount,
             assistantMessageCount: assistantMessageCount,

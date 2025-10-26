@@ -14,7 +14,12 @@ Architecture
 
 UI Rules (macOS specific)
 - Use macOS SwiftUI and AppKit bridges; do NOT use iOS‑only placements such as `.navigationBarTrailing`.
-- Settings › Codex 使用 macOS 15 的 TabView 新 API（`Tab("…", systemImage: "…")`）拆分为多个页签，减少纵向滚动；容器内边距与其他设置页统一（水平 16、顶部 16）。
+- Settings 使用 macOS 15 的 TabView 新 API（`Tab("…", systemImage: "…")`）拆分为多个页签；容器内边距统一（水平 16、顶部 16）。
+- Providers 已从 Codex 页签中拆分为顶层 Settings 页：Settings › Providers 管理全局供应商与 Codex/Claude 绑定；Settings › Codex 仅保留 Runtime/Notifications/Privacy/Raw Config（不再含 Providers）。
+- MCP Server 页签拆分为三个子页签（使用 macOS 15 TabView 新 API）：
+  - Import：Uni‑Import（统一导入），支持粘贴/拖拽 JSON 片段添加 MCP 服务器；初版仅 JSON，后续补 TOML/.mcpb。
+  - Servers：展示已添加服务器（名称、类型、描述、URL/命令），支持整服启用/停用以及能力级别开关（能力列来自 SDK 探测）。
+  - Advanced：引导使用 MCPMate 获取高级管理能力，包含下载入口与说明。
 - Search: prefer a toolbar `SearchField` in macOS, not `.searchable` when exact placement (far right) matters.
 - Toolbars: place refresh as the last ToolbarItem to pin it at the far right. Keep destructive actions in the detail pane, not in the main toolbar. Command+R and the refresh button also invalidate and recompute global sidebar statistics (projects/path tree and calendar day counts) to reflect new sessions immediately.
 - Sidebar (left):
@@ -63,11 +68,9 @@ CLI Integration (codex)
 - UI adds a "Copy real command" button in the detail action bar when the embedded terminal is active; this copies the exact `codex resume <id>` invocation including flags.
 - Provide a “New” command (detail toolbar) that launches `codex` in the session’s working directory while preserving the configured sandbox/approval defaults and `SessionSummary.model`.
 
-Codex Settings (new top-level Settings page)
-- Settings › Codex centralizes Codex CLI configuration separate from General/Terminal/MCP Server.
-- Sections: Providers, Model & Reasoning, Sandbox & Approvals, Notifications, Privacy, Profiles.
-- Providers: list with single‑select active provider; add/edit/delete provider blocks under `[model_providers.<id>]`.
-- Provider presets: Add Provider menu includes K2, GLM, DeepSeek, and Other. Presets prefill name and base URL and show an “Get key” link next to API Key: K2 → https://platform.moonshot.cn/console/api-keys (base https://api.moonshot.cn/v1), GLM → https://bigmodel.cn/usercenter/proj-mgmt/apikeys (base https://open.bigmodel.cn/api/paas/v4/), DeepSeek → https://platform.deepseek.com/api_keys (base https://api.deepseek.com/v1).
+Codex Settings
+- Settings › Codex 仅管理 Codex CLI 运行时相关配置（Model & Reasoning、Sandbox & Approvals、Notifications、Privacy、Raw Config）。
+- Providers 页面已独立：Settings › Providers（跨应用共享，供 Codex 与 Claude Code 选择/配置）。
 - Notifications: TUI notifications toggle; system notifications bridge via `notify` (built‑in script path is managed by CodMate).
 - Privacy: expose `shell_environment_policy`, reasoning visibility, OTEL exporter; do not surface history persistence in phase 1.
 - Projects auto‑create a same‑id Profile on creation; renaming a project synchronizes the profile name. Conflict prompts are required.
@@ -115,3 +118,6 @@ Known Pitfalls
 - `.searchable` may hijack the trailing toolbar slot on macOS; use `SearchField` in a `ToolbarItem` to control placement.
 - Don’t put Info.plist in Copy Bundle Resources (Xcode will warn and refuse to build).
 - OutlineGroup row height is affected by control size and insets; tighten with `.environment(\.defaultMinListRowHeight, 18)` and `.listRowInsets(...)` inside the row content.
+- Swift KeyPath escaping when patching: do not double-escape the leading backslash in typed key paths. Always write single-backslash literals like `\ProvidersVM.codexBaseURL` in Swift sources. The apply_patch tool takes plain text; extra escaping (e.g., `\\ProvidersVM...`) will compile-fail and break symbol discovery across files.
+- Prefer dot-shorthand KeyPaths in Swift (clearer, avoids escaping pitfalls): use `\.codexBaseURL` instead of `\ProvidersVM.codexBaseURL` when the generic context already constrains the base type (e.g., `ReferenceWritableKeyPath<ProvidersVM, String>`). This makes patches safer and reduces chances of accidental extra backslashes.
+- String interpolation gotcha: do not escape quotes inside `\( ... )`. Write `Text("Codex: \(dict["codex"] ?? "")")`, not `Text("Codex: \(dict[\"codex\"] ?? \"\")")`. Escaping quotes inside interpolation confuses the outer string literal and can cause “Unterminated string literal”.

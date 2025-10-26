@@ -539,6 +539,8 @@ private func sanitizedExportFileName(_ s: String, fallback: String, maxLength: I
 }
 
 #Preview {
+    @Previewable @State var visibility: NavigationSplitViewVisibility = .all
+
     // Mock SessionSummary data
     let mockSummary = SessionSummary(
         id: "session-123",
@@ -565,8 +567,6 @@ private func sanitizedExportFileName(_ s: String, fallback: String, maxLength: I
         source: .codex
     )
 
-    @State var visibility: NavigationSplitViewVisibility = .all
-
     return SessionDetailView(
         summary: mockSummary,
         isProcessing: false,
@@ -579,6 +579,8 @@ private func sanitizedExportFileName(_ s: String, fallback: String, maxLength: I
 }
 
 #Preview("Processing State") {
+    @Previewable @State var visibility: NavigationSplitViewVisibility = .all
+
     let mockSummary = SessionSummary(
         id: "session-456",
         fileURL: URL(fileURLWithPath: "/Users/developer/.codex/sessions/session-456.json"),
@@ -602,8 +604,6 @@ private func sanitizedExportFileName(_ s: String, fallback: String, maxLength: I
         lastUpdatedAt: Date().addingTimeInterval(-300),
         source: .codex
     )
-
-    @State var visibility: NavigationSplitViewVisibility = .all
 
     return SessionDetailView(
         summary: mockSummary,

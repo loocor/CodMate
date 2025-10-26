@@ -55,13 +55,13 @@ final class SessionListViewModel: ObservableObject {
     let preferences: SessionPreferencesStore
 
     private let indexer: SessionIndexer
-    private let actions: SessionActions
-    private var allSessions: [SessionSummary] = []
+    let actions: SessionActions
+    var allSessions: [SessionSummary] = []
     private var fulltextMatches: Set<String> = []  // SessionSummary.id set
     private var fulltextTask: Task<Void, Never>?
     private var enrichmentTask: Task<Void, Never>?
-    private var notesStore: SessionNotesStore
-    private var notesSnapshot: [String: SessionNote] = [:]
+    var notesStore: SessionNotesStore
+    var notesSnapshot: [String: SessionNote] = [:]
     private var canonicalCwdCache: [String: String] = [:]
     private var directoryMonitor: DirectoryMonitor?
     private var directoryRefreshTask: Task<Void, Never>?
@@ -97,16 +97,16 @@ final class SessionListViewModel: ObservableObject {
         }
         let hints: Hints
     }
-    private var pendingAssignIntents: [PendingAssignIntent] = []
-    private var intentsCleanupTask: Task<Void, Never>?
+    var pendingAssignIntents: [PendingAssignIntent] = []
+    var intentsCleanupTask: Task<Void, Never>?
 
     // Projects
-    private let configService = CodexConfigService()
-    private let projectsStore = ProjectsStore()
-    private let claudeProvider = ClaudeSessionProvider()
-    @Published private(set) var projects: [Project] = []
-    private var projectCounts: [String: Int] = [:]
-    private var projectMemberships: [String: String] = [:]
+    let configService = CodexConfigService()
+    let projectsStore = ProjectsStore()
+    let claudeProvider = ClaudeSessionProvider()
+    @Published var projects: [Project] = []
+    var projectCounts: [String: Int] = [:]
+    var projectMemberships: [String: String] = [:]
     @Published var selectedProjectId: String? = nil {
         didSet {
             guard !suppressFilterNotifications, oldValue != selectedProjectId else { return }
@@ -301,362 +301,6 @@ final class SessionListViewModel: ObservableObject {
         isLoading = false
     }
 
-    func resume(session: SessionSummary) async -> Result<ProcessResult, Error> {
-        do {
-            let result = try await actions.resume(
-                session: session,
-                executableURL: preferredExecutableURL(for: session.source),
-                options: preferences.resumeOptions)
-            return .success(result)
-        } catch {
-            return .failure(error)
-        }
-    }
-
-    private func preferredExecutableURL(for source: SessionSource) -> URL {
-        switch source {
-        case .codex: return preferences.codexExecutableURL
-        case .claude: return preferences.claudeExecutableURL
-        }
-    }
-
-    func copyResumeCommands(session: SessionSummary) {
-        actions.copyResumeCommands(
-            session: session,
-            executableURL: preferredExecutableURL(for: session.source),
-            options: preferences.resumeOptions,
-            simplifiedForExternal: true
-        )
-    }
-
-    // Profile-aware variants (respect current session's project profile when available)
-    func copyResumeCommandsRespectingProject(session: SessionSummary) {
-        if session.source != .codex {
-            actions.copyResumeCommands(
-                session: session,
-                executableURL: preferredExecutableURL(for: session.source),
-                options: preferences.resumeOptions,
-                simplifiedForExternal: true
-            )
-            return
-        }
-        if let pid = projectIdForSession(session.id),
-            let p = projects.first(where: { $0.id == pid }),
-            p.profile != nil || (p.profileId?.isEmpty == false)
-        {
-            actions.copyResumeUsingProjectProfileCommands(
-                session: session, project: p,
-                executableURL: preferredExecutableURL(for: .codex),
-                options: preferences.resumeOptions)
-        } else {
-            actions.copyResumeCommands(
-                session: session,
-                executableURL: preferredExecutableURL(for: .codex),
-                options: preferences.resumeOptions, simplifiedForExternal: true)
-        }
-    }
-
-    func openInTerminal(session: SessionSummary) -> Bool {
-        actions.openInTerminal(
-            session: session,
-            executableURL: preferredExecutableURL(for: session.source),
-            options: preferences.resumeOptions)
-    }
-
-    func buildResumeCommands(session: SessionSummary) -> String {
-        return actions.buildResumeCommandLines(
-            session: session,
-            executableURL: preferredExecutableURL(for: session.source),
-            options: preferences.resumeOptions
-        )
-    }
-
-    func buildExternalResumeCommands(session: SessionSummary) -> String {
-        return actions.buildExternalResumeCommands(
-            session: session,
-            executableURL: preferredExecutableURL(for: session.source),
-            options: preferences.resumeOptions
-        )
-    }
-
-    func buildResumeCLIInvocation(session: SessionSummary) -> String {
-        let execPath =
-            actions.resolveExecutableURL(
-                preferred: preferredExecutableURL(for: session.source),
-                executableName: session.source == .codex ? "codex" : "claude")?.path
-            ?? preferredExecutableURL(for: session.source).path
-        return actions.buildResumeCLIInvocation(
-            session: session,
-            executablePath: execPath,
-            options: preferences.resumeOptions
-        )
-    }
-
-    func buildResumeCLIInvocationRespectingProject(session: SessionSummary) -> String {
-        if session.source == .codex,
-            let pid = projectIdForSession(session.id),
-            let p = projects.first(where: { $0.id == pid }),
-            p.profile != nil || (p.profileId?.isEmpty == false)
-        {
-            let execPath =
-                actions.resolveExecutableURL(
-                    preferred: preferredExecutableURL(for: .codex), executableName: "codex")?.path
-                ?? preferredExecutableURL(for: .codex).path
-            return actions.buildResumeUsingProjectProfileCLIInvocation(
-                session: session, project: p, executablePath: execPath,
-                options: preferences.resumeOptions)
-        }
-        let execPath =
-            actions.resolveExecutableURL(
-                preferred: preferredExecutableURL(for: session.source),
-                executableName: session.source == .codex ? "codex" : "claude")?.path
-            ?? preferredExecutableURL(for: session.source).path
-        return actions.buildResumeCLIInvocation(
-            session: session, executablePath: execPath, options: preferences.resumeOptions)
-    }
-
-    func copyNewSessionCommands(session: SessionSummary) {
-        actions.copyNewSessionCommands(
-            session: session,
-            executableURL: preferredExecutableURL(for: session.source),
-            options: preferences.resumeOptions
-        )
-    }
-
-    func buildNewSessionCLIInvocation(session: SessionSummary) -> String {
-        return actions.buildNewSessionCLIInvocation(
-            session: session,
-            options: preferences.resumeOptions
-        )
-    }
-
-    func openNewSession(session: SessionSummary) {
-        _ = actions.openNewSession(
-            session: session,
-            executableURL: preferredExecutableURL(for: session.source),
-            options: preferences.resumeOptions
-        )
-    }
-
-    // MARK: - Project-level new session
-    func buildNewProjectCLIInvocation(project: Project) -> String {
-        actions.buildNewProjectCLIInvocation(project: project, options: preferences.resumeOptions)
-    }
-
-    func copyNewProjectCommands(project: Project) {
-        actions.copyNewProjectCommands(
-            project: project, executableURL: preferences.codexExecutableURL,
-            options: preferences.resumeOptions)
-    }
-
-    func openNewSession(project: Project) {
-        // Respect preferred external app setting
-        let app = preferences.defaultResumeExternalApp
-        let dirOpt = project.directory
-        // Record auto-assign intent for project-level new
-        recordIntentForProjectNew(project: project)
-        switch app {
-        case .iterm2:
-            let cmd = buildNewProjectCLIInvocation(project: project)
-            actions.openTerminalViaScheme(.iterm2, directory: dirOpt, command: cmd)
-        case .warp:
-            actions.openTerminalViaScheme(.warp, directory: dirOpt)
-            copyNewProjectCommands(project: project)
-        case .terminal:
-            _ = actions.openNewProject(
-                project: project, executableURL: preferences.codexExecutableURL,
-                options: preferences.resumeOptions)
-        case .none:
-            let fallback = dirOpt ?? NSHomeDirectory()
-            _ = actions.openAppleTerminal(at: fallback)
-            copyNewProjectCommands(project: project)
-        }
-        Task {
-            await SystemNotifier.shared.notify(
-                title: "CodMate", body: "Command copied. Paste it in the opened terminal.")
-        }
-    }
-
-    // MARK: - New (detail) respecting Project Profile
-    func buildNewSessionCLIInvocationRespectingProject(session: SessionSummary) -> String {
-        if session.source == .codex,
-            let pid = projectIdForSession(session.id),
-            let p = projects.first(where: { $0.id == pid }),
-            p.profile != nil || (p.profileId?.isEmpty == false)
-        {
-            return actions.buildNewSessionUsingProjectProfileCLIInvocation(
-                session: session, project: p, options: preferences.resumeOptions)
-        }
-        return actions.buildNewSessionCLIInvocation(
-            session: session, options: preferences.resumeOptions)
-    }
-
-    func buildNewSessionCLIInvocationRespectingProject(
-        session: SessionSummary, initialPrompt: String
-    ) -> String {
-        if session.source == .codex,
-            let pid = projectIdForSession(session.id),
-            let p = projects.first(where: { $0.id == pid }),
-            p.profile != nil || (p.profileId?.isEmpty == false)
-        {
-            return actions.buildNewSessionUsingProjectProfileCLIInvocation(
-                session: session, project: p, options: preferences.resumeOptions,
-                initialPrompt: initialPrompt)
-        }
-        return actions.buildNewSessionCLIInvocation(
-            session: session, options: preferences.resumeOptions, initialPrompt: initialPrompt)
-    }
-
-    func copyNewSessionCommandsRespectingProject(session: SessionSummary) {
-        if session.source == .codex,
-            let pid = projectIdForSession(session.id),
-            let p = projects.first(where: { $0.id == pid }),
-            p.profile != nil || (p.profileId?.isEmpty == false)
-        {
-            actions.copyNewSessionUsingProjectProfileCommands(
-                session: session, project: p, executableURL: preferredExecutableURL(for: session.source),
-                options: preferences.resumeOptions)
-        } else {
-            actions.copyNewSessionCommands(
-                session: session,
-                executableURL: preferredExecutableURL(for: session.source),
-                options: preferences.resumeOptions)
-        }
-    }
-
-    func copyNewSessionCommandsRespectingProject(session: SessionSummary, initialPrompt: String) {
-        if session.source == .codex,
-            let pid = projectIdForSession(session.id),
-            let p = projects.first(where: { $0.id == pid }),
-            p.profile != nil || (p.profileId?.isEmpty == false)
-        {
-            actions.copyNewSessionUsingProjectProfileCommands(
-                session: session, project: p, executableURL: preferredExecutableURL(for: session.source),
-                options: preferences.resumeOptions, initialPrompt: initialPrompt)
-        } else {
-            let cmd = actions.buildNewSessionCLIInvocation(
-                session: session, options: preferences.resumeOptions, initialPrompt: initialPrompt)
-            let pb = NSPasteboard.general
-            pb.clearContents()
-            pb.setString(cmd + "\n", forType: .string)
-        }
-    }
-
-    func openNewSessionRespectingProject(session: SessionSummary) {
-        if session.source == .codex,
-            let pid = projectIdForSession(session.id),
-            let p = projects.first(where: { $0.id == pid }),
-            p.profile != nil || (p.profileId?.isEmpty == false)
-        {
-            _ = actions.openNewSessionUsingProjectProfile(
-                session: session, project: p, executableURL: preferredExecutableURL(for: session.source),
-                options: preferences.resumeOptions)
-        } else {
-            _ = actions.openNewSession(
-                session: session,
-                executableURL: preferredExecutableURL(for: session.source),
-                options: preferences.resumeOptions)
-        }
-    }
-
-    func openNewSessionRespectingProject(session: SessionSummary, initialPrompt: String) {
-        if session.source == .codex,
-            let pid = projectIdForSession(session.id),
-            let p = projects.first(where: { $0.id == pid }),
-            p.profile != nil || (p.profileId?.isEmpty == false)
-        {
-            _ = actions.openNewSessionUsingProjectProfile(
-                session: session, project: p, executableURL: preferredExecutableURL(for: session.source),
-                options: preferences.resumeOptions, initialPrompt: initialPrompt)
-        } else {
-            // Terminal-only variant is not implemented for non-project case; open generic new then user pastes.
-            _ = actions.openNewSession(
-                session: session,
-                executableURL: preferredExecutableURL(for: session.source),
-                options: preferences.resumeOptions)
-        }
-    }
-
-    // MARK: - Project lookup helpers
-    func projectIdForSession(_ id: String) -> String? {
-        projectMemberships[id]
-    }
-
-    func projectForId(_ id: String) async -> Project? {
-        await projectsStore.getProject(id: id)
-    }
-
-    func allowedSources(for session: SessionSummary) -> [ProjectSessionSource] {
-        if let pid = projectIdForSession(session.id),
-            let p = projects.first(where: { $0.id == pid })
-        {
-            let allowed = p.sources.isEmpty ? ProjectSessionSource.allSet : p.sources
-            return Array(allowed).sorted { $0.displayName < $1.displayName }
-        }
-        return ProjectSessionSource.allCases
-    }
-
-    func copyRealResumeCommand(session: SessionSummary) {
-        actions.copyRealResumeInvocation(
-            session: session,
-            executableURL: preferredExecutableURL(for: session.source),
-            options: preferences.resumeOptions
-        )
-    }
-
-    func openWarpLaunch(session: SessionSummary) {
-        _ = actions.openWarpLaunchConfig(session: session, options: preferences.resumeOptions)
-    }
-
-    func openPreferredTerminal(app: TerminalApp) {
-        actions.openTerminalApp(app)
-    }
-
-    func openPreferredTerminalViaScheme(app: TerminalApp, directory: String, command: String? = nil)
-    {
-        actions.openTerminalViaScheme(app, directory: directory, command: command)
-    }
-
-    func openAppleTerminal(at directory: String) -> Bool {
-        actions.openAppleTerminal(at: directory)
-    }
-
-    // MARK: - Rename / Comment
-    func beginEditing(session: SessionSummary) async {
-        editingSession = session
-        if let note = await notesStore.note(for: session.id) {
-            editTitle = note.title ?? ""
-            editComment = note.comment ?? ""
-        } else {
-            editTitle = session.userTitle ?? ""
-            editComment = session.userComment ?? ""
-        }
-    }
-
-    func saveEdits() async {
-        guard let session = editingSession else { return }
-        let titleValue = editTitle.isEmpty ? nil : editTitle
-        let commentValue = editComment.isEmpty ? nil : editComment
-        await notesStore.upsert(id: session.id, title: titleValue, comment: commentValue)
-        notesSnapshot[session.id] = SessionNote(
-            id: session.id, title: titleValue, comment: commentValue, updatedAt: Date())
-        var map = Dictionary(uniqueKeysWithValues: allSessions.map { ($0.id, $0) })
-        if var s = map[session.id] {
-            s.userTitle = titleValue
-            s.userComment = commentValue
-            map[session.id] = s
-        }
-        allSessions = Array(map.values)
-        applyFilters()
-        cancelEdits()
-    }
-
-    func cancelEdits() {
-        editingSession = nil
-        editTitle = ""
-        editComment = ""
-    }
-
     func reveal(session: SessionSummary) {
         actions.revealInFinder(session: session)
     }
@@ -725,6 +369,12 @@ final class SessionListViewModel: ObservableObject {
             }
         }
         return [:]
+    }
+
+    func cacheKey(_ monthStart: Date, _ dimension: DateDimension) -> String {
+        let df = DateFormatter()
+        df.dateFormat = "yyyy-MM"
+        return dimension.rawValue + "|" + df.string(from: monthStart)
     }
 
     var pathTreeRoot: PathTreeNode? { pathTreeRootPublished }
@@ -807,7 +457,7 @@ final class SessionListViewModel: ObservableObject {
         scheduleFilterRefresh(force: true)
     }
 
-    private func applyFilters() {
+    func applyFilters() {
         guard !allSessions.isEmpty else {
             sections = []
             return
@@ -1106,7 +756,7 @@ final class SessionListViewModel: ObservableObject {
             })
     }
 
-    private static func canonicalPath(_ path: String) -> String {
+    static func canonicalPath(_ path: String) -> String {
         let expanded = (path as NSString).expandingTildeInPath
         var standardized = URL(fileURLWithPath: expanded).standardizedFileURL.path
         if standardized.count > 1 && standardized.hasSuffix("/") {
@@ -1282,21 +932,7 @@ extension SessionListViewModel {
         await MainActor.run { self.globalSessionCount = total }
     }
 
-    @MainActor
-    private func recomputeProjectCounts() {
-        var counts: [String: Int] = [:]
-        let allowed = projects.reduce(into: [String: Set<ProjectSessionSource>]()) {
-            $0[$1.id] = $1.sources
-        }
-        for session in allSessions {
-            guard let pid = projectMemberships[session.id] else { continue }
-            let allowedSources = allowed[pid] ?? ProjectSessionSource.allSet
-            if allowedSources.contains(session.source.projectSource) {
-                counts[pid, default: 0] += 1
-            }
-        }
-        projectCounts = counts
-    }
+
 
     func timeline(for summary: SessionSummary) async -> [ConversationTurn] {
         if summary.source == .claude {
@@ -1312,320 +948,6 @@ extension SessionListViewModel {
         objectWillChange.send()
     }
 
-    // MARK: - Projects
-    func loadProjects() async {
-        var list = await projectsStore.listProjects()
-        if list.isEmpty {
-            let cfg = await configService.listProjects()
-            if !cfg.isEmpty {
-                for p in cfg { await projectsStore.upsertProject(p) }
-                list = await projectsStore.listProjects()
-            }
-        }
-        let counts = await projectsStore.counts()
-        let memberships = await projectsStore.membershipsSnapshot()
-        await MainActor.run {
-            self.projects = list
-            self.projectCounts = counts
-            self.projectMemberships = memberships
-            self.recomputeProjectCounts()
-            self.applyFilters()
-        }
-    }
-
-    func setSelectedProject(_ id: String?) {
-        selectedProjectId = id
-    }
-
-    func assignSessions(to projectId: String?, ids: [String]) async {
-        await projectsStore.assign(sessionIds: ids, to: projectId)
-        let counts = await projectsStore.counts()
-        let memberships = await projectsStore.membershipsSnapshot()
-        await MainActor.run {
-            self.projectCounts = counts
-            self.projectMemberships = memberships
-            self.recomputeProjectCounts()
-        }
-        applyFilters()
-    }
-
-    func projectCountsFromStore() -> [String: Int] { projectCounts }
-
-    // Visible counts per project considering only current dateDimension/selectedDay.
-    // Ignores search text and project selection to give a global sense under the date scope.
-    func visibleProjectCountsForDateScope() -> [String: Int] {
-        var visible: [String: Int] = [:]
-        let cal = Calendar.current
-        let allowed = projects.reduce(into: [String: Set<ProjectSessionSource>]()) {
-            $0[$1.id] = $1.sources
-        }
-        for s in allSessions {
-            // Date filter
-            let refDate: Date =
-                (dateDimension == .created) ? s.startedAt : (s.lastUpdatedAt ?? s.startedAt)
-            if !selectedDays.isEmpty {
-                var match = false
-                for d in selectedDays {
-                    if cal.isDate(refDate, inSameDayAs: d) {
-                        match = true
-                        break
-                    }
-                }
-                if !match { continue }
-            } else if let day = selectedDay {
-                if !cal.isDate(refDate, inSameDayAs: day) { continue }
-            }
-            if let pid = projectMemberships[s.id] {
-                let allowedSources = allowed[pid] ?? ProjectSessionSource.allSet
-                if !allowedSources.contains(s.source.projectSource) { continue }
-                visible[pid, default: 0] += 1
-            }
-        }
-        return visible
-    }
-
-    // Aggregated counts including subtree for display (visible/total)
-    func projectCountsDisplay() -> [String: (visible: Int, total: Int)] {
-        let directVisible = visibleProjectCountsForDateScope()
-        let directTotal = projectCounts
-        // Build children index
-        var children: [String: [String]] = [:]
-        for p in projects {
-            if let parent = p.parentId { children[parent, default: []].append(p.id) }
-        }
-        // DFS to sum subtree counts
-        func aggregate(for id: String, using map: inout [String: (Int, Int)]) -> (Int, Int) {
-            if let cached = map[id] { return cached }
-            var v = directVisible[id] ?? 0
-            var t = directTotal[id] ?? 0
-            for c in (children[id] ?? []) {
-                let (cv, ct) = aggregate(for: c, using: &map)
-                v += cv
-                t += ct
-            }
-            map[id] = (v, t)
-            return (v, t)
-        }
-        var memo: [String: (Int, Int)] = [:]
-        var out: [String: (visible: Int, total: Int)] = [:]
-        for p in projects {
-            let (v, t) = aggregate(for: p.id, using: &memo)
-            out[p.id] = (v, t)
-        }
-        return out
-    }
-
-    // All-row visible count under current date scope (ignores project/path/search filters)
-    func visibleAllCountForDateScope() -> Int {
-        let cal = Calendar.current
-        var count = 0
-        for s in allSessions {
-            let ref: Date =
-                (dateDimension == .created) ? s.startedAt : (s.lastUpdatedAt ?? s.startedAt)
-            if !selectedDays.isEmpty {
-                var match = false
-                for d in selectedDays {
-                    if cal.isDate(ref, inSameDayAs: d) {
-                        match = true
-                        break
-                    }
-                }
-                if !match { continue }
-            } else if let day = selectedDay {
-                if !cal.isDate(ref, inSameDayAs: day) { continue }
-            }
-            count += 1
-        }
-        return count
-    }
-
-    // MARK: - Session sources for dialogs/sheets
-    // Returns all sessions within the same explicit project as the anchor session.
-    // If the anchor has no project, return all sessions (fallback).
-    func allSessionsInSameProject(as anchor: SessionSummary) -> [SessionSummary] {
-        if let pid = projectMemberships[anchor.id] {
-            let allowed = projects.first(where: { $0.id == pid })?.sources ?? ProjectSessionSource.allSet
-            return allSessions.filter {
-                projectMemberships[$0.id] == pid && allowed.contains($0.source.projectSource)
-            }
-        }
-        return allSessions
-    }
-
-    // Project upsert/delete with config sync
-    func createOrUpdateProject(_ project: Project) async {
-        await projectsStore.upsertProject(project)
-        await loadProjects()
-    }
-
-    func deleteProject(id: String) async {
-        await projectsStore.deleteProject(id: id)
-        await loadProjects()
-        if selectedProjectId == id { selectedProjectId = nil }
-        applyFilters()
-    }
-
-    // Delete project and all descendants
-    func deleteProjectCascade(id: String) async {
-        let list = await projectsStore.listProjects()
-        let ids = collectDescendants(of: id, in: list) + [id]
-        for pid in ids { await projectsStore.deleteProject(id: pid) }
-        await loadProjects()
-        if let sel = selectedProjectId, ids.contains(sel) { selectedProjectId = nil }
-        applyFilters()
-    }
-
-    // Delete project and move its direct children to top level (keep grandchildren nested)
-    func deleteProjectMoveChildrenUp(id: String) async {
-        let list = await projectsStore.listProjects()
-        for p in list where p.parentId == id {
-            var moved = p
-            moved.parentId = nil
-            await projectsStore.upsertProject(moved)
-        }
-        await projectsStore.deleteProject(id: id)
-        await loadProjects()
-        if selectedProjectId == id { selectedProjectId = nil }
-        applyFilters()
-    }
-
-    private func collectDescendants(of id: String, in list: [Project]) -> [String] {
-        var result: [String] = []
-        func dfs(_ pid: String) {
-            for p in list where p.parentId == pid {
-                result.append(p.id)
-                dfs(p.id)
-            }
-        }
-        dfs(id)
-        return result
-    }
-
-    // Import memberships from notes.projectId one-time when store is empty
-    private func importMembershipsFromNotesIfNeeded(notes: [String: SessionNote]) async {
-        let existing = await projectsStore.membershipsSnapshot()
-        if !existing.isEmpty { return }
-        var buckets: [String: [String]] = [:]  // pid -> [sid]
-        for (sid, n) in notes { if let pid = n.projectId { buckets[pid, default: []].append(sid) } }
-        guard !buckets.isEmpty else { return }
-        for (pid, sids) in buckets { await projectsStore.assign(sessionIds: sids, to: pid) }
-        let counts = await projectsStore.counts()
-        let memberships = await projectsStore.membershipsSnapshot()
-        await MainActor.run {
-            self.projectCounts = counts
-            self.projectMemberships = memberships
-            self.recomputeProjectCounts()
-        }
-    }
-}
-
-extension SessionListViewModel {
-    fileprivate func cacheKey(_ monthStart: Date, _ dimension: DateDimension) -> String {
-        let df = DateFormatter()
-        df.dateFormat = "yyyy-MM"
-        return dimension.rawValue + "|" + df.string(from: monthStart)
-    }
-}
-
-// MARK: - Auto assign intents + matcher
-extension SessionListViewModel {
-    private func pruneExpiredIntents() {
-        let now = Date()
-        pendingAssignIntents.removeAll { now.timeIntervalSince($0.t0) > 60 }
-    }
-
-    private func recordIntent(
-        projectId: String, expectedCwd: String, hints: PendingAssignIntent.Hints
-    ) {
-        if !preferences.autoAssignNewToSameProject { return }
-        let canonical = Self.canonicalPath(expectedCwd)
-        pendingAssignIntents.append(
-            PendingAssignIntent(
-                projectId: projectId, expectedCwd: canonical, t0: Date(), hints: hints))
-        pruneExpiredIntents()
-    }
-
-    func recordIntentForDetailNew(anchor: SessionSummary) {
-        guard let pid = projectIdForSession(anchor.id) else { return }
-        let hints = PendingAssignIntent.Hints(
-            model: anchor.model,
-            sandbox: preferences.resumeOptions.flagSandboxRaw,
-            approval: preferences.resumeOptions.flagApprovalRaw
-        )
-        recordIntent(projectId: pid, expectedCwd: anchor.cwd, hints: hints)
-    }
-
-    func recordIntentForProjectNew(project: Project) {
-        let expected =
-            (project.directory?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap {
-                $0.isEmpty ? nil : $0
-            } ?? NSHomeDirectory()
-        let hints = PendingAssignIntent.Hints(
-            model: project.profile?.model,
-            sandbox: project.profile?.sandbox?.rawValue ?? preferences.resumeOptions.flagSandboxRaw,
-            approval: project.profile?.approval?.rawValue
-                ?? preferences.resumeOptions.flagApprovalRaw
-        )
-        recordIntent(projectId: project.id, expectedCwd: expected, hints: hints)
-    }
-
-    private func handleAutoAssignIfMatches(_ s: SessionSummary) {
-        guard !pendingAssignIntents.isEmpty else { return }
-        let canonical = Self.canonicalPath(s.cwd)
-        let candidates = pendingAssignIntents.filter { intent in
-            guard canonical == intent.expectedCwd else { return false }
-            let windowStart = intent.t0.addingTimeInterval(-2)
-            let windowEnd = intent.t0.addingTimeInterval(60)
-            return s.startedAt >= windowStart && s.startedAt <= windowEnd
-        }
-        guard !candidates.isEmpty else { return }
-        struct Scored {
-            let intent: PendingAssignIntent
-            let score: Int
-            let timeAbs: TimeInterval
-        }
-        var scored: [Scored] = []
-        for it in candidates {
-            var score = 0
-            if let m = it.hints.model, let sm = s.model, !m.isEmpty, m == sm { score += 1 }
-            if let a = it.hints.approval, let sa = s.approvalPolicy, !a.isEmpty, a == sa {
-                score += 1
-            }
-            let timeAbs = abs(s.startedAt.timeIntervalSince(it.t0))
-            scored.append(Scored(intent: it, score: score, timeAbs: timeAbs))
-        }
-        guard
-            let best = scored.max(by: { lhs, rhs in
-                if lhs.score != rhs.score { return lhs.score < rhs.score }
-                return lhs.timeAbs > rhs.timeAbs
-            })
-        else { return }
-        let topScore = best.score
-        let topTime = best.timeAbs
-        let dupCount = scored.filter { $0.score == topScore && abs($0.timeAbs - topTime) < 0.001 }
-            .count
-        if dupCount > 1 {
-            Task {
-                await SystemNotifier.shared.notify(
-                    title: "CodMate", body: "Assign to \(best.intent.projectId)?")
-            }
-            return
-        }
-        Task {
-            await projectsStore.assign(sessionIds: [s.id], to: best.intent.projectId)
-            let counts = await projectsStore.counts()
-            let memberships = await projectsStore.membershipsSnapshot()
-            await MainActor.run {
-                self.projectCounts = counts
-                self.projectMemberships = memberships
-                self.recomputeProjectCounts()
-                self.applyFilters()
-            }
-            await SystemNotifier.shared.notify(
-                title: "CodMate", body: "Assigned to \(best.intent.projectId)")
-        }
-        pendingAssignIntents.removeAll { $0.id == best.intent.id }
-    }
 }
 
 // MARK: - Auto Title / Overview

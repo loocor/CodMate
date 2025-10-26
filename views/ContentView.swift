@@ -353,7 +353,7 @@ struct ContentView: View {
                 .controlSize(.small)
 
                 Menu {
-                    if let focused = focusedSummary {
+                    if focusedSummary != nil {
                         Button {
                             guard let current = focusedSummary else { return }
                             viewModel.copyResumeCommandsRespectingProject(session: current)
