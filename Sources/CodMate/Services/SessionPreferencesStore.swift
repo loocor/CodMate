@@ -3,11 +3,17 @@ import Foundation
 @MainActor
 final class SessionPreferencesStore: ObservableObject {
     @Published var sessionsRoot: URL {
-        didSet { persist() }
+        didSet {
+            ensureDirectoryExists(sessionsRoot)
+            persist()
+        }
     }
 
     @Published var notesRoot: URL {
-        didSet { persist() }
+        didSet {
+            ensureDirectoryExists(notesRoot)
+            persist()
+        }
     }
 
     @Published var codexExecutableURL: URL {
@@ -19,6 +25,7 @@ final class SessionPreferencesStore: ObservableObject {
     }
 
     private let defaults: UserDefaults
+    private let fileManager: FileManager
     private struct Keys {
         static let sessionsRootPath = "codex.sessions.rootPath"
         static let notesRootPath = "codex.notes.rootPath"
@@ -34,6 +41,7 @@ final class SessionPreferencesStore: ObservableObject {
         static let autoAssignNewToSameProject = "codex.projects.autoAssignNewToSame"
         static let timelineVisibleKinds = "codex.timeline.visibleKinds"
         static let markdownVisibleKinds = "codex.markdown.visibleKinds"
+        static let enabledRemoteHosts = "codex.remote.enabledHosts"
     }
 
     init(
@@ -41,6 +49,7 @@ final class SessionPreferencesStore: ObservableObject {
         fileManager: FileManager = .default
     ) {
         self.defaults = defaults
+        self.fileManager = fileManager
         let homeURL = fileManager.homeDirectoryForCurrentUser
 
         // Resolve sessions root without touching self
@@ -100,6 +109,8 @@ final class SessionPreferencesStore: ObservableObject {
 
         self.codexExecutableURL = resolvedExec
         self.claudeExecutableURL = resolvedClaudeExec
+        let storedHosts = defaults.array(forKey: Keys.enabledRemoteHosts) as? [String] ?? []
+        self.enabledRemoteHosts = Set(storedHosts)
         // Resume defaults
         self.defaultResumeUseEmbeddedTerminal =
             defaults.object(forKey: Keys.resumeUseEmbedded) as? Bool ?? true
@@ -137,6 +148,9 @@ final class SessionPreferencesStore: ObservableObject {
         } else {
             self.markdownVisibleKinds = MessageVisibilityKind.markdownDefault
         }
+
+        ensureDirectoryExists(self.sessionsRoot)
+        ensureDirectoryExists(self.notesRoot)
     }
 
     private func persist() {
@@ -144,6 +158,16 @@ final class SessionPreferencesStore: ObservableObject {
         defaults.set(notesRoot.path, forKey: Keys.notesRootPath)
         defaults.set(codexExecutableURL.path, forKey: Keys.executablePath)
         defaults.set(claudeExecutableURL.path, forKey: Keys.claudeExecutablePath)
+    }
+
+    private func ensureDirectoryExists(_ url: URL) {
+        var isDir: ObjCBool = false
+        if fileManager.fileExists(atPath: url.path, isDirectory: &isDir) {
+            if isDir.boolValue { return }
+            // Remove non-directory item occupying the expected path
+            try? fileManager.removeItem(at: url)
+        }
+        try? fileManager.createDirectory(at: url, withIntermediateDirectories: true)
     }
 
     convenience init(defaults: UserDefaults = .standard) {
@@ -225,6 +249,10 @@ final class SessionPreferencesStore: ObservableObject {
     }
     @Published var markdownVisibleKinds: Set<MessageVisibilityKind> = MessageVisibilityKind.markdownDefault {
         didSet { defaults.set(Array(markdownVisibleKinds.map { $0.rawValue }), forKey: Keys.markdownVisibleKinds) }
+    }
+
+    @Published var enabledRemoteHosts: Set<String> = [] {
+        didSet { defaults.set(Array(enabledRemoteHosts), forKey: Keys.enabledRemoteHosts) }
     }
 
     var resumeOptions: ResumeOptions {

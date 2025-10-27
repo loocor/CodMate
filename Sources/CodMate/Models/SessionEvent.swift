@@ -6,33 +6,104 @@ struct SessionRow: Decodable {
 
     enum CodingKeys: String, CodingKey {
         case timestamp
+        case legacyTimestamp = "ts"
         case type
+        case legacyType = "kind"
         case payload
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        timestamp = try container.decode(Date.self, forKey: .timestamp)
-        let type = try container.decode(String.self, forKey: .type)
+        if let parsed = Self.decodeTimestamp(in: container, keys: [.timestamp, .legacyTimestamp]) {
+            timestamp = parsed
+        } else {
+            throw DecodingError.keyNotFound(
+                CodingKeys.timestamp,
+                DecodingError.Context(
+                    codingPath: container.codingPath,
+                    debugDescription: "Missing timestamp/ts"
+                )
+            )
+        }
+
+        let type = (try? container.decode(String.self, forKey: .type))
+            ?? (try? container.decode(String.self, forKey: .legacyType))
+            ?? "unknown"
 
         switch type {
         case "session_meta":
-            let payload = try container.decode(SessionMetaPayload.self, forKey: .payload)
-            kind = .sessionMeta(payload)
+            if let payload = try? container.decode(SessionMetaPayload.self, forKey: .payload) {
+                kind = .sessionMeta(payload)
+            } else {
+                let raw = (try? container.decode(JSONValue.self, forKey: .payload)) ?? .null
+                kind = .unknown(type: type, payload: raw)
+            }
         case "turn_context":
-            let payload = try container.decode(TurnContextPayload.self, forKey: .payload)
-            kind = .turnContext(payload)
+            if let payload = try? container.decode(TurnContextPayload.self, forKey: .payload) {
+                kind = .turnContext(payload)
+            } else {
+                let raw = (try? container.decode(JSONValue.self, forKey: .payload)) ?? .null
+                kind = .unknown(type: type, payload: raw)
+            }
         case "event_msg":
-            let payload = try container.decode(EventMessagePayload.self, forKey: .payload)
-            kind = .eventMessage(payload)
+            if let payload = try? container.decode(EventMessagePayload.self, forKey: .payload) {
+                kind = .eventMessage(payload)
+            } else {
+                let raw = (try? container.decode(JSONValue.self, forKey: .payload)) ?? .null
+                kind = .unknown(type: type, payload: raw)
+            }
         case "response_item":
-            let payload = try container.decode(ResponseItemPayload.self, forKey: .payload)
-            kind = .responseItem(payload)
+            if let payload = try? container.decode(ResponseItemPayload.self, forKey: .payload) {
+                kind = .responseItem(payload)
+            } else {
+                let raw = (try? container.decode(JSONValue.self, forKey: .payload)) ?? .null
+                kind = .unknown(type: type, payload: raw)
+            }
         default:
-            let payload = try container.decode(JSONValue.self, forKey: .payload)
+            let payload = (try? container.decode(JSONValue.self, forKey: .payload)) ?? .null
             kind = .unknown(type: type, payload: payload)
         }
     }
+
+    private static func decodeTimestamp(
+        in container: KeyedDecodingContainer<CodingKeys>,
+        keys: [CodingKeys]
+    ) -> Date? {
+        for key in keys {
+            if let string = try? container.decode(String.self, forKey: key),
+                let parsed = parseDate(string)
+            {
+                return parsed
+            }
+            if let double = try? container.decode(Double.self, forKey: key) {
+                return Date(timeIntervalSince1970: double)
+            }
+            if let int = try? container.decode(Int.self, forKey: key) {
+                return Date(timeIntervalSince1970: TimeInterval(int))
+            }
+        }
+        return nil
+    }
+
+    private static func parseDate(_ string: String) -> Date? {
+        if let date = formatterWithFractionalSeconds.date(from: string) { return date }
+        if let date = formatterWithoutFractionalSeconds.date(from: string) { return date }
+        return defaultFormatter.date(from: string)
+    }
+
+    private static let formatterWithFractionalSeconds: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+
+    private static let formatterWithoutFractionalSeconds: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime]
+        return f
+    }()
+
+    private static let defaultFormatter = ISO8601DateFormatter()
 
     enum Kind {
         case sessionMeta(SessionMetaPayload)
@@ -207,7 +278,7 @@ struct SessionSummaryBuilder {
     private(set) var eventCount: Int = 0
     private(set) var lineCount: Int = 0
     private(set) var fileSizeBytes: UInt64?
-    private(set) var source: SessionSource = .codex
+    private(set) var source: SessionSource = .codexLocal
 
     var hasEssentialMetadata: Bool {
         id != nil && startedAt != nil && cliVersion != nil && cwd != nil
@@ -313,7 +384,8 @@ struct SessionSummaryBuilder {
             eventCount: eventCount,
             lineCount: lineCount,
             lastUpdatedAt: lastUpdatedAt,
-            source: source
+            source: source,
+            remotePath: nil
         )
     }
 }

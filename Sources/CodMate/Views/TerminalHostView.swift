@@ -27,6 +27,7 @@ import SwiftUI
         }
 
         private func applyTheme(_ v: LocalProcessTerminalView) {
+            hideBuiltInScroller(for: v)
             // Transparent background for visual integration with surrounding surface.
             v.wantsLayer = true
             v.layer?.backgroundColor = NSColor.clear.cgColor
@@ -94,12 +95,12 @@ import SwiftUI
             func scheduleRelayout(_ view: LocalProcessTerminalView) {
                 relayoutWork?.cancel()
                 let work = DispatchWorkItem { [weak self, weak view] in
-                    guard let self, let v = view else { return }
+                    guard let self, let v = view, let container = self.container else { return }
                     v.needsLayout = true
-                    v.layoutSubtreeIfNeeded()
                     v.needsDisplay = true
+                    container.needsLayout = true
                     // Reassert visible vertical scroller after layout changes
-                    v.disableBuiltInScroller()
+                    hideBuiltInScroller(for: v)
                     self.updateOverlay(position: v.scrollPosition, thumb: v.scrollThumbsize)
                 }
                 relayoutWork = work
@@ -134,9 +135,11 @@ import SwiftUI
             let v = TerminalSessionManager.shared.view(
                 for: terminalKey, initialCommands: initialCommands, font: font)
             applyTheme(v)
-            v.disableBuiltInScroller()
+            hideBuiltInScroller(for: v)
             // Freeze grid reflow during live-resize; reflow once at the end to avoid duplicate/garbled text
-            v.deferReflowDuringLiveResize = true
+            if let codMateView = v as? CodMateTerminalView {
+                codMateView.deferReflowDuringLiveResize = true
+            }
             if v.superview !== container {
                 v.removeFromSuperview()
                 v.translatesAutoresizingMaskIntoConstraints = false
@@ -177,6 +180,21 @@ import SwiftUI
                 let path = NSBezierPath(roundedRect: bounds, xRadius: 2, yRadius: 2)
                 path.fill()
             }
+        }
+    }
+
+    private func hideBuiltInScroller(for view: TerminalView) {
+        guard let scroller = view.subviews.first(where: { $0 is NSScroller }) as? NSScroller else {
+            return
+        }
+        scroller.isHidden = true
+        scroller.isEnabled = false
+        scroller.alphaValue = 0
+        if scroller.frame.width != 0 {
+            var frame = scroller.frame
+            frame.origin.x = view.bounds.maxX
+            frame.size.width = 0
+            scroller.frame = frame
         }
     }
 

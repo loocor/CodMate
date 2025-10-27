@@ -67,7 +67,7 @@ actor ClaudeSessionProvider {
     }
 
     func enrich(summary: SessionSummary) -> SessionSummary? {
-        guard summary.source == .claude else { return summary }
+        guard summary.source.baseKind == .claude else { return summary }
         guard let parsed = parser.parse(at: summary.fileURL) else { return nil }
         let loader = SessionTimelineLoader()
         let turns = loader.turns(from: parsed.rows)
@@ -94,12 +94,13 @@ actor ClaudeSessionProvider {
             eventCount: parsed.summary.eventCount,
             lineCount: parsed.summary.lineCount,
             lastUpdatedAt: parsed.summary.lastUpdatedAt,
-            source: .claude
+            source: summary.source,
+            remotePath: summary.remotePath
         )
     }
 
     func timeline(for summary: SessionSummary) -> [ConversationTurn]? {
-        guard summary.source == .claude else { return nil }
+        guard summary.source.baseKind == .claude else { return nil }
         guard let parsed = parser.parse(at: summary.fileURL) else { return nil }
         let loader = SessionTimelineLoader()
         return loader.turns(from: parsed.rows)

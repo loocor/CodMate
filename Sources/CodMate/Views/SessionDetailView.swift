@@ -83,6 +83,12 @@ struct SessionDetailView: View {
                 infoRow(title: "ORIGINATOR", value: summary.originator, icon: "person.circle")
 
                 infoRow(title: "WORKING DIRECTORY", value: summary.cwd, icon: "folder")
+                if let host = summary.remoteHost {
+                    infoRow(title: "REMOTE HOST", value: host, icon: "antenna.radiowaves.left.and.right")
+                }
+                if let remotePath = summary.remotePath, summary.isRemote {
+                    infoRow(title: "REMOTE LOG", value: remotePath, icon: "doc.text")
+                }
                 infoRow(title: "FILE SIZE", value: summary.fileSizeDisplay, icon: "externaldrive")
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -151,7 +157,7 @@ struct SessionDetailView: View {
                 }
                 .task(id: environmentExpanded) {
                     guard environmentExpanded else { return }
-                    guard summary.source == .codex else {
+                    guard summary.source.baseKind == .codex else {
                         environmentInfo = nil
                         environmentLoading = false
                         return
@@ -191,7 +197,7 @@ struct SessionDetailView: View {
                 }
                 .task(id: instructionsExpanded) {
                     guard instructionsExpanded else { return }
-                    guard summary.source == .codex else {
+                    guard summary.source.baseKind == .codex else {
                         instructionsText = nil
                         instructionsLoading = false
                         return
@@ -373,7 +379,7 @@ extension SessionDetailView {
         loadingTimeline = true
         defer { loadingTimeline = false }
         let loaded: [ConversationTurn]
-        if summary.source == .claude {
+        if summary.source.baseKind == .claude {
             loaded = await viewModel.timeline(for: summary)
         } else {
             loaded = (try? loader.load(url: summary.fileURL)) ?? []
@@ -562,10 +568,9 @@ private func sanitizedExportFileName(_ s: String, fallback: String, maxLength: I
         eventCount: 12,
         lineCount: 156,
         lastUpdatedAt: Date().addingTimeInterval(-1800),
-        source: .codex
+        source: .codexLocal,
+        remotePath: nil
     )
-
-    @State var visibility: NavigationSplitViewVisibility = .all
 
     return SessionDetailView(
         summary: mockSummary,
@@ -573,7 +578,7 @@ private func sanitizedExportFileName(_ s: String, fallback: String, maxLength: I
         onResume: { print("Resume session") },
         onReveal: { print("Reveal in Finder") },
         onDelete: { print("Delete session") },
-        columnVisibility: $visibility
+        columnVisibility: .constant(.all)
     )
     .frame(width: 600, height: 800)
 }
@@ -600,10 +605,9 @@ private func sanitizedExportFileName(_ s: String, fallback: String, maxLength: I
         eventCount: 6,
         lineCount: 89,
         lastUpdatedAt: Date().addingTimeInterval(-300),
-        source: .codex
+        source: .codexLocal,
+        remotePath: nil
     )
-
-    @State var visibility: NavigationSplitViewVisibility = .all
 
     return SessionDetailView(
         summary: mockSummary,
@@ -611,7 +615,7 @@ private func sanitizedExportFileName(_ s: String, fallback: String, maxLength: I
         onResume: { print("Resume session") },
         onReveal: { print("Reveal in Finder") },
         onDelete: { print("Delete session") },
-        columnVisibility: $visibility
+        columnVisibility: .constant(.all)
     )
     .frame(width: 600, height: 800)
 }

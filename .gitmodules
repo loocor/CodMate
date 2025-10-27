@@ -1,0 +1,6 @@
+[submodule "SwiftTerm"]
+	path = SwiftTerm
+	url = https://github.com/migueldeicaza/SwiftTerm
+[submodule "codex"]
+	path = codex
+	url = https://github.com/openai/codex

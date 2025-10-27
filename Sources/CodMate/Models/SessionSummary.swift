@@ -25,6 +25,7 @@ struct SessionSummary: Identifiable, Hashable, Sendable, Codable {
     let lineCount: Int
     let lastUpdatedAt: Date?
     let source: SessionSource
+    let remotePath: String?
 
     // User-provided metadata (rename/comment)
     var userTitle: String? = nil
@@ -85,6 +86,15 @@ struct SessionSummary: Identifiable, Hashable, Sendable, Codable {
         return source.friendlyModelName(for: model)
     }
 
+    var remoteHost: String? { source.remoteHost }
+    var isRemote: Bool { source.isRemote }
+    var identityKey: String {
+        if let host = remoteHost {
+            return "\(host)::\(id)"
+        }
+        return id
+    }
+
     var fileSizeDisplay: String {
         guard let bytes = resolvedFileSizeBytes else { return "—" }
         let formatter = ByteCountFormatter()
@@ -119,13 +129,16 @@ struct SessionSummary: Identifiable, Hashable, Sendable, Codable {
         ].map { $0.lowercased() }
 
         let needle = term.lowercased()
-        return haystack.contains { $0.contains(needle) }
+        if haystack.contains(where: { $0.contains(needle) }) { return true }
+        if let host = remoteHost?.lowercased(), host.contains(needle) { return true }
+        if let remotePath = remotePath?.lowercased(), remotePath.contains(needle) { return true }
+        return false
     }
 }
 
 extension SessionSummary {
-    func overridingSource(_ newSource: SessionSource) -> SessionSummary {
-        if newSource == source { return self }
+    func overridingSource(_ newSource: SessionSource, remotePath: String? = nil) -> SessionSummary {
+        if newSource == source, remotePath == self.remotePath { return self }
         return SessionSummary(
             id: id,
             fileURL: fileURL,
@@ -148,9 +161,14 @@ extension SessionSummary {
             lineCount: lineCount,
             lastUpdatedAt: lastUpdatedAt,
             source: newSource,
+            remotePath: remotePath ?? self.remotePath,
             userTitle: userTitle,
             userComment: userComment
         )
+    }
+
+    func withRemoteMetadata(source: SessionSource, remotePath: String) -> SessionSummary {
+        return overridingSource(source, remotePath: remotePath)
     }
 }
 
@@ -215,7 +233,100 @@ struct SessionDaySection: Identifiable, Hashable {
     let sessions: [SessionSummary]
 }
 
-enum SessionSource: String, Codable, Sendable {
-    case codex
-    case claude
+enum SessionSource: Hashable, Sendable {
+    case codexLocal
+    case claudeLocal
+    case codexRemote(host: String)
+    case claudeRemote(host: String)
+
+    var isRemote: Bool {
+        switch self {
+        case .codexRemote, .claudeRemote: return true
+        default: return false
+        }
+    }
+
+    var remoteHost: String? {
+        switch self {
+        case .codexRemote(let host), .claudeRemote(let host): return host
+        default: return nil
+        }
+    }
+
+    var baseKind: Kind {
+        switch self {
+        case .codexLocal, .codexRemote: return .codex
+        case .claudeLocal, .claudeRemote: return .claude
+        }
+    }
+
+    enum Kind: String, Sendable {
+        case codex
+        case claude
+    }
+}
+
+extension SessionSource: Codable {
+    private enum CodingKeys: String, CodingKey {
+        case kind
+        case host
+    }
+
+    func encode(to encoder: Encoder) throws {
+        switch self {
+        case .codexLocal:
+            var container = encoder.singleValueContainer()
+            try container.encode("codex")
+        case .claudeLocal:
+            var container = encoder.singleValueContainer()
+            try container.encode("claude")
+        case .codexRemote(let host):
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode("codexRemote", forKey: .kind)
+            try container.encode(host, forKey: .host)
+        case .claudeRemote(let host):
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode("claudeRemote", forKey: .kind)
+            try container.encode(host, forKey: .host)
+        }
+    }
+
+    init(from decoder: Decoder) throws {
+        if let singleValue = try? decoder.singleValueContainer(),
+           let raw = try? singleValue.decode(String.self)
+        {
+            switch raw {
+            case "codex":
+                self = .codexLocal
+            case "claude":
+                self = .claudeLocal
+            case "codexLocal":
+                self = .codexLocal
+            case "claudeLocal":
+                self = .claudeLocal
+            default:
+                throw DecodingError.dataCorruptedError(
+                    in: singleValue, debugDescription: "Unknown SessionSource raw value \(raw)")
+            }
+            return
+        }
+
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let kind = try container.decode(String.self, forKey: .kind)
+        switch kind {
+        case "codexRemote":
+            let host = try container.decode(String.self, forKey: .host)
+            self = .codexRemote(host: host)
+        case "claudeRemote":
+            let host = try container.decode(String.self, forKey: .host)
+            self = .claudeRemote(host: host)
+        case "codex":
+            self = .codexLocal
+        case "claude":
+            self = .claudeLocal
+        default:
+            throw DecodingError.dataCorruptedError(
+                forKey: .kind, in: container, debugDescription: "Unknown SessionSource kind \(kind)")
+        }
+    }
 }

@@ -66,7 +66,7 @@ struct ContentView: View {
         }
         .navigationSplitViewStyle(.balanced)
         .task {
-            await viewModel.refreshSessions(force: true)
+            await viewModel.ensureInitialRefresh()
         }
         .onChange(of: viewModel.sections) { _, _ in
             normalizeSelection()
@@ -280,32 +280,32 @@ struct ContentView: View {
                         let providers = viewModel.allowedSources(for: focused)
                         if !providers.isEmpty {
                             Divider()
-                            ForEach(providers, id: \.self) { provider in
+                            ForEach(providers) { provider in
                                 let sessionSource = provider.sessionSource
                                 Menu {
                                     Button {
-                                        guard let current = focusedSummary else { return }
+                                        let current = focused
                                         launchNewSession(
                                             for: current, using: sessionSource, style: .preferred)
                                     } label: {
                                         Label("Use Preferred Launch", systemImage: "gearshape")
                                     }
                                     Button {
-                                        guard let current = focusedSummary else { return }
+                                        let current = focused
                                         launchNewSession(
                                             for: current, using: sessionSource, style: .terminal)
                                     } label: {
                                         Label("Open in Terminal", systemImage: "terminal")
                                     }
                                     Button {
-                                        guard let current = focusedSummary else { return }
+                                        let current = focused
                                         launchNewSession(
                                             for: current, using: sessionSource, style: .iterm)
                                     } label: {
                                         Label("Open in iTerm2", systemImage: "app.fill")
                                     }
                                     Button {
-                                        guard let current = focusedSummary else { return }
+                                        let current = focused
                                         launchNewSession(
                                             for: current, using: sessionSource, style: .warp)
                                     } label: {
@@ -313,7 +313,7 @@ struct ContentView: View {
                                     }
                                     if viewModel.preferences.defaultResumeUseEmbeddedTerminal {
                                         Button {
-                                            guard let current = focusedSummary else { return }
+                                            let current = focused
                                             launchNewSession(
                                                 for: current, using: sessionSource, style: .embedded
                                             )
@@ -354,50 +354,68 @@ struct ContentView: View {
 
                 Menu {
                     if let focused = focusedSummary {
-                        Button {
-                            guard let current = focusedSummary else { return }
-                            viewModel.copyResumeCommandsRespectingProject(session: current)
-                            _ = viewModel.openAppleTerminal(at: workingDirectory(for: current))
-                            Task {
-                                await SystemNotifier.shared.notify(
-                                    title: "CodMate",
-                                    body: "Command copied. Paste it in the opened terminal.")
-                            }
-                        } label: {
-                            Label("Open in Terminal", systemImage: "terminal")
-                        }
+                        ForEach(viewModel.allowedSources(for: focused)) { provider in
+                            let sessionSource = provider.sessionSource
+                            Menu {
+                                Button {
+                                    if viewModel.preferences.defaultResumeUseEmbeddedTerminal {
+                                        startEmbedded(for: focused, using: sessionSource)
+                                    } else {
+                                        openPreferredExternal(for: focused, using: sessionSource)
+                                    }
+                                } label: {
+                                    Label("Use Preferred Launch", systemImage: "gearshape")
+                                }
 
-                        Button {
-                            guard let current = focusedSummary else { return }
-                            let dir = workingDirectory(for: current)
-                            let cmd = viewModel.buildResumeCLIInvocationRespectingProject(
-                                session: current)
-                            viewModel.openPreferredTerminalViaScheme(
-                                app: .iterm2, directory: dir, command: cmd)
-                        } label: {
-                            Label("Open in iTerm2", systemImage: "app.fill")
-                        }
+                                Button {
+                                    let target = overriding(focused, with: sessionSource)
+                                    viewModel.copyResumeCommandsRespectingProject(session: target)
+                                    _ = viewModel.openAppleTerminal(at: workingDirectory(for: target))
+                                    Task {
+                                        await SystemNotifier.shared.notify(
+                                            title: "CodMate",
+                                            body: "Command copied. Paste it in the opened terminal.")
+                                    }
+                                } label: {
+                                    Label("Open in Terminal", systemImage: "terminal")
+                                }
 
-                        Button {
-                            guard let current = focusedSummary else { return }
-                            viewModel.copyResumeCommandsRespectingProject(session: current)
-                            viewModel.openPreferredTerminalViaScheme(
-                                app: .warp, directory: workingDirectory(for: current))
-                            Task {
-                                await SystemNotifier.shared.notify(
-                                    title: "CodMate",
-                                    body: "Command copied. Paste it in the opened terminal.")
-                            }
-                        } label: {
-                            Label("Open in Warp", systemImage: "app.gift.fill")
-                        }
+                                Button {
+                                    let target = overriding(focused, with: sessionSource)
+                                    let dir = workingDirectory(for: target)
+                                    let cmd = viewModel.buildResumeCLIInvocationRespectingProject(
+                                        session: target)
+                                    viewModel.openPreferredTerminalViaScheme(
+                                        app: .iterm2, directory: dir, command: cmd)
+                                } label: {
+                                    Label("Open in iTerm2", systemImage: "app.fill")
+                                }
 
-                        if viewModel.preferences.defaultResumeUseEmbeddedTerminal {
-                            Button {
-                                guard let current = focusedSummary else { return }
-                                startEmbedded(for: current)
+                                Button {
+                                    let target = overriding(focused, with: sessionSource)
+                                    viewModel.copyResumeCommandsRespectingProject(session: target)
+                                    viewModel.openPreferredTerminalViaScheme(
+                                        app: .warp, directory: workingDirectory(for: target))
+                                    Task {
+                                        await SystemNotifier.shared.notify(
+                                            title: "CodMate",
+                                            body: "Command copied. Paste it in the opened terminal.")
+                                    }
+                                } label: {
+                                    Label("Open in Warp", systemImage: "app.gift.fill")
+                                }
+
+                                if viewModel.preferences.defaultResumeUseEmbeddedTerminal {
+                                    Button {
+                                        startEmbedded(for: focused, using: sessionSource)
+                                    } label: {
+                                        Label(
+                                            "Open Embedded Terminal",
+                                            systemImage: "rectangle.badge.plus")
+                                    }
+                                }
                             } label: {
-                                Label("Open Embedded Terminal", systemImage: "rectangle.badge.plus")
+                                providerMenuLabel(prefix: "Resume", source: sessionSource)
                             }
                         }
                     } else {
@@ -543,13 +561,14 @@ struct ContentView: View {
         }
     }
 
-    private func startEmbedded(for session: SessionSummary) {
+    private func startEmbedded(for session: SessionSummary, using source: SessionSource? = nil) {
+        let target = overriding(session, with: source)
         // Build the default resume commands for this session so TerminalHostView can inject them
-        embeddedInitialCommands[session.id] = viewModel.buildResumeCommands(session: session)
-        runningSessionIDs.insert(session.id)
+        embeddedInitialCommands[target.id] = viewModel.buildResumeCommands(session: target)
+        runningSessionIDs.insert(target.id)
         // Nudge Codex to redraw cleanly once it starts, by sending "/" then backspace
         #if canImport(SwiftTerm)
-            TerminalSessionManager.shared.scheduleSlashNudge(forKey: session.id, delay: 1.0)
+            TerminalSessionManager.shared.scheduleSlashNudge(forKey: target.id, delay: 1.0)
         #endif
     }
 
@@ -578,8 +597,20 @@ struct ContentView: View {
         return session.fileURL.deletingLastPathComponent().path
     }
 
+    private func overriding(_ session: SessionSummary, with source: SessionSource?) -> SessionSummary {
+        guard let source else { return session }
+        if source == session.source { return session }
+        let remotePath: String?
+        if let host = source.remoteHost, host == session.remoteHost {
+            remotePath = session.remotePath
+        } else {
+            remotePath = nil
+        }
+        return session.overridingSource(source, remotePath: remotePath)
+    }
+
     private func startEmbeddedNew(for session: SessionSummary, using source: SessionSource? = nil) {
-        let target = source.map { session.overridingSource($0) } ?? session
+        let target = overriding(session, with: source)
         // Build the 'new session' commands (respecting project profile when present)
         let cwd =
             FileManager.default.fileExists(atPath: target.cwd)
@@ -592,7 +623,7 @@ struct ContentView: View {
             "export LC_CTYPE=zh_CN.UTF-8",
             "export TERM=xterm-256color",
         ]
-        if target.source == .codex {
+        if target.source.baseKind == .codex {
             exportLines.append("export CODEX_DISABLE_COLOR_QUERY=1")
         }
         let exports = exportLines.joined(separator: "; ")
@@ -612,13 +643,14 @@ struct ContentView: View {
         )
     }
 
-    private func openPreferredExternal(for session: SessionSummary) {
-        viewModel.copyResumeCommandsRespectingProject(session: session)
+    private func openPreferredExternal(for session: SessionSummary, using source: SessionSource? = nil) {
+        let target = overriding(session, with: source)
+        viewModel.copyResumeCommandsRespectingProject(session: target)
         let app = viewModel.preferences.defaultResumeExternalApp
-        let dir = workingDirectory(for: session)
+        let dir = workingDirectory(for: target)
         switch app {
         case .iterm2:
-            let cmd = viewModel.buildResumeCLIInvocationRespectingProject(session: session)
+            let cmd = viewModel.buildResumeCLIInvocationRespectingProject(session: target)
             viewModel.openPreferredTerminalViaScheme(app: .iterm2, directory: dir, command: cmd)
         case .warp:
             viewModel.openPreferredTerminalViaScheme(app: .warp, directory: dir)
@@ -633,20 +665,21 @@ struct ContentView: View {
         }
     }
 
-    private func openPreferredExternalForNew(session: SessionSummary) {
+    private func openPreferredExternalForNew(session: SessionSummary, using source: SessionSource? = nil) {
+        let target = overriding(session, with: source)
         // Record pending intent for auto-assign before launching
-        viewModel.recordIntentForDetailNew(anchor: session)
+        viewModel.recordIntentForDetailNew(anchor: target)
         let app = viewModel.preferences.defaultResumeExternalApp
-        let dir = workingDirectory(for: session)
+        let dir = workingDirectory(for: target)
         switch app {
         case .iterm2:
-            let cmd = viewModel.buildNewSessionCLIInvocationRespectingProject(session: session)
+            let cmd = viewModel.buildNewSessionCLIInvocationRespectingProject(session: target)
             viewModel.openPreferredTerminalViaScheme(app: .iterm2, directory: dir, command: cmd)
         case .warp:
             // Warp scheme cannot run a command; open path only and rely on clipboard
             viewModel.openPreferredTerminalViaScheme(app: .warp, directory: dir)
         case .terminal:
-            viewModel.openNewSessionRespectingProject(session: session)
+            viewModel.openNewSessionRespectingProject(session: target)
         case .none:
             break
         }
@@ -657,7 +690,7 @@ struct ContentView: View {
     }
 
     private func startNewSession(for session: SessionSummary, using source: SessionSource? = nil) {
-        let target = source.map { session.overridingSource($0) } ?? session
+        let target = overriding(session, with: source)
         viewModel.copyNewSessionCommandsRespectingProject(session: target)
         openPreferredExternalForNew(session: target)
     }
@@ -673,7 +706,7 @@ struct ContentView: View {
     private func launchNewSession(
         for session: SessionSummary, using source: SessionSource, style: NewLaunchStyle
     ) {
-        let target = source == session.source ? session : session.overridingSource(source)
+        let target = overriding(session, with: source)
         switch style {
         case .preferred:
             if viewModel.preferences.defaultResumeUseEmbeddedTerminal {

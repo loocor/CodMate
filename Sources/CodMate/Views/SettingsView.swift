@@ -8,6 +8,7 @@ struct SettingsView: View {
     @StateObject private var codexVM = CodexVM()
     @EnvironmentObject private var viewModel: SessionListViewModel
     @State private var showLicensesSheet = false
+    @State private var availableRemoteHosts: [SSHHost] = []
 
     init(preferences: SessionPreferencesStore, selection: Binding<SettingCategory>) {
         self._preferences = ObservedObject(wrappedValue: preferences)
@@ -337,6 +338,7 @@ struct SettingsView: View {
             TabView {
                 Tab("Providers", systemImage: "server.rack") { providersPane }
                 Tab("Runtime", systemImage: "gearshape.2") { runtimePane }
+                Tab("Remote Hosts", systemImage: "antenna.radiowaves.left.and.right") { remoteHostsPane }
                 Tab("Notifications", systemImage: "bell") { notificationsPane }
                 Tab("Privacy", systemImage: "lock.shield") { privacyPane }
                 Tab("Raw Config", systemImage: "doc.text") { rawConfigPane }
@@ -545,6 +547,95 @@ struct SettingsView: View {
                     Toggle("", isOn: $preferences.autoAssignNewToSameProject)
                         .labelsHidden()
                         .frame(maxWidth: .infinity, alignment: .trailing)
+                }
+            }
+        }
+    }
+
+    private var remoteHostsPane: some View {
+        codexTabContent {
+            VStack(alignment: .leading, spacing: 16) {
+                HStack(alignment: .firstTextBaseline) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Remote Hosts")
+                            .font(.title3)
+                            .fontWeight(.semibold)
+                        Text("Choose which SSH hosts CodMate should mirror for remote Codex/Claude sessions.")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                    }
+                    Spacer(minLength: 8)
+                    HStack(spacing: 10) {
+                        Button(role: .none) {
+                            DispatchQueue.main.async {
+                                preferences.enabledRemoteHosts = []
+                            }
+                        } label: {
+                            Text("Clear All")
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(preferences.enabledRemoteHosts.isEmpty)
+                        Button {
+                            reloadRemoteHosts()
+                        } label: {
+                            Label("Refresh", systemImage: "arrow.clockwise")
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                }
+
+                let hosts = availableRemoteHosts
+                if hosts.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("No SSH hosts were found in ~/.ssh/config.")
+                            .font(.body)
+                            .foregroundColor(.secondary)
+                        Text("Add host aliases to your SSH config, then refresh to enable remote session mirroring.")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
+                    .padding(.vertical, 12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    VStack(alignment: .leading, spacing: 10) {
+                        ForEach(hosts, id: \.alias) { host in
+                            Toggle(isOn: bindingForRemoteHost(alias: host.alias)) {
+                                Text(host.alias)
+                                    .font(.body)
+                                    .fontWeight(.medium)
+                            }
+                            .toggleStyle(.switch)
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+
+                let hostAliases = Set(hosts.map { $0.alias })
+                let dangling = preferences.enabledRemoteHosts.subtracting(hostAliases)
+                if !dangling.isEmpty {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Unavailable Hosts")
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                        Text("The following host aliases are enabled but not present in your current SSH config:")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        ForEach(Array(dangling).sorted(), id: \.self) { alias in
+                            Text("• \(alias)")
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                    .padding(.vertical, 6)
+                }
+
+                Text("CodMate mirrors only the hosts you enable. Hosts that prompt for passwords will open interactively when needed.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .onAppear {
+                if availableRemoteHosts.isEmpty {
+                    DispatchQueue.main.async { reloadRemoteHosts() }
                 }
             }
         }
@@ -820,6 +911,36 @@ struct SettingsView: View {
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 8)
+    }
+
+    private func reloadRemoteHosts() {
+        let resolver = SSHConfigResolver()
+        let hosts = resolver.resolvedHosts().sorted { $0.alias.lowercased() < $1.alias.lowercased() }
+        availableRemoteHosts = hosts
+        let hostAliases = Set(hosts.map { $0.alias })
+        let filtered = preferences.enabledRemoteHosts.filter { hostAliases.contains($0) }
+        if filtered.count != preferences.enabledRemoteHosts.count {
+            DispatchQueue.main.async {
+                preferences.enabledRemoteHosts = Set(filtered)
+            }
+        }
+    }
+
+    private func bindingForRemoteHost(alias: String) -> Binding<Bool> {
+        Binding(
+            get: { preferences.enabledRemoteHosts.contains(alias) },
+            set: { isOn in
+                DispatchQueue.main.async {
+                    var hosts = preferences.enabledRemoteHosts
+                    if isOn {
+                        hosts.insert(alias)
+                    } else {
+                        hosts.remove(alias)
+                    }
+                    preferences.enabledRemoteHosts = hosts
+                }
+            }
+        )
     }
 
     private var terminalSettings: some View {

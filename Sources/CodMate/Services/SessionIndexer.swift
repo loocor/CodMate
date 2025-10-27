@@ -47,6 +47,66 @@ fileprivate actor DiskCache {
     }
 }
 
+// Codex TUI session logs (Rust-based CLI) emit JSONL entries with a different schema
+// than the legacy Codex CLI. These helpers let us parse those files to produce summaries.
+private struct CodexTUILogEntry: Decodable {
+    let timestamp: Date
+    let direction: String
+    let kind: String
+    let payload: Payload?
+    let cwd: String?
+    let model: String?
+    let reasoningEffort: String?
+    let modelProviderID: String?
+    let modelProviderName: String?
+
+    struct Payload: Decodable {
+        let id: String?
+        let message: Message?
+
+        enum CodingKeys: String, CodingKey {
+            case id
+            case message = "msg"
+        }
+    }
+
+    struct Message: Decodable {
+        let type: String
+        let message: String?
+        let delta: String?
+        let lastAgentMessage: String?
+        let sessionId: String?
+        let model: String?
+        let reasoningEffort: String?
+        let approvalPolicy: String?
+        let cwd: String?
+
+        enum CodingKeys: String, CodingKey {
+            case type
+            case message
+            case delta
+            case lastAgentMessage = "last_agent_message"
+            case sessionId = "session_id"
+            case model
+            case reasoningEffort = "reasoning_effort"
+            case approvalPolicy = "approval_policy"
+            case cwd
+        }
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case timestamp = "ts"
+        case direction = "dir"
+        case kind
+        case payload
+        case cwd
+        case model
+        case reasoningEffort = "reasoning_effort"
+        case modelProviderID = "model_provider_id"
+        case modelProviderName = "model_provider_name"
+    }
+}
+
 actor SessionIndexer {
     private let fileManager: FileManager
     private let decoder: JSONDecoder
@@ -58,6 +118,31 @@ actor SessionIndexer {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return f
+    }
+
+    private struct ISO8601DecodingFormatters: @unchecked Sendable {
+        let withFractionalSeconds: ISO8601DateFormatter
+        let withoutFractionalSeconds: ISO8601DateFormatter
+        let fallback: ISO8601DateFormatter
+
+        init() {
+            let fractional = ISO8601DateFormatter()
+            fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            withFractionalSeconds = fractional
+
+            let withoutFractional = ISO8601DateFormatter()
+            withoutFractional.formatOptions = [.withInternetDateTime]
+            withoutFractionalSeconds = withoutFractional
+
+            fallback = ISO8601DateFormatter()
+        }
+
+        func parse(_ string: String) -> Date? {
+            if let date = withFractionalSeconds.date(from: string) { return date }
+            if let date = withoutFractionalSeconds.date(from: string) { return date }
+            if let date = fallback.date(from: string) { return date }
+            return nil
+        }
     }
 
     private final class CacheEntry {
@@ -73,8 +158,23 @@ actor SessionIndexer {
     init(fileManager: FileManager = .default) {
         self.fileManager = fileManager
         self.diskCache = DiskCache()
-        decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
+        let decoder = JSONDecoder()
+        let dateParsers = ISO8601DecodingFormatters()
+
+        decoder.dateDecodingStrategy = .custom { decoder in
+            let container = try decoder.singleValueContainer()
+            let dateString = try container.decode(String.self)
+
+            if let date = dateParsers.parse(dateString) {
+                return date
+            }
+
+            throw DecodingError.dataCorruptedError(
+                in: container,
+                debugDescription: "Cannot decode date string: \(dateString)"
+            )
+        }
+        self.decoder = decoder
     }
 
     func refreshSessions(root: URL, scope: SessionLoadScope) async throws -> [SessionSummary] {
@@ -343,11 +443,20 @@ actor SessionIndexer {
     private func scopeBaseURL(root: URL, scope: SessionLoadScope) -> URL? {
         switch scope {
         case .today:
-            return dayDirectory(root: root, date: Date())
+            if let dayURL = dayDirectory(root: root, date: Date()) {
+                return dayURL
+            }
+            return directoryIfExists(root)
         case .day(let date):
-            return dayDirectory(root: root, date: date)
+            if let dayURL = dayDirectory(root: root, date: date) {
+                return dayURL
+            }
+            return directoryIfExists(root)
         case .month(let date):
-            return monthDirectory(root: root, date: date)
+            if let monthURL = monthDirectory(root: root, date: date) {
+                return monthURL
+            }
+            return directoryIfExists(root)
         case .all:
             return directoryIfExists(root)
         }
@@ -444,8 +553,8 @@ actor SessionIndexer {
         }
         let newline: UInt8 = 0x0A
         let carriageReturn: UInt8 = 0x0D
-        for var slice in data.split(separator: newline, omittingEmptySubsequences: true).prefix(200)
-        {
+        let codexDecoder = makeCodexTUILogDecoder()
+        for var slice in data.split(separator: newline, omittingEmptySubsequences: true).prefix(200) {
             if slice.last == carriageReturn { slice = slice.dropLast() }
             if let row = try? decoder.decode(SessionRow.self, from: Data(slice)) {
                 switch row.kind {
@@ -453,9 +562,172 @@ actor SessionIndexer {
                 case .turnContext(let p): if let c = p.cwd { return c }
                 default: break
                 }
+            } else if let entry = try? codexDecoder.decode(CodexTUILogEntry.self, from: Data(slice)) {
+                if entry.kind == "session_start", let cwd = entry.cwd, !cwd.isEmpty {
+                    return cwd
+                }
+                if let msgCwd = entry.payload?.message?.cwd, !msgCwd.isEmpty {
+                    return msgCwd
+                }
             }
         }
         return nil
+    }
+
+    nonisolated private func makeCodexTUILogDecoder() -> JSONDecoder {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return decoder
+    }
+
+    private func codexTUISummaryIfNeeded(
+        for url: URL,
+        data: Data,
+        lines: [Data.SubSequence],
+        builder: inout SessionSummaryBuilder
+    ) -> SessionSummary? {
+        guard let firstLine = lines.first else { return nil }
+        var probe = firstLine
+        if probe.last == 0x0D { probe = probe.dropLast() }
+        guard let header = String(bytes: probe, encoding: .utf8) else { return nil }
+        guard header.contains("\"kind\":\"session_start\""),
+              header.contains("\"ts\""),
+              !header.contains("\"timestamp\"")
+        else { return nil }
+
+        guard let summary = buildCodexTUISummary(
+            for: url,
+            data: data,
+            lines: lines,
+            fileSizeHint: builder.fileSizeBytes
+        ) else {
+            return nil
+        }
+        if let updated = summary.lastUpdatedAt {
+            builder.seedLastUpdated(updated)
+        }
+        return summary
+    }
+
+    private func buildCodexTUISummary(
+        for url: URL,
+        data: Data,
+        lines: [Data.SubSequence],
+        fileSizeHint: UInt64?
+    ) -> SessionSummary? {
+        let decoder = makeCodexTUILogDecoder()
+        let carriageReturn: UInt8 = 0x0D
+
+        var startedAt: Date?
+        var lastTimestamp: Date?
+        var sessionID: String?
+        var cwd: String?
+        var model: String?
+        var approvalPolicy: String?
+        var userMessageCount = 0
+        var assistantMessageCount = 0
+        var toolInvocationCount = 0
+        var responseCounts: [String: Int] = [:]
+        var eventCount = 0
+        var lineCount = 0
+
+        for var slice in lines {
+            if slice.last == carriageReturn { slice = slice.dropLast() }
+            guard !slice.isEmpty else { continue }
+            lineCount += 1
+            guard let entry = try? decoder.decode(CodexTUILogEntry.self, from: Data(slice)) else {
+                continue
+            }
+
+            lastTimestamp = entry.timestamp
+
+            switch entry.kind {
+            case "session_start":
+                if startedAt == nil { startedAt = entry.timestamp }
+                if let value = entry.cwd, !value.isEmpty { cwd = value }
+                if let value = entry.model, !value.isEmpty { model = value }
+            default:
+                break
+            }
+
+            guard let message = entry.payload?.message else {
+                if entry.kind == "codex_event" { eventCount += 1 }
+                continue
+            }
+
+            if sessionID == nil, let sid = message.sessionId, !sid.isEmpty {
+                sessionID = sid
+            }
+            if let value = message.model, !value.isEmpty {
+                model = value
+            }
+            if let value = message.approvalPolicy, !value.isEmpty {
+                approvalPolicy = value
+            }
+            if let value = message.cwd, !value.isEmpty {
+                cwd = value
+            }
+
+            let type = message.type
+            if type == "session_configured" {
+                if entry.kind == "codex_event" { eventCount += 1 }
+                continue
+            }
+
+            if entry.kind == "codex_event" {
+                eventCount += 1
+            }
+
+            switch type {
+            case "agent_message":
+                assistantMessageCount += 1
+            case "user_message":
+                userMessageCount += 1
+            default:
+                break
+            }
+
+            if type.contains("tool_call") || type.contains("tool_result")
+                || type.contains("tool_output")
+            {
+                toolInvocationCount += 1
+            }
+
+            if !type.isEmpty && !type.hasSuffix("_delta") {
+                responseCounts[type, default: 0] += 1
+            }
+        }
+
+        guard let start = startedAt ?? lastTimestamp else { return nil }
+        let resolvedLast = lastTimestamp ?? start
+        let fileSize = fileSizeHint
+            ?? (try? fileManager.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.uint64Value
+            ?? UInt64(data.count)
+
+        return SessionSummary(
+            id: sessionID ?? url.deletingPathExtension().lastPathComponent,
+            fileURL: url,
+            fileSizeBytes: fileSize,
+            startedAt: start,
+            endedAt: resolvedLast,
+            activeDuration: nil,
+            cliVersion: "codex-tui",
+            cwd: (cwd?.isEmpty == false ? cwd! : url.deletingLastPathComponent().path),
+            originator: "codex",
+            instructions: nil,
+            model: model,
+            approvalPolicy: approvalPolicy,
+            userMessageCount: userMessageCount,
+            assistantMessageCount: assistantMessageCount,
+            toolInvocationCount: toolInvocationCount,
+            responseCounts: responseCounts,
+            turnContextCount: 0,
+            eventCount: eventCount,
+            lineCount: lineCount,
+            lastUpdatedAt: resolvedLast,
+            source: .codexLocal,
+            remotePath: nil
+        )
     }
 
     private func buildSummaryFast(for url: URL, builder: inout SessionSummaryBuilder) throws
@@ -467,9 +739,20 @@ actor SessionIndexer {
 
         let newline: UInt8 = 0x0A
         let carriageReturn: UInt8 = 0x0D
+        let lines = data.split(separator: newline, omittingEmptySubsequences: true)
+
+        if let summary = codexTUISummaryIfNeeded(
+            for: url,
+            data: data,
+            lines: lines,
+            builder: &builder
+        ) {
+            return summary
+        }
+
         let fastLineLimit = 64
         var lineCount = 0
-        for var slice in data.split(separator: newline, omittingEmptySubsequences: true) {
+        for var slice in lines {
             if slice.last == carriageReturn { slice = slice.dropLast() }
             guard !slice.isEmpty else { continue }
             if lineCount >= fastLineLimit, builder.hasEssentialMetadata {
@@ -508,8 +791,19 @@ actor SessionIndexer {
         guard !data.isEmpty else { return nil }
         let newline: UInt8 = 0x0A
         let carriageReturn: UInt8 = 0x0D
+        let lines = data.split(separator: newline, omittingEmptySubsequences: true)
+
+        if let summary = codexTUISummaryIfNeeded(
+            for: url,
+            data: data,
+            lines: lines,
+            builder: &builder
+        ) {
+            return summary
+        }
+
         var lastError: Error?
-        for var slice in data.split(separator: newline, omittingEmptySubsequences: true) {
+        for var slice in lines {
             if slice.last == carriageReturn { slice = slice.dropLast() }
             guard !slice.isEmpty else { continue }
             do {
@@ -520,6 +814,16 @@ actor SessionIndexer {
             }
         }
         if let result = builder.build(for: url) { return result }
+        if let decodingError = lastError as? DecodingError {
+            switch decodingError {
+            case .keyNotFound(let key, _):
+                if key.stringValue == "timestamp" || key.stringValue == "ts" {
+                    return nil
+                }
+            default:
+                break
+            }
+        }
         if let error = lastError { throw error }
         return nil
     }
@@ -557,6 +861,7 @@ actor SessionIndexer {
             lineCount: base.lineCount,
             lastUpdatedAt: base.lastUpdatedAt,
             source: base.source,
+            remotePath: base.remotePath,
             userTitle: base.userTitle,
             userComment: base.userComment
         )
@@ -679,17 +984,40 @@ actor SessionIndexer {
     }
 
     nonisolated private func extractTimestamp(from text: String) -> Date? {
-        let pattern = #""timestamp"\s*:\s*"([^"]+)""#
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else {
-            return nil
+        let patterns = [
+            #""timestamp"\s*:\s*"([^"]+)""#,
+            #""ts"\s*:\s*"([^"]+)""#
+        ]
+
+        let formatterWithFractionalSeconds = ISO8601DateFormatter()
+        formatterWithFractionalSeconds.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+
+        let formatterWithoutFractionalSeconds = ISO8601DateFormatter()
+        formatterWithoutFractionalSeconds.formatOptions = [.withInternetDateTime]
+
+        for pattern in patterns {
+            guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else {
+                continue
+            }
+            let range = NSRange(location: 0, length: (text as NSString).length)
+            guard let match = regex.firstMatch(in: text, options: [], range: range),
+                  match.numberOfRanges >= 2
+            else { continue }
+
+            let nsText = text as NSString
+            let isoString = nsText.substring(with: match.range(at: 1))
+
+            if let date = formatterWithFractionalSeconds.date(from: isoString) {
+                return date
+            }
+            if let date = formatterWithoutFractionalSeconds.date(from: isoString) {
+                return date
+            }
+            if let date = ISO8601DateFormatter().date(from: isoString) {
+                return date
+            }
         }
-        let range = NSRange(location: 0, length: (text as NSString).length)
-        guard let match = regex.firstMatch(in: text, options: [], range: range),
-            match.numberOfRanges >= 2
-        else { return nil }
-        let nsText = text as NSString
-        let isoString = nsText.substring(with: match.range(at: 1))
-        return SessionIndexer.makeTailTimestampFormatter().date(from: isoString)
+        return nil
     }
 
     // Global count for sidebar label

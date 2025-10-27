@@ -14,6 +14,10 @@ import Foundation
         override var isOpaque: Bool { false }
         // Lightweight scroll listener for overlay scrollbar in the host view
         var onScrolled: ((Double, CGFloat) -> Void)?
+        /// When enabled, avoid expensive reflows during window live-resize and perform
+        /// a single relayout once resizing finishes.
+        var deferReflowDuringLiveResize: Bool = false
+        private var needsDeferredRelayout = false
 
         deinit {}
 
@@ -27,6 +31,29 @@ import Foundation
                 NSEvent.removeMonitor(m)
                 keyMonitor = nil
             }
+        }
+
+        override func setFrameSize(_ newSize: NSSize) {
+            super.setFrameSize(newSize)
+            guard deferReflowDuringLiveResize else { return }
+            if window?.inLiveResize == true {
+                needsDeferredRelayout = true
+            } else if needsDeferredRelayout {
+                performDeferredRelayout()
+            }
+        }
+
+        override func viewDidEndLiveResize() {
+            super.viewDidEndLiveResize()
+            guard deferReflowDuringLiveResize else { return }
+            performDeferredRelayout()
+        }
+
+        private func performDeferredRelayout() {
+            needsDeferredRelayout = false
+            needsLayout = true
+            layoutSubtreeIfNeeded()
+            needsDisplay = true
         }
 
         override func paste(_ sender: Any) {

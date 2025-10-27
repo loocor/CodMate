@@ -87,7 +87,7 @@ struct SessionListColumnView: View {
                                 }
                                 .listRowInsets(EdgeInsets())
                                 .contextMenu {
-                                    if session.source == .codex {
+                                    if session.source.baseKind == .codex {
                                         Button { onResume(session) } label: {
                                             Label("Resume", systemImage: "play.fill")
                                         }
@@ -461,7 +461,8 @@ extension TimeInterval {
                     eventCount: 6,
                     lineCount: 89,
                     lastUpdatedAt: Date().addingTimeInterval(-3600),
-                    source: .codex
+                    source: .codexLocal,
+                    remotePath: nil
                 ),
                 SessionSummary(
                     id: "session-2",
@@ -485,7 +486,8 @@ extension TimeInterval {
                     eventCount: 9,
                     lineCount: 120,
                     lastUpdatedAt: Date().addingTimeInterval(-9000),
-                    source: .codex
+                    source: .codexLocal,
+                    remotePath: nil
                 ),
             ]
         ),
@@ -517,7 +519,8 @@ extension TimeInterval {
                     eventCount: 14,
                     lineCount: 200,
                     lastUpdatedAt: Date().addingTimeInterval(-158400),
-                    source: .codex
+                    source: .codexLocal,
+                    remotePath: nil
                 )
             ]
         ),

@@ -11,7 +11,7 @@ struct ConversationTimelineView: View {
     let turns: [ConversationTurn]
     @Binding var expandedTurnIDs: Set<String>
     var ascending: Bool = false
-    var branding: SessionSourceBranding = SessionSource.codex.branding
+    var branding: SessionSourceBranding = SessionSource.codexLocal.branding
 
     var body: some View {
         LazyVStack(alignment: .leading, spacing: 20) {
@@ -401,7 +401,7 @@ private struct ConversationTimelinePreview: View {
         ConversationTimelineView(
             turns: [sampleTurn],
             expandedTurnIDs: $expanded,
-            branding: SessionSource.codex.branding
+            branding: SessionSource.codexLocal.branding
         )
         .padding()
         .frame(width: 540)

@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import Foundation
 
 @MainActor
@@ -74,6 +75,7 @@ final class SessionListViewModel: ObservableObject {
     private var quickPulseTask: Task<Void, Never>?
     private var lastQuickPulseAt: Date = .distantPast
     private var fileMTimeCache: [String: Date] = [:]  // session.id -> mtime
+    private var hasPerformedInitialRefresh = false
     @Published var editingSession: SessionSummary? = nil
     @Published var editTitle: String = ""
     @Published var editComment: String = ""
@@ -83,6 +85,7 @@ final class SessionListViewModel: ObservableObject {
     // Live activity indicators
     @Published private(set) var activeUpdatingIDs: Set<String> = []
     @Published private(set) var awaitingFollowupIDs: Set<String> = []
+    private var cancellables: Set<AnyCancellable> = []
 
     // Auto-assign: pending intents created when user clicks New
     struct PendingAssignIntent: Identifiable, Sendable, Hashable {
@@ -104,6 +107,7 @@ final class SessionListViewModel: ObservableObject {
     private let configService = CodexConfigService()
     private let projectsStore = ProjectsStore()
     private let claudeProvider = ClaudeSessionProvider()
+    private let remoteProvider = RemoteSessionProvider()
     @Published private(set) var projects: [Project] = []
     private var projectCounts: [String: Int] = [:]
     private var projectMemberships: [String: String] = [:]
@@ -148,6 +152,15 @@ final class SessionListViewModel: ObservableObject {
         }
         startActivityPruneTicker()
         startIntentsCleanupTicker()
+
+        preferences.$enabledRemoteHosts
+            .removeDuplicates()
+            .dropFirst()
+            .sink { [weak self] _ in
+                guard let self else { return }
+                Task { await self.refreshSessions(force: true) }
+            }
+            .store(in: &cancellables)
     }
 
     // Immediate apply from UI (e.g., pressing Return in search field)
@@ -172,23 +185,29 @@ final class SessionListViewModel: ObservableObject {
 
         do {
             let scope = currentScope()
-            async let codexTask = indexer.refreshSessions(
-                root: preferences.sessionsRoot, scope: scope)
-            async let claudeTask = claudeProvider.sessions(scope: scope)
+            let enabledRemoteHosts = preferences.enabledRemoteHosts
+            let sessionsRoot = preferences.sessionsRoot
 
-            var sessions = try await codexTask
-            let claudeSessions = await claudeTask
-            if !claudeSessions.isEmpty {
-                let existingIDs = Set(sessions.map(\.id))
-                let filteredClaude = claudeSessions.filter { !existingIDs.contains($0.id) }
-                sessions.append(contentsOf: filteredClaude)
+            var sessions = try await indexer.refreshSessions(
+                root: sessionsRoot, scope: scope)
+            let claudeSessions = await claudeProvider.sessions(scope: scope)
+            if !claudeSessions.isEmpty { sessions.append(contentsOf: claudeSessions) }
+
+            if !enabledRemoteHosts.isEmpty {
+                let remoteCodex = await remoteProvider.codexSessions(
+                    scope: scope, enabledHosts: enabledRemoteHosts)
+                if !remoteCodex.isEmpty { sessions.append(contentsOf: remoteCodex) }
+                let remoteClaude = await remoteProvider.claudeSessions(
+                    scope: scope, enabledHosts: enabledRemoteHosts)
+                if !remoteClaude.isEmpty { sessions.append(contentsOf: remoteClaude) }
             }
             if !sessions.isEmpty {
                 var seen: Set<String> = []
                 var unique: [SessionSummary] = []
                 unique.reserveCapacity(sessions.count)
                 for summary in sessions {
-                    if seen.insert(summary.id).inserted {
+                    let key = summary.identityKey
+                    if seen.insert(key).inserted {
                         unique.append(summary)
                     }
                 }
@@ -196,7 +215,7 @@ final class SessionListViewModel: ObservableObject {
             }
 
             guard token == activeRefreshToken else { return }
-            let previousIDs = Set(allSessions.map { $0.id })
+            let previousKeys = Set(allSessions.map { $0.identityKey })
             let notes = await notesStore.all()
             notesSnapshot = notes
             // Refresh projects/memberships snapshot and import legacy mappings if needed
@@ -206,7 +225,7 @@ final class SessionListViewModel: ObservableObject {
             }
             apply(notes: notes, to: &sessions)
             // Auto-assign on newly appeared sessions matched with pending intents
-            let newlyAppeared = sessions.filter { !previousIDs.contains($0.id) }
+            let newlyAppeared = sessions.filter { !previousKeys.contains($0.identityKey) }
             if !newlyAppeared.isEmpty {
                 for s in newlyAppeared { self.handleAutoAssignIfMatches(s) }
             }
@@ -222,13 +241,25 @@ final class SessionListViewModel: ObservableObject {
             currentMonthKey = monthKey(for: selectedDay, dimension: dateDimension)
             Task { await self.refreshGlobalCount() }
             // Refresh path tree to ensure newly created files appear via refresh
+            let enabledRemoteHostsForCounts = enabledRemoteHosts
+            let sessionsRootForCounts = sessionsRoot
             Task {
-                async let codex = indexer.collectCWDCounts(root: preferences.sessionsRoot)
-                async let claude = claudeProvider.collectCWDCounts()
-                var counts = await codex
-                let claudeCounts = await claude
+                var counts = await indexer.collectCWDCounts(root: sessionsRootForCounts)
+                let claudeCounts = await claudeProvider.collectCWDCounts()
                 for (key, value) in claudeCounts {
                     counts[key, default: 0] += value
+                }
+                if !enabledRemoteHostsForCounts.isEmpty {
+                    let remoteCodex = await remoteProvider.collectCWDAggregates(
+                        kind: .codex, enabledHosts: enabledRemoteHostsForCounts)
+                    for (key, value) in remoteCodex {
+                        counts[key, default: 0] += value
+                    }
+                    let remoteClaude = await remoteProvider.collectCWDAggregates(
+                        kind: .claude, enabledHosts: enabledRemoteHostsForCounts)
+                    for (key, value) in remoteClaude {
+                        counts[key, default: 0] += value
+                    }
                 }
                 let tree = counts.buildPathTreeFromCounts()
                 await MainActor.run { self.pathTreeRootPublished = tree }
@@ -238,6 +269,12 @@ final class SessionListViewModel: ObservableObject {
                 errorMessage = error.localizedDescription
             }
         }
+    }
+
+    func ensureInitialRefresh() async {
+        guard !hasPerformedInitialRefresh else { return }
+        hasPerformedInitialRefresh = true
+        await refreshSessions(force: true)
     }
 
     private func registerActivityHeartbeat(previous: [SessionSummary], current: [SessionSummary]) {
@@ -315,8 +352,10 @@ final class SessionListViewModel: ObservableObject {
 
     private func preferredExecutableURL(for source: SessionSource) -> URL {
         switch source {
-        case .codex: return preferences.codexExecutableURL
-        case .claude: return preferences.claudeExecutableURL
+        case .codexLocal, .codexRemote:
+            return preferences.codexExecutableURL
+        case .claudeLocal, .claudeRemote:
+            return preferences.claudeExecutableURL
         }
     }
 
@@ -331,7 +370,7 @@ final class SessionListViewModel: ObservableObject {
 
     // Profile-aware variants (respect current session's project profile when available)
     func copyResumeCommandsRespectingProject(session: SessionSummary) {
-        if session.source != .codex {
+        if session.source.baseKind != .codex {
             actions.copyResumeCommands(
                 session: session,
                 executableURL: preferredExecutableURL(for: session.source),
@@ -345,13 +384,14 @@ final class SessionListViewModel: ObservableObject {
             p.profile != nil || (p.profileId?.isEmpty == false)
         {
             actions.copyResumeUsingProjectProfileCommands(
-                session: session, project: p,
-                executableURL: preferredExecutableURL(for: .codex),
+                session: session,
+                project: p,
+                executableURL: preferredExecutableURL(for: .codexLocal),
                 options: preferences.resumeOptions)
         } else {
             actions.copyResumeCommands(
                 session: session,
-                executableURL: preferredExecutableURL(for: .codex),
+                executableURL: preferredExecutableURL(for: .codexLocal),
                 options: preferences.resumeOptions, simplifiedForExternal: true)
         }
     }
@@ -380,10 +420,18 @@ final class SessionListViewModel: ObservableObject {
     }
 
     func buildResumeCLIInvocation(session: SessionSummary) -> String {
+        if session.isRemote {
+            let command = actions.buildExternalResumeCommands(
+                session: session,
+                executableURL: preferredExecutableURL(for: session.source),
+                options: preferences.resumeOptions
+            )
+            return command.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
         let execPath =
             actions.resolveExecutableURL(
                 preferred: preferredExecutableURL(for: session.source),
-                executableName: session.source == .codex ? "codex" : "claude")?.path
+                executableName: session.source.baseKind == .codex ? "codex" : "claude")?.path
             ?? preferredExecutableURL(for: session.source).path
         return actions.buildResumeCLIInvocation(
             session: session,
@@ -393,15 +441,36 @@ final class SessionListViewModel: ObservableObject {
     }
 
     func buildResumeCLIInvocationRespectingProject(session: SessionSummary) -> String {
-        if session.source == .codex,
+        if session.isRemote {
+            if session.source.baseKind == .codex,
+                let pid = projectIdForSession(session.id),
+                let p = projects.first(where: { $0.id == pid }),
+                p.profile != nil || (p.profileId?.isEmpty == false)
+            {
+                let command = actions.buildResumeUsingProjectProfileCommandLines(
+                    session: session,
+                    project: p,
+                    executableURL: preferredExecutableURL(for: session.source),
+                    options: preferences.resumeOptions
+                )
+                return command.trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            let command = actions.buildExternalResumeCommands(
+                session: session,
+                executableURL: preferredExecutableURL(for: session.source),
+                options: preferences.resumeOptions
+            )
+            return command.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        if session.source.baseKind == .codex,
             let pid = projectIdForSession(session.id),
             let p = projects.first(where: { $0.id == pid }),
             p.profile != nil || (p.profileId?.isEmpty == false)
         {
             let execPath =
                 actions.resolveExecutableURL(
-                    preferred: preferredExecutableURL(for: .codex), executableName: "codex")?.path
-                ?? preferredExecutableURL(for: .codex).path
+                    preferred: preferredExecutableURL(for: .codexLocal), executableName: "codex")?.path
+                ?? preferredExecutableURL(for: .codexLocal).path
             return actions.buildResumeUsingProjectProfileCLIInvocation(
                 session: session, project: p, executablePath: execPath,
                 options: preferences.resumeOptions)
@@ -409,7 +478,7 @@ final class SessionListViewModel: ObservableObject {
         let execPath =
             actions.resolveExecutableURL(
                 preferred: preferredExecutableURL(for: session.source),
-                executableName: session.source == .codex ? "codex" : "claude")?.path
+                executableName: session.source.baseKind == .codex ? "codex" : "claude")?.path
             ?? preferredExecutableURL(for: session.source).path
         return actions.buildResumeCLIInvocation(
             session: session, executablePath: execPath, options: preferences.resumeOptions)
@@ -479,7 +548,28 @@ final class SessionListViewModel: ObservableObject {
 
     // MARK: - New (detail) respecting Project Profile
     func buildNewSessionCLIInvocationRespectingProject(session: SessionSummary) -> String {
-        if session.source == .codex,
+        if session.isRemote {
+            if session.source.baseKind == .codex,
+                let pid = projectIdForSession(session.id),
+                let p = projects.first(where: { $0.id == pid }),
+                p.profile != nil || (p.profileId?.isEmpty == false)
+            {
+                let command = actions.buildNewSessionUsingProjectProfileCommandLines(
+                    session: session,
+                    project: p,
+                    executableURL: preferredExecutableURL(for: session.source),
+                    options: preferences.resumeOptions
+                )
+                return command.trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            let command = actions.buildNewSessionCommandLines(
+                session: session,
+                executableURL: preferredExecutableURL(for: session.source),
+                options: preferences.resumeOptions
+            )
+            return command.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        if session.source.baseKind == .codex,
             let pid = projectIdForSession(session.id),
             let p = projects.first(where: { $0.id == pid }),
             p.profile != nil || (p.profileId?.isEmpty == false)
@@ -494,7 +584,29 @@ final class SessionListViewModel: ObservableObject {
     func buildNewSessionCLIInvocationRespectingProject(
         session: SessionSummary, initialPrompt: String
     ) -> String {
-        if session.source == .codex,
+        if session.isRemote {
+            if session.source.baseKind == .codex,
+                let pid = projectIdForSession(session.id),
+                let p = projects.first(where: { $0.id == pid }),
+                p.profile != nil || (p.profileId?.isEmpty == false)
+            {
+                let command = actions.buildNewSessionUsingProjectProfileCommandLines(
+                    session: session,
+                    project: p,
+                    executableURL: preferredExecutableURL(for: session.source),
+                    options: preferences.resumeOptions,
+                    initialPrompt: initialPrompt
+                )
+                return command.trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            let command = actions.buildNewSessionCommandLines(
+                session: session,
+                executableURL: preferredExecutableURL(for: session.source),
+                options: preferences.resumeOptions
+            )
+            return command.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        if session.source.baseKind == .codex,
             let pid = projectIdForSession(session.id),
             let p = projects.first(where: { $0.id == pid }),
             p.profile != nil || (p.profileId?.isEmpty == false)
@@ -508,7 +620,7 @@ final class SessionListViewModel: ObservableObject {
     }
 
     func copyNewSessionCommandsRespectingProject(session: SessionSummary) {
-        if session.source == .codex,
+        if session.source.baseKind == .codex,
             let pid = projectIdForSession(session.id),
             let p = projects.first(where: { $0.id == pid }),
             p.profile != nil || (p.profileId?.isEmpty == false)
@@ -525,7 +637,7 @@ final class SessionListViewModel: ObservableObject {
     }
 
     func copyNewSessionCommandsRespectingProject(session: SessionSummary, initialPrompt: String) {
-        if session.source == .codex,
+        if session.source.baseKind == .codex,
             let pid = projectIdForSession(session.id),
             let p = projects.first(where: { $0.id == pid }),
             p.profile != nil || (p.profileId?.isEmpty == false)
@@ -543,7 +655,7 @@ final class SessionListViewModel: ObservableObject {
     }
 
     func openNewSessionRespectingProject(session: SessionSummary) {
-        if session.source == .codex,
+        if session.source.baseKind == .codex,
             let pid = projectIdForSession(session.id),
             let p = projects.first(where: { $0.id == pid }),
             p.profile != nil || (p.profileId?.isEmpty == false)
@@ -560,7 +672,7 @@ final class SessionListViewModel: ObservableObject {
     }
 
     func openNewSessionRespectingProject(session: SessionSummary, initialPrompt: String) {
-        if session.source == .codex,
+        if session.source.baseKind == .codex,
             let pid = projectIdForSession(session.id),
             let p = projects.first(where: { $0.id == pid }),
             p.profile != nil || (p.profileId?.isEmpty == false)
@@ -586,14 +698,37 @@ final class SessionListViewModel: ObservableObject {
         await projectsStore.getProject(id: id)
     }
 
-    func allowedSources(for session: SessionSummary) -> [ProjectSessionSource] {
-        if let pid = projectIdForSession(session.id),
-            let p = projects.first(where: { $0.id == pid })
-        {
-            let allowed = p.sources.isEmpty ? ProjectSessionSource.allSet : p.sources
-            return Array(allowed).sorted { $0.displayName < $1.displayName }
+    func allowedSources(for session: SessionSummary) -> [SessionLaunchProvider] {
+        let allowedBases: [ProjectSessionSource] = {
+            if let pid = projectIdForSession(session.id),
+                let project = projects.first(where: { $0.id == pid })
+            {
+                let sources = project.sources.isEmpty ? ProjectSessionSource.allSet : project.sources
+                return Array(sources).sorted { $0.displayName < $1.displayName }
+            }
+            return ProjectSessionSource.allCases.sorted { $0.displayName < $1.displayName }
+        }()
+        var hostSet = preferences.enabledRemoteHosts
+        if let remoteHost = session.remoteHost {
+            hostSet.insert(remoteHost)
         }
-        return ProjectSessionSource.allCases
+        let orderedHosts = Array(hostSet).sorted()
+        var providers: [SessionLaunchProvider] = []
+        for base in allowedBases {
+            switch base {
+            case .codex:
+                providers.append(SessionLaunchProvider(sessionSource: .codexLocal))
+                for host in orderedHosts {
+                    providers.append(SessionLaunchProvider(sessionSource: .codexRemote(host: host)))
+                }
+            case .claude:
+                providers.append(SessionLaunchProvider(sessionSource: .claudeLocal))
+                for host in orderedHosts {
+                    providers.append(SessionLaunchProvider(sessionSource: .claudeRemote(host: host)))
+                }
+            }
+        }
+        return providers
     }
 
     func copyRealResumeCommand(session: SessionSummary) {
@@ -712,32 +847,82 @@ final class SessionListViewModel: ObservableObject {
             let currentKey = currentMonthKey,
             currentKey == key
         {
-            let counts = countsForLoadedMonth(dimension: dimension)
-            monthCountsCache[key] = counts
-            return counts
-        }
-        Task { [monthStart, dimension] in
-            let counts = await indexer.computeCalendarCounts(
-                root: preferences.sessionsRoot, monthStart: monthStart, dimension: dimension)
-            await MainActor.run {
-                self.monthCountsCache[self.cacheKey(monthStart, dimension)] = counts
-                self.objectWillChange.send()
-            }
+            return countsForLoadedMonth(dimension: dimension)
         }
         return [:]
+    }
+
+    func ensureCalendarCounts(for monthStart: Date, dimension: DateDimension) {
+        let key = cacheKey(monthStart, dimension)
+        if monthCountsCache[key] != nil { return }
+        if currentMonthDimension == dimension,
+            let currentKey = currentMonthKey,
+            currentKey == key
+        {
+            let counts = countsForLoadedMonth(dimension: dimension)
+            DispatchQueue.main.async { [weak self] in
+                self?.monthCountsCache[key] = counts
+            }
+            return
+        }
+        let enabledHosts = preferences.enabledRemoteHosts
+        let sessionsRoot = preferences.sessionsRoot
+        Task { [weak self, monthStart, dimension, enabledHosts, sessionsRoot] in
+            guard let self else { return }
+            var merged = await self.indexer.computeCalendarCounts(
+                root: sessionsRoot, monthStart: monthStart, dimension: dimension)
+            if !enabledHosts.isEmpty {
+                let remoteCodex = await self.remoteProvider.codexSessions(
+                    scope: .month(monthStart), enabledHosts: enabledHosts)
+                let remoteClaude = await self.remoteProvider.claudeSessions(
+                    scope: .month(monthStart), enabledHosts: enabledHosts)
+                let remoteSessions = remoteCodex + remoteClaude
+                if !remoteSessions.isEmpty {
+                    let calendar = Calendar.current
+                    for session in remoteSessions {
+                        let referenceDate: Date
+                        switch dimension {
+                        case .created:
+                            referenceDate = session.startedAt
+                        case .updated:
+                            referenceDate = session.lastUpdatedAt ?? session.startedAt
+                        }
+                        guard calendar.isDate(referenceDate, equalTo: monthStart, toGranularity: .month)
+                        else { continue }
+                        let day = calendar.component(.day, from: referenceDate)
+                        merged[day, default: 0] += 1
+                    }
+                }
+            }
+            await MainActor.run {
+                self.monthCountsCache[self.cacheKey(monthStart, dimension)] = merged
+            }
+        }
     }
 
     var pathTreeRoot: PathTreeNode? { pathTreeRootPublished }
 
     func ensurePathTree() {
         if pathTreeRootPublished != nil { return }
-        Task {
-            async let codex = indexer.collectCWDCounts(root: preferences.sessionsRoot)
-            async let claude = claudeProvider.collectCWDCounts()
-            var counts = await codex
-            let claudeCounts = await claude
+        let sessionsRoot = preferences.sessionsRoot
+        let enabledHosts = preferences.enabledRemoteHosts
+        Task { [sessionsRoot, enabledHosts] in
+            var counts = await indexer.collectCWDCounts(root: sessionsRoot)
+            let claudeCounts = await claudeProvider.collectCWDCounts()
             for (key, value) in claudeCounts {
                 counts[key, default: 0] += value
+            }
+            if !enabledHosts.isEmpty {
+                let remoteCodex = await remoteProvider.collectCWDAggregates(
+                    kind: .codex, enabledHosts: enabledHosts)
+                for (key, value) in remoteCodex {
+                    counts[key, default: 0] += value
+                }
+                let remoteClaude = await remoteProvider.collectCWDAggregates(
+                    kind: .claude, enabledHosts: enabledHosts)
+                for (key, value) in remoteClaude {
+                    counts[key, default: 0] += value
+                }
             }
             let tree = counts.buildPathTreeFromCounts()
             await MainActor.run { self.pathTreeRootPublished = tree }
@@ -978,7 +1163,7 @@ final class SessionListViewModel: ObservableObject {
         } else {
             sessions = sections.flatMap { $0.sessions }
         }
-        let currentIDs = Set(sessions.map(\.id))
+        let currentIDs = Set(sessions.map(\.identityKey))
         if let cached = enrichmentSnapshots[cacheKey], cached == currentIDs {
             isEnriching = false
             enrichmentProgress = 0
@@ -1008,20 +1193,20 @@ final class SessionListViewModel: ObservableObject {
 
                 func addNext(_ n: Int) {
                     for _ in 0..<n {
-            guard let s = iterator.next() else { return }
-            group.addTask { [weak self] in
-                guard let self else { return nil }
-                if s.source == .claude {
-                    if let enriched = await self.claudeProvider.enrich(summary: s) {
-                        return (s.id, enriched)
+                        guard let s = iterator.next() else { return }
+                        group.addTask { [weak self] in
+                            guard let self else { return nil }
+                            if s.source.baseKind == .claude {
+                                if let enriched = await self.claudeProvider.enrich(summary: s) {
+                                    return (s.id, enriched)
+                                }
+                                return (s.id, s)
+                            } else if let enriched = try await self.indexer.enrich(url: s.fileURL) {
+                                return (s.id, enriched)
+                            }
+                            return (s.id, s)
+                        }
                     }
-                    return (s.id, s)
-                } else if let enriched = try await self.indexer.enrich(url: s.fileURL) {
-                    return (s.id, enriched)
-                }
-                return (s.id, s)
-            }
-        }
                 }
                 addNext(concurrency)
                 var updatesBuffer: [(String, SessionSummary)] = []
@@ -1276,9 +1461,14 @@ extension SessionListViewModel {
     }
 
     func refreshGlobalCount() async {
-        async let codex = indexer.countAllSessions(root: preferences.sessionsRoot)
-        async let claude = claudeProvider.countAllSessions()
-        let total = await codex + claude
+        let codexCount = await indexer.countAllSessions(root: preferences.sessionsRoot)
+        let claudeCount = await claudeProvider.countAllSessions()
+        let enabledHosts = preferences.enabledRemoteHosts
+        var total = codexCount + claudeCount
+        if !enabledHosts.isEmpty {
+            total += await remoteProvider.countSessions(kind: .codex, enabledHosts: enabledHosts)
+            total += await remoteProvider.countSessions(kind: .claude, enabledHosts: enabledHosts)
+        }
         await MainActor.run { self.globalSessionCount = total }
     }
 
@@ -1299,7 +1489,7 @@ extension SessionListViewModel {
     }
 
     func timeline(for summary: SessionSummary) async -> [ConversationTurn] {
-        if summary.source == .claude {
+        if summary.source.baseKind == .claude {
             return await claudeProvider.timeline(for: summary) ?? []
         }
         let loader = SessionTimelineLoader()

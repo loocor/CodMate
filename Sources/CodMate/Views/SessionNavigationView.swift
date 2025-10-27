@@ -53,15 +53,15 @@ struct SessionNavigationView: View {
         }
         .frame(idealWidth: 240)
         .task {
-            _ = viewModel.calendarCounts(for: monthStart, dimension: dimension)
+            viewModel.ensureCalendarCounts(for: monthStart, dimension: dimension)
             // Ensure dimension is synced on startup
             viewModel.dateDimension = dimension
         }
         .onChange(of: monthStart) { _, m in
-            _ = viewModel.calendarCounts(for: m, dimension: dimension)
+            viewModel.ensureCalendarCounts(for: m, dimension: dimension)
         }
         .onChange(of: dimension) { _, d in
-            _ = viewModel.calendarCounts(for: monthStart, dimension: d)
+            viewModel.ensureCalendarCounts(for: monthStart, dimension: d)
         }
         .sheet(isPresented: $showNewProject) {
             ProjectEditorSheet(isPresented: $showNewProject, mode: .new)

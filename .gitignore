@@ -3,3 +3,5 @@
 .DS_Store
 artifacts/
 build/
+._*
+**/xcuserdata/
