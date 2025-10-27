@@ -352,10 +352,10 @@ struct SettingsView: View {
                                     .font(.caption).foregroundStyle(.secondary)
                             }
                             VStack(alignment: .leading, spacing: 8) {
-                                aliasField(label: "default", text: $claudeVM.aliasDefault, placeholder: "vendor model id")
-                                aliasField(label: "haiku", text: $claudeVM.aliasHaiku, placeholder: "vendor model id")
-                                aliasField(label: "sonnet", text: $claudeVM.aliasSonnet, placeholder: "vendor model id")
-                                aliasField(label: "opus", text: $claudeVM.aliasOpus, placeholder: "vendor model id")
+                                aliasPicker(label: "default", selection: $claudeVM.aliasDefault)
+                                aliasPicker(label: "haiku", selection: $claudeVM.aliasHaiku)
+                                aliasPicker(label: "sonnet", selection: $claudeVM.aliasSonnet)
+                                aliasPicker(label: "opus", selection: $claudeVM.aliasOpus)
                             }
                             .frame(maxWidth: .infinity, alignment: .trailing)
                         }
@@ -377,10 +377,18 @@ struct SettingsView: View {
     }
 
     @ViewBuilder
-    private func aliasField(label: String, text: Binding<String>, placeholder: String) -> some View {
-        HStack {
+    private func aliasPicker(label: String, selection: Binding<String>) -> some View {
+        let options = [""] + claudeVM.availableModels()
+        return HStack {
             Text(label).frame(width: 70, alignment: .leading).font(.caption)
-            TextField(placeholder, text: text)
+            Picker("", selection: selection) {
+                Text("None").tag("")
+                ForEach(Array(Set(options)).filter { !$0.isEmpty }.sorted(), id: \.self) { model in
+                    Text(model).tag(model)
+                }
+            }
+            .labelsHidden()
+            .frame(maxWidth: .infinity)
         }
     }
 

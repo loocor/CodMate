@@ -3,7 +3,6 @@ import SwiftUI
 struct CodexSettingsView: View {
     @ObservedObject var codexVM: CodexVM
     @ObservedObject var preferences: SessionPreferencesStore
-    @State private var codexCatalogIds: [String] = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -32,6 +31,7 @@ struct CodexSettingsView: View {
 
             // Tabs
             TabView {
+                Tab("Provider", systemImage: "server.rack") { providerPane }
                 Tab("Runtime", systemImage: "gearshape.2") { runtimePane }
                 Tab("Notifications", systemImage: "bell") { notificationsPane }
                 Tab("Privacy", systemImage: "lock.shield") { privacyPane }
@@ -42,58 +42,107 @@ struct CodexSettingsView: View {
         }
     }
 
+    // MARK: - Provider Pane
+    private var providerPane: some View {
+        codexTabContent {
+            Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 18) {
+                GridRow {
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text("Provider").font(.subheadline).fontWeight(.medium)
+                        Text("Choose built-in or a configured provider")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    Picker("", selection: $codexVM.registryActiveProviderId) {
+                        Text("(Built-in)").tag(String?.none)
+                        ForEach(codexVM.registryProviders, id: \.id) { provider in
+                            Text(codexVM.registryDisplayName(for: provider))
+                                .tag(String?(provider.id))
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .onChange(of: codexVM.registryActiveProviderId) { _, _ in
+                        Task { await codexVM.applyRegistryProviderSelection() }
+                    }
+                }
+                gridDivider
+                GridRow {
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text("Model").font(.subheadline).fontWeight(.medium)
+                        Text("Default model used by Codex CLI.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    if codexVM.registryActiveProviderId == nil {
+                        Picker("", selection: $codexVM.model) {
+                            ForEach(codexVM.builtinModels, id: \.self) { model in
+                                Text(model).tag(model)
+                            }
+                        }
+                        .labelsHidden()
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                        .onChange(of: codexVM.model) { _, _ in
+                            Task { await codexVM.applyModel() }
+                        }
+                    } else {
+                        let modelIds = codexVM.modelsForActiveRegistryProvider()
+                        if modelIds.isEmpty {
+                            Text("No models configured for this provider. Add models in Providers → Models tab.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .trailing)
+                        } else {
+                            Picker("", selection: $codexVM.model) {
+                                ForEach(modelIds, id: \.self) { modelId in
+                                    Text(modelId).tag(modelId)
+                                }
+                            }
+                            .labelsHidden()
+                            .frame(maxWidth: .infinity, alignment: .trailing)
+                            .onChange(of: codexVM.model) { _, _ in
+                                Task { await codexVM.applyModel() }
+                            }
+                        }
+                    }
+                }
+                if let provider = codexVM.selectedRegistryProvider(),
+                    let connector = provider.connectors[
+                        ProvidersRegistryService.Consumer.codex.rawValue]
+                {
+                    gridDivider
+                    GridRow {
+                        VStack(alignment: .leading, spacing: 0) {
+                            Text("Base URL").font(.subheadline).fontWeight(.medium)
+                            Text("Endpoint applied to config.toml")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        Text(connector.baseURL ?? "—")
+                            .frame(maxWidth: .infinity, alignment: .trailing)
+                            .font(.system(.body, design: .monospaced))
+                            .textSelection(.enabled)
+                    }
+                    if let envKey = connector.envKey, !envKey.isEmpty {
+                        gridDivider
+                        GridRow {
+                            VStack(alignment: .leading, spacing: 0) {
+                                Text("API Key Env").font(.subheadline).fontWeight(.medium)
+                                Text("Environment variable passed to Codex")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                            Text(envKey)
+                                .frame(maxWidth: .infinity, alignment: .trailing)
+                                .font(.system(.body, design: .monospaced))
+                        }
+                    }
+                }
+            }
+        }
+        .task { await codexVM.loadRegistryBindings() }
+    }
+
     // MARK: - Runtime Pane
     private var runtimePane: some View {
         codexTabContent {
             Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 18) {
-                        // Provider selection (Built-in or configured third-party)
-                        GridRow {
-                            VStack(alignment: .leading, spacing: 0) {
-                                Text("Provider").font(.subheadline).fontWeight(.medium)
-                                Text("Choose built-in or a configured provider").font(.caption).foregroundStyle(.secondary)
-                            }
-                            Picker("", selection: $codexVM.activeProviderId) {
-                                Text("(Built‑in)").tag(String?.none)
-                                ForEach(codexVM.providers, id: \.id) { p in
-                                    Text((p.name?.isEmpty == false ? p.name! : p.id)).tag(String?(p.id))
-                                }
-                            }
-                            .labelsHidden()
-                            .onChange(of: codexVM.activeProviderId) { _, _ in
-                                Task {
-                                    await codexVM.applyActiveProvider()
-                                    await loadCodexCatalogIds()
-                                }
-                            }
-                            .frame(maxWidth: .infinity, alignment: .trailing)
-                        }
-                        gridDivider
-                        GridRow {
-                            VStack(alignment: .leading, spacing: 0) {
-                                Text("Model").font(.subheadline).fontWeight(.medium)
-                                Text("Default model used by Codex CLI.")
-                                    .font(.caption).foregroundStyle(.secondary)
-                            }
-                            HStack(spacing: 8) {
-                                TextField("gpt-5-codex", text: $codexVM.model)
-                                    .onSubmit { Task { await codexVM.applyModel() } }
-                                    .onChange(of: codexVM.model) { _, _ in codexVM.runtimeDirty = true }
-                                if !codexCatalogIds.isEmpty {
-                                    Menu {
-                                        ForEach(codexCatalogIds, id: \.self) { modelId in
-                                            Button(modelId) {
-                                                codexVM.model = modelId
-                                                Task { await codexVM.applyModel() }
-                                            }
-                                        }
-                                    } label: {
-                                        Label("From Catalog", systemImage: "chevron.down")
-                                    }
-                                }
-                            }
-                            .frame(maxWidth: .infinity, alignment: .trailing)
-                        }
-                        gridDivider
                         GridRow {
                             VStack(alignment: .leading, spacing: 0) {
                                 Text("Reasoning Effort").font(.subheadline).fontWeight(.medium)
@@ -185,7 +234,6 @@ struct CodexSettingsView: View {
                         }
                     }
         }
-        .task { await loadCodexCatalogIds() }
     }
 
     // MARK: - Notifications Pane
@@ -399,16 +447,4 @@ struct CodexSettingsView: View {
         Divider()
     }
 
-    private func loadCodexCatalogIds() async {
-        let registry = ProvidersRegistryService()
-        let providers = await registry.listProviders()
-        guard let active = codexVM.activeProviderId,
-              let provider = providers.first(where: { $0.id == active })
-        else {
-            await MainActor.run { codexCatalogIds = [] }
-            return
-        }
-        let ids = provider.catalog?.models?.map { $0.vendorModelId } ?? []
-        await MainActor.run { codexCatalogIds = ids }
-    }
 }

@@ -88,6 +88,51 @@ actor CodexConfigService {
         try writeConfig(rewritten)
     }
 
+    func replaceProviders(with providers: [CodexProvider]) throws {
+        var text = (try? String(contentsOf: paths.configURL, encoding: .utf8)) ?? ""
+        text = rewriteProvidersRegion(in: text, with: providers)
+        try writeConfig(text)
+    }
+
+    func applyProviderFromRegistry(_ provider: ProvidersRegistryService.Provider?) throws {
+        if let provider {
+            guard
+                let connector = provider.connectors[ProvidersRegistryService.Consumer.codex.rawValue]
+            else {
+                try replaceProviders(with: [])
+                try setActiveProvider(nil)
+                return
+            }
+            var envKeyValue = connector.envKey
+            var headerMap = connector.httpHeaders ?? [:]
+            if let envKeyValueNonNil = envKeyValue,
+                envKeyValueNonNil.lowercased().contains("sk-")
+            {
+                envKeyValue = nil
+                headerMap["Authorization"] = "Bearer \(envKeyValueNonNil)"
+            }
+            let codexProvider = CodexProvider(
+                id: provider.id,
+                name: provider.name,
+                baseURL: connector.baseURL,
+                envKey: envKeyValue,
+                wireAPI: (connector.wireAPI?.lowercased() == "responses") ? "responses" : "chat",
+                queryParamsRaw: connector.queryParams.map { renderInlineTable($0) },
+                httpHeadersRaw: headerMap.isEmpty ? nil : renderInlineTable(headerMap),
+                envHttpHeadersRaw: connector.envHttpHeaders.map { renderInlineTable($0) },
+                requestMaxRetries: connector.requestMaxRetries,
+                streamMaxRetries: connector.streamMaxRetries,
+                streamIdleTimeoutMs: connector.streamIdleTimeoutMs,
+                managedByCodMate: provider.managedByCodMate
+            )
+            try replaceProviders(with: [codexProvider])
+            try setActiveProvider(provider.id)
+        } else {
+            try replaceProviders(with: [])
+            try setActiveProvider(nil)
+        }
+    }
+
     // MARK: - Runtime: model, reasoning, sandbox, approvals
 
     func getTopLevelString(_ key: String) -> String? {

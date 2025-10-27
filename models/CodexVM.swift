@@ -3,6 +3,7 @@ import SwiftUI
 
 @MainActor
 final class CodexVM: ObservableObject {
+    let builtinModels: [String] = ["gpt-5", "gpt-5-codex"]
     enum ReasoningEffort: String, CaseIterable, Identifiable {
         case minimal, low, medium, high
         var id: String { rawValue }
@@ -23,6 +24,8 @@ final class CodexVM: ObservableObject {
     // Providers
     @Published var providers: [CodexProvider] = []
     @Published var activeProviderId: String?
+    @Published var registryProviders: [ProvidersRegistryService.Provider] = []
+    @Published var registryActiveProviderId: String?
     @Published var showProviderEditor = false
     @Published var providerDraft: CodexProvider = .init(
         id: "", name: nil, baseURL: nil, envKey: nil, wireAPI: nil, queryParamsRaw: nil,
@@ -65,6 +68,7 @@ final class CodexVM: ObservableObject {
     @Published var lastError: String?
 
     private let service = CodexConfigService()
+    private let providersRegistry = ProvidersRegistryService()
     // Preset helper
     enum ProviderPreset { case k2, glm, deepseek }
     @Published var providerKeyApplyURL: String? = nil
@@ -72,6 +76,7 @@ final class CodexVM: ObservableObject {
     func loadAll() async {
         await loadProviders()
         await loadRuntime()
+        await loadRegistryBindings()
         await loadNotifications()
         await loadPrivacy()
         await reloadRawConfig()
@@ -80,6 +85,21 @@ final class CodexVM: ObservableObject {
     func loadProviders() async {
         providers = await service.listProviders()
         activeProviderId = await service.activeProvider()
+    }
+
+    func loadRegistryBindings() async {
+        registryProviders = await providersRegistry.listProviders()
+        let bindings = await providersRegistry.getBindings()
+        registryActiveProviderId = bindings.activeProvider?[
+            ProvidersRegistryService.Consumer.codex.rawValue]
+        if let defaultModel = bindings.defaultModel?[
+            ProvidersRegistryService.Consumer.codex.rawValue], !defaultModel.isEmpty
+        {
+            model = defaultModel
+        } else if registryActiveProviderId == nil {
+            model = builtinModels.first ?? "gpt-5-codex"
+        }
+        normalizeBuiltinModelIfNeeded()
     }
 
     func presentAddProvider() {
@@ -266,8 +286,70 @@ final class CodexVM: ObservableObject {
     }
 
     func applyModel() async {
-        do { try await service.setTopLevelString("model", value: model) } catch {
+        let trimmed = model.trimmingCharacters(in: .whitespacesAndNewlines)
+        let value = trimmed.isEmpty ? nil : trimmed
+        model = trimmed
+        do {
+            try await service.setTopLevelString("model", value: value)
+            try await providersRegistry.setDefaultModel(
+                .codex, modelId: value)
+            runtimeDirty = false
+        } catch {
             lastError = "Save failed"
+        }
+    }
+
+    func selectedRegistryProvider() -> ProvidersRegistryService.Provider? {
+        guard let id = registryActiveProviderId else { return nil }
+        return registryProviders.first(where: { $0.id == id })
+    }
+
+    func modelsForActiveRegistryProvider() -> [String] {
+        guard let provider = selectedRegistryProvider() else { return [] }
+        let ids = (provider.catalog?.models ?? []).map { $0.vendorModelId }
+        var seen = Set<String>()
+        return ids.compactMap { id in
+            let trimmed = id.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return nil }
+            if seen.insert(trimmed).inserted { return trimmed }
+            return nil
+        }
+    }
+
+    func registryDisplayName(for provider: ProvidersRegistryService.Provider) -> String {
+        if let name = provider.name, !name.isEmpty { return name }
+        return provider.id
+    }
+
+    func applyRegistryProviderSelection() async {
+        do {
+            try await providersRegistry.setActiveProvider(
+                .codex, providerId: registryActiveProviderId)
+            if let provider = selectedRegistryProvider() {
+                try await service.applyProviderFromRegistry(provider)
+                if let recommended = provider.recommended?.defaultModelFor?[
+                    ProvidersRegistryService.Consumer.codex.rawValue],
+                    !recommended.isEmpty
+                {
+                    model = recommended
+                } else if let first = provider.catalog?.models?.first?.vendorModelId {
+                    model = first
+                }
+            } else {
+                try await service.applyProviderFromRegistry(nil)
+                model = builtinModels.first ?? "gpt-5-codex"
+            }
+            await applyModel()
+        } catch {
+            lastError = "Failed to apply provider"
+        }
+        await loadRegistryBindings()
+    }
+
+    private func normalizeBuiltinModelIfNeeded() {
+        guard registryActiveProviderId == nil else { return }
+        if !builtinModels.contains(model) {
+            model = builtinModels.first ?? "gpt-5-codex"
         }
     }
     func applyReasoning() async {

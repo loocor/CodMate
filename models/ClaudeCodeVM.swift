@@ -23,6 +23,13 @@ final class ClaudeCodeVM: ObservableObject {
         }
     }
 
+    func availableModels() -> [String] {
+        guard let id = activeProviderId,
+              let provider = providers.first(where: { $0.id == id })
+        else { return [] }
+        return (provider.catalog?.models ?? []).map { $0.vendorModelId }
+    }
+
     func applyActiveProvider() async {
         do {
             try await registry.setActiveProvider(.claudeCode, providerId: activeProviderId)
@@ -81,8 +88,10 @@ final class ClaudeCodeVM: ObservableObject {
             aliasOpus = ""
             return
         }
-        let aliases = provider.connectors[ProvidersRegistryService.Consumer.claudeCode.rawValue]?.modelAliases ?? [:]
-        aliasDefault = aliases["default"] ?? ""
+        let connector = provider.connectors[ProvidersRegistryService.Consumer.claudeCode.rawValue]
+        let aliases = connector?.modelAliases ?? [:]
+        let recommended = provider.recommended?.defaultModelFor?[ProvidersRegistryService.Consumer.claudeCode.rawValue]
+        aliasDefault = aliases["default"] ?? recommended ?? ""
         aliasHaiku = aliases["haiku"] ?? ""
         aliasSonnet = aliases["sonnet"] ?? ""
         aliasOpus = aliases["opus"] ?? ""

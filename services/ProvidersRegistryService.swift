@@ -74,7 +74,6 @@ actor ProvidersRegistryService {
 
     private let fm: FileManager
     private let paths: Paths
-    private var state: Registry?
 
     init(paths: Paths = ProvidersRegistryService.defaultPaths(), fileManager: FileManager = .default) {
         self.paths = paths
@@ -83,20 +82,20 @@ actor ProvidersRegistryService {
 
     // MARK: - Public API
     func load() -> Registry {
-        if let state { return state }
         let url = paths.fileURL
         if let data = try? Data(contentsOf: url),
            let reg = try? JSONDecoder().decode(Registry.self, from: data) {
-            self.state = reg
             return reg
         }
-        let empty = Registry(version: 1, providers: [], bindings: .init(activeProvider: nil, defaultModel: nil), migration: nil)
-        self.state = empty
-        return empty
+        return Registry(
+            version: 1,
+            providers: [],
+            bindings: .init(activeProvider: nil, defaultModel: nil),
+            migration: nil
+        )
     }
 
-    func save() throws {
-        let reg = state ?? load()
+    func save(_ reg: Registry) throws {
         try fm.createDirectory(at: paths.home, withIntermediateDirectories: true)
         let tmp = paths.fileURL.appendingPathExtension("tmp")
         let enc = JSONEncoder()
@@ -120,15 +119,13 @@ actor ProvidersRegistryService {
         } else {
             reg.providers.append(provider)
         }
-        state = reg
-        try save()
+        try save(reg)
     }
 
     func deleteProvider(id: String) throws {
         var reg = load()
         reg.providers.removeAll { $0.id == id }
-        state = reg
-        try save()
+        try save(reg)
     }
 
     func getBindings() -> Bindings { load().bindings }
@@ -138,8 +135,7 @@ actor ProvidersRegistryService {
         var ap = reg.bindings.activeProvider ?? [:]
         ap[consumer.rawValue] = providerId
         reg.bindings.activeProvider = ap
-        state = reg
-        try save()
+        try save(reg)
     }
 
     func setDefaultModel(_ consumer: Consumer, modelId: String?) throws {
@@ -147,8 +143,7 @@ actor ProvidersRegistryService {
         var dm = reg.bindings.defaultModel ?? [:]
         dm[consumer.rawValue] = modelId
         reg.bindings.defaultModel = dm
-        state = reg
-        try save()
+        try save(reg)
     }
 
     // MARK: - Migration from Codex config (providers + active/model)
@@ -198,7 +193,6 @@ actor ProvidersRegistryService {
         if let model { dm[Consumer.codex.rawValue] = model }
         reg.bindings.defaultModel = dm
         reg.migration = .init(importedFromCodexConfigAt: Date())
-        state = reg
-        try? save()
+        try? save(reg)
     }
 }
