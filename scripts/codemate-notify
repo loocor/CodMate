@@ -1,6 +1,6 @@
 #!/bin/zsh
 # Lightweight bridge to surface Codex `notify` events as macOS notifications.
-# Usage: codemate-notify '<JSON>'
+# Usage: codmate-notify '<JSON>'
 
 set -euo pipefail
 
@@ -35,7 +35,7 @@ thread_id = data.get("thread-id", "codex-thread")
 print("Codex", msg[:240], f"codex-{thread_id}", sep='\t')
 PY
   if command -v terminal-notifier >/dev/null 2>&1; then
-    terminal-notifier -title "$title" -message "$message" -group "$group_id" -ignoreDnD -sender "ai.codemate.app" || true
+    terminal-notifier -title "$title" -message "$message" -group "$group_id" -ignoreDnD -sender "ai.codmate.app" || true
   else
     # Fallback to osascript (less capable, but ubiquitous)
     /usr/bin/osascript <<OSA || true
