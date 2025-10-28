@@ -34,6 +34,19 @@ final class SessionPreferencesStore: ObservableObject {
         static let autoAssignNewToSameProject = "codex.projects.autoAssignNewToSame"
         static let timelineVisibleKinds = "codex.timeline.visibleKinds"
         static let markdownVisibleKinds = "codex.markdown.visibleKinds"
+        // Claude advanced
+        static let claudeDebug = "claude.debug"
+        static let claudeDebugFilter = "claude.debug.filter"
+        static let claudeVerbose = "claude.verbose"
+        static let claudePermissionMode = "claude.permission.mode"
+        static let claudeAllowedTools = "claude.allowedTools"
+        static let claudeDisallowedTools = "claude.disallowedTools"
+        static let claudeAddDirs = "claude.addDirs"
+        static let claudeIDE = "claude.ide"
+        static let claudeStrictMCP = "claude.strictMCP"
+        static let claudeFallbackModel = "claude.fallbackModel"
+        static let claudeSkipPermissions = "claude.skipPermissions"
+        static let claudeAllowSkipPermissions = "claude.allowSkipPermissions"
     }
 
     init(
@@ -137,6 +150,21 @@ final class SessionPreferencesStore: ObservableObject {
         } else {
             self.markdownVisibleKinds = MessageVisibilityKind.markdownDefault
         }
+        // Claude advanced defaults
+        self.claudeDebug = defaults.object(forKey: Keys.claudeDebug) as? Bool ?? false
+        self.claudeDebugFilter = defaults.string(forKey: Keys.claudeDebugFilter) ?? ""
+        self.claudeVerbose = defaults.object(forKey: Keys.claudeVerbose) as? Bool ?? false
+        if let pm = defaults.string(forKey: Keys.claudePermissionMode) {
+            self.claudePermissionMode = ClaudePermissionMode(rawValue: pm) ?? .default
+        } else { self.claudePermissionMode = .default }
+        self.claudeAllowedTools = defaults.string(forKey: Keys.claudeAllowedTools) ?? ""
+        self.claudeDisallowedTools = defaults.string(forKey: Keys.claudeDisallowedTools) ?? ""
+        self.claudeAddDirs = defaults.string(forKey: Keys.claudeAddDirs) ?? ""
+        self.claudeIDE = defaults.object(forKey: Keys.claudeIDE) as? Bool ?? false
+        self.claudeStrictMCP = defaults.object(forKey: Keys.claudeStrictMCP) as? Bool ?? false
+        self.claudeFallbackModel = defaults.string(forKey: Keys.claudeFallbackModel) ?? ""
+        self.claudeSkipPermissions = defaults.object(forKey: Keys.claudeSkipPermissions) as? Bool ?? false
+        self.claudeAllowSkipPermissions = defaults.object(forKey: Keys.claudeAllowSkipPermissions) as? Bool ?? false
     }
 
     private func persist() {
@@ -228,11 +256,39 @@ final class SessionPreferencesStore: ObservableObject {
     }
 
     var resumeOptions: ResumeOptions {
-        ResumeOptions(
+        var opt = ResumeOptions(
             sandbox: defaultResumeSandboxMode,
             approval: defaultResumeApprovalPolicy,
             fullAuto: defaultResumeFullAuto,
             dangerouslyBypass: defaultResumeDangerBypass
         )
+        // Carry Claude advanced flags for launch
+        opt.claudeDebug = claudeDebug
+        opt.claudeDebugFilter = claudeDebugFilter.isEmpty ? nil : claudeDebugFilter
+        opt.claudeVerbose = claudeVerbose
+        opt.claudePermissionMode = claudePermissionMode
+        opt.claudeAllowedTools = claudeAllowedTools.isEmpty ? nil : claudeAllowedTools
+        opt.claudeDisallowedTools = claudeDisallowedTools.isEmpty ? nil : claudeDisallowedTools
+        opt.claudeAddDirs = claudeAddDirs.isEmpty ? nil : claudeAddDirs
+        opt.claudeIDE = claudeIDE
+        opt.claudeStrictMCP = claudeStrictMCP
+        opt.claudeFallbackModel = claudeFallbackModel.isEmpty ? nil : claudeFallbackModel
+        opt.claudeSkipPermissions = claudeSkipPermissions
+        opt.claudeAllowSkipPermissions = claudeAllowSkipPermissions
+        return opt
     }
+
+    // MARK: - Claude Advanced (Published)
+    @Published var claudeDebug: Bool { didSet { defaults.set(claudeDebug, forKey: Keys.claudeDebug) } }
+    @Published var claudeDebugFilter: String { didSet { defaults.set(claudeDebugFilter, forKey: Keys.claudeDebugFilter) } }
+    @Published var claudeVerbose: Bool { didSet { defaults.set(claudeVerbose, forKey: Keys.claudeVerbose) } }
+    @Published var claudePermissionMode: ClaudePermissionMode { didSet { defaults.set(claudePermissionMode.rawValue, forKey: Keys.claudePermissionMode) } }
+    @Published var claudeAllowedTools: String { didSet { defaults.set(claudeAllowedTools, forKey: Keys.claudeAllowedTools) } }
+    @Published var claudeDisallowedTools: String { didSet { defaults.set(claudeDisallowedTools, forKey: Keys.claudeDisallowedTools) } }
+    @Published var claudeAddDirs: String { didSet { defaults.set(claudeAddDirs, forKey: Keys.claudeAddDirs) } }
+    @Published var claudeIDE: Bool { didSet { defaults.set(claudeIDE, forKey: Keys.claudeIDE) } }
+    @Published var claudeStrictMCP: Bool { didSet { defaults.set(claudeStrictMCP, forKey: Keys.claudeStrictMCP) } }
+    @Published var claudeFallbackModel: String { didSet { defaults.set(claudeFallbackModel, forKey: Keys.claudeFallbackModel) } }
+    @Published var claudeSkipPermissions: Bool { didSet { defaults.set(claudeSkipPermissions, forKey: Keys.claudeSkipPermissions) } }
+    @Published var claudeAllowSkipPermissions: Bool { didSet { defaults.set(claudeAllowSkipPermissions, forKey: Keys.claudeAllowSkipPermissions) } }
 }

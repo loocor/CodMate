@@ -52,7 +52,7 @@ actor SessionIndexer {
     private let decoder: JSONDecoder
     private let cache = NSCache<NSURL, CacheEntry>()
     private let diskCache: DiskCache
-    private let logger = Logger(subsystem: "io.umate.codemate", category: "SessionIndexer")
+    private let logger = Logger(subsystem: "io.umate.codmate", category: "SessionIndexer")
     /// Avoid global mutable, non-Sendable formatter; create locally when needed
     nonisolated private static func makeTailTimestampFormatter() -> ISO8601DateFormatter {
         let f = ISO8601DateFormatter()

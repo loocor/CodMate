@@ -90,9 +90,10 @@ final class SessionEnrichmentService {
                         }
                         map[id] = enriched
                     }
-                    enrichedSessions = Array(map.values)
+                    let newEnrichedSessions = Array(map.values)
+                    enrichedSessions = newEnrichedSessions
                     await MainActor.run {
-                        onUpdate(enrichedSessions)
+                        onUpdate(newEnrichedSessions)
                     }
                     updatesBuffer.removeAll(keepingCapacity: true)
                     lastFlushTime = ContinuousClock.now
