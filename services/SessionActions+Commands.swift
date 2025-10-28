@@ -263,10 +263,73 @@ extension SessionActions {
             return parts.joined(separator: " ")
         case .claude:
             var parts: [String] = ["claude"]
+
+            // Apply model if specified
+            // For Built-in provider: either omit --model or use short alias (sonnet/haiku/opus)
+            // Built-in models follow pattern: claude-3-X-Y-latest or claude-3-5-X-latest
+            // Also handle fallback names like "Claude", "Sonnet", "Haiku", "Opus"
             if let model = session.model, !model.trimmingCharacters(in: .whitespaces).isEmpty {
-                parts.append("--model")
-                parts.append(shellQuoteIfNeeded(model))
+                let trimmed = model.trimmingCharacters(in: .whitespaces)
+                let lowerModel = trimmed.lowercased()
+
+                // Check if this is a generic fallback name (Claude) - omit it
+                if lowerModel == "claude" {
+                    // Generic fallback - don't pass --model, let CLI use default
+                } else if lowerModel == "sonnet" || lowerModel == "haiku" || lowerModel == "opus" {
+                    // Already a short alias - pass as-is (lowercase)
+                    parts.append("--model")
+                    parts.append(lowerModel)
+                } else if trimmed.hasPrefix("claude-") && trimmed.hasSuffix("-latest") {
+                    // Built-in format detected: use short alias
+                    let shortAlias: String?
+                    if lowerModel.contains("sonnet") {
+                        shortAlias = "sonnet"
+                    } else if lowerModel.contains("haiku") {
+                        shortAlias = "haiku"
+                    } else if lowerModel.contains("opus") {
+                        shortAlias = "opus"
+                    } else {
+                        shortAlias = nil  // Unknown built-in model, omit --model
+                    }
+                    if let alias = shortAlias {
+                        parts.append("--model")
+                        parts.append(alias)
+                    }
+                } else {
+                    // Third-party or custom model: pass as-is
+                    parts.append("--model")
+                    parts.append(shellQuoteIfNeeded(trimmed))
+                }
             }
+
+            // Apply Claude runtime configuration from options (matching resume behavior)
+            if options.claudeVerbose { parts.append("--verbose") }
+            if options.claudeDebug {
+                parts.append("-d")
+                if let f = options.claudeDebugFilter, !f.isEmpty { parts.append(shellQuoteIfNeeded(f)) }
+            }
+            if let pm = options.claudePermissionMode, pm != .default {
+                parts.append(contentsOf: ["--permission-mode", shellQuoteIfNeeded(pm.rawValue)])
+            }
+            if options.claudeSkipPermissions { parts.append("--dangerously-skip-permissions") }
+            if options.claudeAllowSkipPermissions { parts.append("--allow-dangerously-skip-permissions") }
+            if let allowed = options.claudeAllowedTools, !allowed.isEmpty {
+                parts.append(contentsOf: ["--allowed-tools", shellQuoteIfNeeded(allowed)])
+            }
+            if let disallowed = options.claudeDisallowedTools, !disallowed.isEmpty {
+                parts.append(contentsOf: ["--disallowed-tools", shellQuoteIfNeeded(disallowed)])
+            }
+            if let addDirs = options.claudeAddDirs, !addDirs.isEmpty {
+                let dirParts = addDirs.split(whereSeparator: { $0 == "," || $0.isWhitespace }).map { String($0) }.filter { !$0.isEmpty }
+                for dir in dirParts { parts.append(contentsOf: ["--add-dir", shellQuoteIfNeeded(dir)]) }
+            }
+            if options.claudeIDE { parts.append("--ide") }
+            if options.claudeStrictMCP { parts.append("--strict-mcp-config") }
+            if let fb = options.claudeFallbackModel, !fb.isEmpty { parts.append(contentsOf: ["--fallback-model", shellQuoteIfNeeded(fb)]) }
+
+            // Note: MCP config file is only attached in actual process execution (resume method),
+            // not in CLI invocation strings for external terminals, as it requires async export
+
             if let prompt = initialPrompt, !prompt.isEmpty {
                 parts.append(shellSingleQuoted(prompt))
             }

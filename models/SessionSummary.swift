@@ -38,7 +38,26 @@ struct SessionSummary: Identifiable, Hashable, Sendable, Codable {
 
     var displayName: String {
         let filename = fileURL.deletingPathExtension().lastPathComponent
-        // Extract session ID from filename like "rollout-2025-10-17T14-11-18-0199f124-8c38-7140-969c-396260d0099c"
+
+        // Handle new format: agent-6afec743 -> extract agentId from filename
+        if filename.hasPrefix("agent-") {
+            // Use the agentId portion from filename to distinguish between parallel agents
+            let agentId = String(filename.dropFirst("agent-".count))
+            if !agentId.isEmpty {
+                return "agent-\(agentId)"
+            }
+            // Fallback to sessionId if agentId extraction failed
+            return id
+        }
+
+        // Handle old UUID format: ed5f5b12-a30b-4c86-b3ff-5bcf5dba65c0 -> use as is
+        if filename.components(separatedBy: "-").count == 5 &&
+           filename.count == 36 &&
+           UUID(uuidString: filename) != nil {
+            return filename
+        }
+
+        // Handle rollout format: "rollout-2025-10-17T14-11-18-0199f124-8c38-7140-969c-396260d0099c"
         // Keep only the last 5 segments after removing rollout + timestamp (5 parts)
         let components = filename.components(separatedBy: "-")
         if components.count >= 7 {
@@ -46,6 +65,7 @@ struct SessionSummary: Identifiable, Hashable, Sendable, Codable {
             let sessionIdComponents = Array(components.dropFirst(6))
             return sessionIdComponents.joined(separator: "-")
         }
+
         return filename
     }
 

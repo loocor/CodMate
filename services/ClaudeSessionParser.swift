@@ -280,6 +280,7 @@ struct ClaudeSessionParser {
 
     private struct MetadataAccumulator {
         var sessionId: String?
+        var agentId: String?
         var version: String?
         var cwd: String?
         var model: String?
@@ -289,6 +290,7 @@ struct ClaudeSessionParser {
 
         mutating func consume(_ line: ClaudeLogLine, renderedText: String?, model: String?) {
             if let sid = line.sessionId, sessionId == nil { sessionId = sid }
+            if let aid = line.agentId, agentId == nil { agentId = aid }
             if let ver = line.version, version == nil { version = ver }
             if let path = line.cwd, cwd == nil { cwd = path }
             if let timestamp = line.timestamp {
@@ -329,6 +331,7 @@ struct ClaudeSessionParser {
         let type: String?
         let timestamp: Date?
         let sessionId: String?
+        let agentId: String?
         let version: String?
         let cwd: String?
         let message: ClaudeMessage?
