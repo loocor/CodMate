@@ -13,13 +13,16 @@ let package = Package(
     ],
     dependencies: [
         // Embedded terminal support (use local checkout for development)
-        .package(path: "SwiftTerm")
+        .package(path: "SwiftTerm"),
+        // MCP Swift SDK for real MCP client connections
+        .package(url: "https://github.com/modelcontextprotocol/swift-sdk.git", from: "0.10.0")
     ],
     targets: [
         .executableTarget(
             name: "CodMate",
             dependencies: [
-                .product(name: "SwiftTerm", package: "SwiftTerm")
+                .product(name: "SwiftTerm", package: "SwiftTerm"),
+                .product(name: "MCP", package: "swift-sdk")
             ],
             path: "Sources"
         ),
