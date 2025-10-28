@@ -16,3 +16,5 @@ codmate.xcodeproj/xcuserdata/
 
 # Vendored or local packages to exclude
 SwiftTerm/
+dist/
+.env
