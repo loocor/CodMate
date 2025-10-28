@@ -252,7 +252,7 @@ struct UniImportMCPNormalizer {
             if line.isEmpty || line.hasPrefix("#") { continue }
 
             // Section headers
-            if let rx = doubleSectionRx, let m = rx.firstMatch(in: line, range: NSRange(location: 0, length: line.utf16.count)) {
+            if let rx = doubleSectionRx, let _ = rx.firstMatch(in: line, range: NSRange(location: 0, length: line.utf16.count)) {
                 // e.g., [[servers]]
                 flushCurrent()
                 currentName = nil
@@ -281,7 +281,7 @@ struct UniImportMCPNormalizer {
             // key = value
             guard let eq = line.firstIndex(of: "=") else { continue }
             let key = line[..<eq].trimmingCharacters(in: .whitespaces)
-            var value = String(line[line.index(after: eq)...]).trimmingCharacters(in: .whitespaces)
+            let value = String(line[line.index(after: eq)...]).trimmingCharacters(in: .whitespaces)
             // accumulate
             if key == "name" { currentName = parseTomlScalar(value) }
             current[key] = value

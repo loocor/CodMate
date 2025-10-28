@@ -7,7 +7,7 @@ actor MCPServersStore {
 
     static func defaultPaths(fileManager: FileManager = .default) -> Paths {
         let home = fileManager.homeDirectoryForCurrentUser
-            .appendingPathComponent(".codemate", isDirectory: true)
+            .appendingPathComponent(".codmate", isDirectory: true)
         return Paths(home: home, fileURL: home.appendingPathComponent("mcp-servers.json"))
     }
 
@@ -66,6 +66,31 @@ actor MCPServersStore {
         try save(sorted)
     }
 
+    // Export enabled servers to a JSON file usable by Claude Code via --mcp-config
+    func exportEnabledForClaudeConfig() -> URL? {
+        let list = load().filter { $0.enabled }
+        guard !list.isEmpty else { return nil }
+        let out = paths.home.appendingPathComponent("mcp-enabled-claude.json")
+        var obj: [String: Any] = [:]
+        var serversObj: [String: Any] = [:]
+        for s in list {
+            var entry: [String: Any] = [:]
+            if let url = s.url { entry["url"] = url }
+            if let cmd = s.command { entry["command"] = cmd }
+            if let args = s.args { entry["args"] = args }
+            if let env = s.env { entry["env"] = env }
+            if let headers = s.headers { entry["headers"] = headers }
+            serversObj[s.name] = entry
+        }
+        obj["mcpServers"] = serversObj
+        if let data = try? JSONSerialization.data(withJSONObject: obj, options: [.prettyPrinted]) {
+            try? fm.createDirectory(at: paths.home, withIntermediateDirectories: true)
+            try? data.write(to: out, options: .atomic)
+            return out
+        }
+        return nil
+    }
+
     func delete(name: String) throws {
         var list = load()
         list.removeAll { $0.name == name }
@@ -92,4 +117,3 @@ actor MCPServersStore {
         try save(list)
     }
 }
-
