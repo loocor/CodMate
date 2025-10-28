@@ -10,7 +10,6 @@ struct MCPServersSettingsPane: View {
     // New unified editor sheet
     @State private var showEditorSheet = false
     @State private var editorIsEditingExisting = false
-    @State private var selectedServerName: String? = nil
     var openMCPMateDownload: () -> Void
     @State private var pendingDeleteName: String? = nil
 
@@ -165,7 +164,7 @@ struct MCPServersSettingsPane: View {
                 .frame(maxWidth: .infinity)
                 .frame(minHeight: 200)
             } else {
-                List(selection: $selectedServerName) {
+                List(selection: $vm.selectedServerName) {
                     ForEach(vm.servers) { s in
                         HStack(alignment: .center, spacing: 0) {
                             Toggle("", isOn: Binding(get: { s.enabled }, set: { v in Task { await vm.setServerEnabled(s, v) } }))
@@ -195,7 +194,7 @@ struct MCPServersSettingsPane: View {
                             .buttonStyle(.borderless)
                             .help("Edit server")
                         }
-                        .padding(.vertical, 4)
+                        .padding(.vertical, 8)
                         .tag(s.name as String?)
                         .contextMenu {
                             Button("Edit…") {
@@ -209,11 +208,10 @@ struct MCPServersSettingsPane: View {
                     }
                 }
                 .frame(minHeight: 200)
-                .padding(.horizontal, -8)
             }
         }
         .task { await vm.loadServers() }
-        .padding(8)
+        .padding(.horizontal, -8)
         .alert("Delete MCP Server?", isPresented: Binding(get: { pendingDeleteName != nil }, set: { if !$0 { pendingDeleteName = nil } })) {
             Button("Delete", role: .destructive) {
                 if let name = pendingDeleteName { Task { await vm.deleteServer(named: name) } }

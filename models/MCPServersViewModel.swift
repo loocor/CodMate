@@ -14,6 +14,7 @@ final class MCPServersViewModel: ObservableObject {
     @Published var drafts: [MCPServerDraft] = []
 
     @Published var servers: [MCPServer] = []
+    @Published var selectedServerName: String? = nil
     @Published var errorMessage: String? = nil
     @Published var testInProgress: Bool = false
     @Published var testMessage: String? = nil
@@ -55,6 +56,13 @@ final class MCPServersViewModel: ObservableObject {
     func loadServers() async {
         let list = await store.list()
         self.servers = list
+
+        // Auto-select first server if none selected (matching Providers behavior)
+        if let currentName = selectedServerName, !list.contains(where: { $0.name == currentName }) {
+            selectedServerName = list.first?.name
+        } else if selectedServerName == nil {
+            selectedServerName = list.first?.name
+        }
     }
 
     func startNewForm() {
