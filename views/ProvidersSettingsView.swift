@@ -63,17 +63,15 @@ struct ProvidersSettingsView: View {
 
     private var providersList: some View {
         VStack(alignment: .leading, spacing: 4) {
-            if !vm.providers.isEmpty {
-                HStack {
-                    Spacer()
-                    Menu {
-                        Button("K2") { vm.addPreset(.k2) }
-                        Button("GLM") { vm.addPreset(.glm) }
-                        Button("DeepSeek") { vm.addPreset(.deepseek) }
-                        Divider()
-                        Button("Other…") { vm.startNewProvider() }
-                    } label: { Label("Add", systemImage: "plus") }
-                }
+            HStack {
+                Spacer()
+                Menu {
+                    Button("K2") { vm.addPreset(.k2) }
+                    Button("GLM") { vm.addPreset(.glm) }
+                    Button("DeepSeek") { vm.addPreset(.deepseek) }
+                    Divider()
+                    Button("Other…") { vm.startNewProvider() }
+                } label: { Label("Add", systemImage: "plus") }
             }
 
             if vm.providers.isEmpty {
@@ -84,28 +82,9 @@ struct ProvidersSettingsView: View {
                     Text("No Providers")
                         .font(.title3)
                         .fontWeight(.medium)
-                    Text("Add a provider to get started")
+                    Text("Click Add to create a provider")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
-                    Menu {
-                        Button(action: { vm.addPreset(.k2) }) {
-                            Label("K2", systemImage: "server.rack")
-                        }
-                        Button(action: { vm.addPreset(.glm) }) {
-                            Label("GLM", systemImage: "server.rack")
-                        }
-                        Button(action: { vm.addPreset(.deepseek) }) {
-                            Label("DeepSeek", systemImage: "server.rack")
-                        }
-                        Divider()
-                        Button(action: { vm.startNewProvider() }) {
-                            Label("Custom Provider…", systemImage: "plus.circle")
-                        }
-                    } label: {
-                        Label("Add Provider", systemImage: "plus")
-                            .font(.body)
-                    }
-                    .controlSize(.large)
                 }
                 .frame(maxWidth: .infinity)
                 .frame(minHeight: 200)
@@ -279,6 +258,9 @@ private struct ProviderEditorSheet: View {
     @ObservedObject var vm: ProvidersVM
     @Environment(\.dismiss) private var dismiss
     @State private var selectedTab: EditorTab = .basic
+    @State private var isTesting: Bool = false
+    @State private var selectedModelRowIDs: Set<UUID> = []
+    @State private var showDeleteSelectedModelsAlert: Bool = false
 
     private enum EditorTab { case basic, models }
 
@@ -289,27 +271,34 @@ private struct ProviderEditorSheet: View {
                 Spacer()
             }
             TabView(selection: $selectedTab) {
-                basicTab
+                SettingsTabContent { basicTab }
                     .tabItem { Label("Basic", systemImage: "slider.horizontal.3") }
                     .tag(EditorTab.basic)
-                modelsTab
+                SettingsTabContent { modelsTab }
                     .tabItem { Label("Models", systemImage: "list.bullet.rectangle") }
                     .tag(EditorTab.models)
             }
             .frame(minHeight: 260)
-            if let result = vm.testResultText, !result.isEmpty {
-                Text(result)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            if let error = vm.lastError, !error.isEmpty {
-                Text(error).foregroundStyle(.red)
+            if selectedTab == .basic {
+                if let result = vm.testResultText, !result.isEmpty {
+                    Text(result)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                if let error = vm.lastError, !error.isEmpty {
+                    Text(error).foregroundStyle(.red)
+                }
             }
             HStack {
-                Button("Test") {
-                    Task { await vm.testEditingFields() }
+                if selectedTab == .basic {
+                    Button {
+                        if !isTesting { isTesting = true; Task { await vm.testEditingFields(); isTesting = false } }
+                    } label: {
+                        if isTesting { ProgressView().controlSize(.small) } else { Text("Test") }
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(isTesting)
                 }
-                .buttonStyle(.bordered)
                 Spacer()
                 Button("Cancel") { dismiss() }
                 Button("Save") {
@@ -389,61 +378,94 @@ private struct ProviderEditorSheet: View {
                     .pickerStyle(.segmented)
                 }
             }
-            .padding(8)
             if let docs = vm.providerDocsURL {
                 Link("View API documentation", destination: docs)
                     .font(.caption)
-                    .padding(.horizontal, 8)
             }
         }
-        .padding(.horizontal, 4)
         .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 
     private var modelsTab: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Text("Models").font(.subheadline).fontWeight(.medium)
-                    Spacer()
-                    Button { vm.addModelRow() } label: { Label("Add", systemImage: "plus") }
-                        .buttonStyle(.borderless)
-                }
-                Grid(alignment: .topLeading, horizontalSpacing: 12, verticalSpacing: 10) {
-                    GridRow {
-                        Text("Default").font(.caption.weight(.medium))
-                        Text("Model ID").font(.caption.weight(.medium))
-                        Text("Reasoning").font(.caption.weight(.medium))
-                        Text("Tool Use").font(.caption.weight(.medium))
-                        Text("Vision").font(.caption.weight(.medium))
-                        Text("Long Ctx").font(.caption.weight(.medium))
-                        Spacer(minLength: 0)
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Models").font(.subheadline).fontWeight(.medium)
+                Spacer()
+                HStack(spacing: 0) {
+                    Button { vm.addModelRow() } label: {
+                        Text("+")
+                            .frame(width: 18, height: 16)
                     }
-                    ForEach($vm.modelRows, id: \.id) { $row in
-                        GridRow {
-                            Toggle("", isOn: Binding(get: { vm.defaultModelRowID == row.id }, set: { isOn in vm.setDefaultModelRow(rowID: isOn ? row.id : nil, modelId: isOn ? row.modelId : nil) }))
-                                .labelsHidden()
-                                .disabled(row.modelId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                            TextField("vendor model id", text: $row.modelId)
-                                .onChange(of: row.modelId) { _, newValue in
-                                    vm.handleModelIDChange(for: row.id, newValue: newValue)
-                                }
-                            Toggle("", isOn: $row.reasoning).labelsHidden()
-                            Toggle("", isOn: $row.toolUse).labelsHidden()
-                            Toggle("", isOn: $row.vision).labelsHidden()
-                            Toggle("", isOn: $row.longContext).labelsHidden()
-                            HStack {
-                                Spacer(minLength: 0)
-                                Button(role: .destructive) { vm.deleteModelRow(rowKey: row.id) } label: { Image(systemName: "trash") }
-                                    .buttonStyle(.borderless)
-                            }
-                        }
+                    .buttonStyle(.bordered)
+
+                    Button {
+                        if !selectedModelRowIDs.isEmpty { showDeleteSelectedModelsAlert = true }
+                    } label: {
+                        Text("–")
+                            .frame(width: 18, height: 16)
                     }
+                    .buttonStyle(.bordered)
+                    .disabled(selectedModelRowIDs.isEmpty)
                 }
+                .clipShape(RoundedRectangle(cornerRadius: 6))
             }
-            .padding(8)
+            Table(vm.modelRows, selection: $selectedModelRowIDs) {
+                TableColumn("Default") { row in
+                    Toggle("", isOn: Binding(
+                        get: { vm.defaultModelRowID == row.id },
+                        set: { isOn in vm.setDefaultModelRow(rowID: isOn ? row.id : nil, modelId: isOn ? row.modelId : nil) }
+                    ))
+                    .labelsHidden()
+                    .controlSize(.small)
+                    .disabled(row.modelId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }.width(50)
+
+                TableColumn("Model ID") { row in
+                    if let binding = vm.bindingModelId(for: row.id) {
+                        TextField("vendor model id", text: binding)
+                            .onChange(of: binding.wrappedValue) { _, newValue in
+                                vm.handleModelIDChange(for: row.id, newValue: newValue)
+                            }
+                    }
+                }.width(min: 120, ideal: 200)
+
+                TableColumn("Reasoning") { row in
+                    if let b = vm.bindingBool(for: row.id, keyPath: \.reasoning) {
+                        Toggle("", isOn: b).labelsHidden().controlSize(.small)
+                    }
+                }.width(60)
+
+                TableColumn("Tool Use") { row in
+                    if let b = vm.bindingBool(for: row.id, keyPath: \.toolUse) {
+                        Toggle("", isOn: b).labelsHidden().controlSize(.small)
+                    }
+                }.width(50)
+
+                TableColumn("Vision") { row in
+                    if let b = vm.bindingBool(for: row.id, keyPath: \.vision) {
+                        Toggle("", isOn: b).labelsHidden().controlSize(.small)
+                    }
+                }.width(50)
+
+                TableColumn("Long Ctx") { row in
+                    if let b = vm.bindingBool(for: row.id, keyPath: \.longContext) {
+                        Toggle("", isOn: b).labelsHidden().controlSize(.small)
+                    }
+                }.width(60)
+
+            }
+            .environment(\.defaultMinListRowHeight, 26)
+            .controlSize(.small)
         }
-        .padding(.horizontal, 4)
+        .alert("Delete selected models?", isPresented: $showDeleteSelectedModelsAlert) {
+            Button("Delete", role: .destructive) {
+                for id in selectedModelRowIDs { vm.deleteModelRow(rowKey: id) }
+                selectedModelRowIDs.removeAll()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This action cannot be undone.")
+        }
     }
 
     }
@@ -633,6 +655,28 @@ final class ProvidersVM: ObservableObject {
             defaultModelId = nil
         }
         normalizeDefaultSelection()
+    }
+
+    // MARK: - Bindings for Table cells
+    func indexForRow(_ id: UUID) -> Int? { modelRows.firstIndex(where: { $0.id == id }) }
+
+    func bindingModelId(for id: UUID) -> Binding<String>? {
+        guard let idx = indexForRow(id) else { return nil }
+        return Binding<String>(
+            get: { self.modelRows[idx].modelId },
+            set: { newVal in
+                self.modelRows[idx].modelId = newVal
+                self.handleModelIDChange(for: id, newValue: newVal)
+            }
+        )
+    }
+
+    func bindingBool(for id: UUID, keyPath: WritableKeyPath<ModelRow, Bool>) -> Binding<Bool>? {
+        guard let idx = indexForRow(id) else { return nil }
+        return Binding<Bool>(
+            get: { self.modelRows[idx][keyPath: keyPath] },
+            set: { newVal in self.modelRows[idx][keyPath: keyPath] = newVal }
+        )
     }
 
     private func providerDefaultModel(from provider: ProvidersRegistryService.Provider) -> String? {

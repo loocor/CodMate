@@ -44,11 +44,11 @@ struct CodexSettingsView: View {
 
     // MARK: - Provider Pane
     private var providerPane: some View {
-        codexTabContent {
-            Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 18) {
+        SettingsTabContent {
+            Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 14) {
                 GridRow {
                     VStack(alignment: .leading, spacing: 0) {
-                        Text("Provider").font(.subheadline).fontWeight(.medium)
+                        Text("Active Provider").font(.subheadline).fontWeight(.medium)
                         Text("Choose built-in or a configured provider")
                             .font(.caption).foregroundStyle(.secondary)
                     }
@@ -62,7 +62,7 @@ struct CodexSettingsView: View {
                     .labelsHidden()
                     .frame(maxWidth: .infinity, alignment: .trailing)
                     .onChange(of: codexVM.registryActiveProviderId) { _, _ in
-                        Task { await codexVM.applyRegistryProviderSelection() }
+                        codexVM.scheduleApplyRegistryProviderSelectionDebounced()
                     }
                 }
                 gridDivider
@@ -80,9 +80,7 @@ struct CodexSettingsView: View {
                         }
                         .labelsHidden()
                         .frame(maxWidth: .infinity, alignment: .trailing)
-                        .onChange(of: codexVM.model) { _, _ in
-                            Task { await codexVM.applyModel() }
-                        }
+                        .onChange(of: codexVM.model) { _, _ in codexVM.scheduleApplyModelDebounced() }
                     } else {
                         let modelIds = codexVM.modelsForActiveRegistryProvider()
                         if modelIds.isEmpty {
@@ -98,42 +96,11 @@ struct CodexSettingsView: View {
                             }
                             .labelsHidden()
                             .frame(maxWidth: .infinity, alignment: .trailing)
-                            .onChange(of: codexVM.model) { _, _ in
-                                Task { await codexVM.applyModel() }
-                            }
+                            .onChange(of: codexVM.model) { _, _ in codexVM.scheduleApplyModelDebounced() }
                         }
                     }
                 }
-                if let provider = codexVM.selectedRegistryProvider(),
-                    let connector = provider.connectors[
-                        ProvidersRegistryService.Consumer.codex.rawValue]
-                {
-                    gridDivider
-                    GridRow {
-                        VStack(alignment: .leading, spacing: 0) {
-                            Text("Base URL").font(.subheadline).fontWeight(.medium)
-                            Text("Endpoint applied to config.toml")
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
-                        Text(connector.baseURL ?? "—")
-                            .frame(maxWidth: .infinity, alignment: .trailing)
-                            .font(.system(.body, design: .monospaced))
-                            .textSelection(.enabled)
-                    }
-                    if let envKey = connector.envKey, !envKey.isEmpty {
-                        gridDivider
-                        GridRow {
-                            VStack(alignment: .leading, spacing: 0) {
-                                Text("API Key Env").font(.subheadline).fontWeight(.medium)
-                                Text("Environment variable passed to Codex")
-                                    .font(.caption).foregroundStyle(.secondary)
-                            }
-                            Text(envKey)
-                                .frame(maxWidth: .infinity, alignment: .trailing)
-                                .font(.system(.body, design: .monospaced))
-                        }
-                    }
-                }
+                // Base URL and API Key Env rows are hidden to reduce redundancy
             }
         }
         .task { await codexVM.loadRegistryBindings() }
@@ -141,7 +108,7 @@ struct CodexSettingsView: View {
 
     // MARK: - Runtime Pane
     private var runtimePane: some View {
-        codexTabContent {
+        SettingsTabContent {
             Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 18) {
                         GridRow {
                             VStack(alignment: .leading, spacing: 0) {
@@ -153,9 +120,7 @@ struct CodexSettingsView: View {
                                 ForEach(CodexVM.ReasoningEffort.allCases) { Text($0.rawValue).tag($0) }
                             }
                             .labelsHidden()
-                            .onChange(of: codexVM.reasoningEffort) { _, _ in
-                                Task { await codexVM.applyReasoning() }
-                            }
+                            .onChange(of: codexVM.reasoningEffort) { _, _ in codexVM.scheduleApplyReasoningDebounced() }
                             .frame(maxWidth: .infinity, alignment: .trailing)
                         }
                         gridDivider
@@ -169,9 +134,7 @@ struct CodexSettingsView: View {
                                 ForEach(CodexVM.ReasoningSummary.allCases) { Text($0.rawValue).tag($0) }
                             }
                             .labelsHidden()
-                            .onChange(of: codexVM.reasoningSummary) { _, _ in
-                                Task { await codexVM.applyReasoning() }
-                            }
+                            .onChange(of: codexVM.reasoningSummary) { _, _ in codexVM.scheduleApplyReasoningDebounced() }
                             .frame(maxWidth: .infinity, alignment: .trailing)
                         }
                         gridDivider
@@ -185,9 +148,7 @@ struct CodexSettingsView: View {
                                 ForEach(CodexVM.ModelVerbosity.allCases) { Text($0.rawValue).tag($0) }
                             }
                             .labelsHidden()
-                            .onChange(of: codexVM.modelVerbosity) { _, _ in
-                                Task { await codexVM.applyReasoning() }
-                            }
+                            .onChange(of: codexVM.modelVerbosity) { _, _ in codexVM.scheduleApplyReasoningDebounced() }
                             .frame(maxWidth: .infinity, alignment: .trailing)
                         }
                         gridDivider
@@ -238,7 +199,7 @@ struct CodexSettingsView: View {
 
     // MARK: - Notifications Pane
     private var notificationsPane: some View {
-        codexTabContent {
+        SettingsTabContent {
             Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 18) {
                         GridRow {
                             VStack(alignment: .leading, spacing: 0) {
@@ -252,9 +213,7 @@ struct CodexSettingsView: View {
                                     .labelsHidden()
                                     .toggleStyle(.switch)
                                     .controlSize(.small)
-                                .onChange(of: codexVM.tuiNotifications) { _, _ in
-                                    Task { await codexVM.applyTuiNotifications() }
-                                }
+                            .onChange(of: codexVM.tuiNotifications) { _, _ in codexVM.scheduleApplyTuiNotificationsDebounced() }
                                 .frame(maxWidth: .infinity, alignment: .trailing)
                         }
                         gridDivider
@@ -270,9 +229,7 @@ struct CodexSettingsView: View {
                                     .labelsHidden()
                                     .toggleStyle(.switch)
                                     .controlSize(.small)
-                                .onChange(of: codexVM.systemNotifications) { _, _ in
-                                    Task { await codexVM.applySystemNotifications() }
-                                }
+                                .onChange(of: codexVM.systemNotifications) { _, _ in codexVM.scheduleApplySystemNotificationsDebounced() }
                                 .frame(maxWidth: .infinity, alignment: .trailing)
                         }
                         if let path = codexVM.notifyBridgePath {
@@ -292,7 +249,7 @@ struct CodexSettingsView: View {
 
     // MARK: - Privacy Pane
     private var privacyPane: some View {
-        codexTabContent {
+        SettingsTabContent {
             VStack(alignment: .leading, spacing: 16) {
                 Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 18) {
                     GridRow {
@@ -371,9 +328,7 @@ struct CodexSettingsView: View {
                         }
                         Toggle("", isOn: $codexVM.hideAgentReasoning)
                             .labelsHidden()
-                            .onChange(of: codexVM.hideAgentReasoning) { _, _ in
-                                Task { await codexVM.applyHideReasoning() }
-                            }
+                            .onChange(of: codexVM.hideAgentReasoning) { _, _ in codexVM.scheduleApplyHideReasoningDebounced() }
                             .frame(maxWidth: .infinity, alignment: .trailing)
                     }
                     GridRow {
@@ -386,9 +341,7 @@ struct CodexSettingsView: View {
                         }
                         Toggle("", isOn: $codexVM.showRawAgentReasoning)
                             .labelsHidden()
-                            .onChange(of: codexVM.showRawAgentReasoning) { _, _ in
-                                Task { await codexVM.applyShowRawReasoning() }
-                            }
+                            .onChange(of: codexVM.showRawAgentReasoning) { _, _ in codexVM.scheduleApplyShowRawReasoningDebounced() }
                             .frame(maxWidth: .infinity, alignment: .trailing)
                     }
                 }
@@ -398,7 +351,7 @@ struct CodexSettingsView: View {
 
     // MARK: - Raw Config Pane
     private var rawConfigPane: some View {
-        codexTabContent {
+        SettingsTabContent {
             ZStack(alignment: .topTrailing) {
                 ScrollView {
                     Text(
@@ -432,15 +385,7 @@ struct CodexSettingsView: View {
 
     // MARK: - Helper Views
 
-    private func codexTabContent<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            content()
-                .frame(maxWidth: .infinity, alignment: .topLeading)
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 8)
-    }
+    // codexTabContent has been replaced by the shared SettingsTabContent component
 
     @ViewBuilder
     private var gridDivider: some View {
