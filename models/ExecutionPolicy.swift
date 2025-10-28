@@ -32,11 +32,33 @@ enum ApprovalPolicy: String, CaseIterable, Identifiable, Codable {
     }
 }
 
+// Claude Code specific permission mode
+enum ClaudePermissionMode: String, CaseIterable, Identifiable, Codable {
+    case `default`
+    case acceptEdits
+    case bypassPermissions
+    case plan
+    var id: String { rawValue }
+}
+
 struct ResumeOptions {
     var sandbox: SandboxMode?
     var approval: ApprovalPolicy?
     var fullAuto: Bool
     var dangerouslyBypass: Bool
+    // Claude Code advanced flags (optional)
+    var claudeDebug: Bool = false
+    var claudeDebugFilter: String? = nil
+    var claudeVerbose: Bool = false
+    var claudePermissionMode: ClaudePermissionMode? = nil
+    var claudeAllowedTools: String? = nil
+    var claudeDisallowedTools: String? = nil
+    var claudeAddDirs: String? = nil
+    var claudeIDE: Bool = false
+    var claudeStrictMCP: Bool = false
+    var claudeFallbackModel: String? = nil
+    var claudeSkipPermissions: Bool = false
+    var claudeAllowSkipPermissions: Bool = false
 }
 
 extension ResumeOptions {

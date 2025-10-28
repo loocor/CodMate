@@ -365,7 +365,6 @@ final class SessionListViewModel: ObservableObject {
                 root: preferences.sessionsRoot, monthStart: monthStart, dimension: dimension)
             await MainActor.run {
                 self.monthCountsCache[self.cacheKey(monthStart, dimension)] = counts
-                self.objectWillChange.send()
             }
         }
         return [:]

@@ -69,6 +69,14 @@ final class CodexVM: ObservableObject {
 
     private let service = CodexConfigService()
     private let providersRegistry = ProvidersRegistryService()
+    // Debounce tasks
+    private var debounceProviderTask: Task<Void, Never>? = nil
+    private var debounceModelTask: Task<Void, Never>? = nil
+    private var debounceReasoningTask: Task<Void, Never>? = nil
+    private var debounceTuiNotifTask: Task<Void, Never>? = nil
+    private var debounceSysNotifTask: Task<Void, Never>? = nil
+    private var debounceHideReasoningTask: Task<Void, Never>? = nil
+    private var debounceShowReasoningTask: Task<Void, Never>? = nil
     // Preset helper
     enum ProviderPreset { case k2, glm, deepseek }
     @Published var providerKeyApplyURL: String? = nil
@@ -100,6 +108,39 @@ final class CodexVM: ObservableObject {
             model = builtinModels.first ?? "gpt-5-codex"
         }
         normalizeBuiltinModelIfNeeded()
+    }
+
+    // MARK: - Debounced schedulers
+    private func schedule(_ taskRef: inout Task<Void, Never>?, delayMs: UInt64 = 300, action: @escaping @MainActor () async -> Void) {
+        taskRef?.cancel()
+        taskRef = Task { [weak self] in
+            guard self != nil else { return }
+            do { try await Task.sleep(nanoseconds: delayMs * 1_000_000) } catch { return }
+            if Task.isCancelled { return }
+            await action()
+        }
+    }
+
+    func scheduleApplyRegistryProviderSelectionDebounced() {
+        schedule(&debounceProviderTask) { [weak self] in guard let self else { return }; await self.applyRegistryProviderSelection() }
+    }
+    func scheduleApplyModelDebounced() {
+        schedule(&debounceModelTask) { [weak self] in guard let self else { return }; await self.applyModel() }
+    }
+    func scheduleApplyReasoningDebounced() {
+        schedule(&debounceReasoningTask) { [weak self] in guard let self else { return }; await self.applyReasoning() }
+    }
+    func scheduleApplyTuiNotificationsDebounced() {
+        schedule(&debounceTuiNotifTask) { [weak self] in guard let self else { return }; await self.applyTuiNotifications() }
+    }
+    func scheduleApplySystemNotificationsDebounced() {
+        schedule(&debounceSysNotifTask) { [weak self] in guard let self else { return }; await self.applySystemNotifications() }
+    }
+    func scheduleApplyHideReasoningDebounced() {
+        schedule(&debounceHideReasoningTask) { [weak self] in guard let self else { return }; await self.applyHideReasoning() }
+    }
+    func scheduleApplyShowRawReasoningDebounced() {
+        schedule(&debounceShowReasoningTask) { [weak self] in guard let self else { return }; await self.applyShowRawReasoning() }
     }
 
     func presentAddProvider() {
