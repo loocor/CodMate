@@ -12,7 +12,7 @@ enum SettingCategory: String, CaseIterable, Identifiable {
   case about
 
   // Customize displayed order and allow hiding categories without breaking enums elsewhere.
-  static var allCases: [SettingCategory] { [.general, .terminal, .providers, .codex, .claudeCode, .mcpServer, .dialectics, .about] }
+  static var allCases: [SettingCategory] { [.general, .terminal, .providers, .mcpServer, .codex, .claudeCode, .dialectics, .about] }
 
   var id: String { rawValue }
 
