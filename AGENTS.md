@@ -14,12 +14,14 @@ Architecture
 
 UI Rules (macOS specific)
 - Use macOS SwiftUI and AppKit bridges; do NOT use iOS‑only placements such as `.navigationBarTrailing`.
-- Settings 使用 macOS 15 的 TabView 新 API（`Tab("…", systemImage: "…")`）拆分为多个页签；容器内边距统一（水平 16、顶部 16）。
-- Providers 已从 Codex 页签中拆分为顶层 Settings 页：Settings › Providers 管理全局供应商与 Codex/Claude 绑定；Settings › Codex 仅保留 Runtime/Notifications/Privacy/Raw Config（不再含 Providers）。
-- MCP Server 页签拆分为三个子页签（使用 macOS 15 TabView 新 API）：
-  - Import：Uni‑Import（统一导入），支持粘贴/拖拽 JSON 片段添加 MCP 服务器；初版仅 JSON，后续补 TOML/.mcpb。
-  - Servers：展示已添加服务器（名称、类型、描述、URL/命令），支持整服启用/停用以及能力级别开关（能力列来自 SDK 探测）。
-  - Advanced：引导使用 MCPMate 获取高级管理能力，包含下载入口与说明。
+- Settings uses macOS 15's new TabView API (`Tab("…", systemImage: "…")`) to split into multiple tabs; container padding is unified (horizontal 16pt, top 16pt).
+  - Tab content uniformly uses `SettingsTabContent` container (top-aligned, overall 8pt padding) to ensure consistent layout and spacing across pages.
+- Providers has been separated from the Codex tab into a top-level Settings page: Settings › Providers manages global providers and Codex/Claude bindings; Settings › Codex only retains Runtime/Notifications/Privacy/Raw Config (no longer includes Providers).
+- MCP Servers page (aligned with Providers style):
+  - Main page directly displays existing server list (name, type icon, description, URL/command), with enable toggle on the left; provides pencil edit entry on the right.
+  - Fixed "Add" button in top-right corner; clicking opens independent "New MCP Server" window for Uni‑Import.
+  - New window supports paste/drag JSON text (can be extended to TOML/.mcpb later), previews parsing results and confirms import.
+  - Advanced capabilities (MCPMate download and instructions) can still provide entry at page bottom or independent instruction area, no longer as separate sub-tab.
 - Search: prefer a toolbar `SearchField` in macOS, not `.searchable` when exact placement (far right) matters.
 - Toolbars: place refresh as the last ToolbarItem to pin it at the far right. Keep destructive actions in the detail pane, not in the main toolbar. Command+R and the refresh button also invalidate and recompute global sidebar statistics (projects/path tree and calendar day counts) to reflect new sessions immediately.
 - Sidebar (left):
@@ -69,8 +71,8 @@ CLI Integration (codex)
 - Provide a “New” command (detail toolbar) that launches `codex` in the session’s working directory while preserving the configured sandbox/approval defaults and `SessionSummary.model`.
 
 Codex Settings
-- Settings › Codex 仅管理 Codex CLI 运行时相关配置（Model & Reasoning、Sandbox & Approvals、Notifications、Privacy、Raw Config）。
-- Providers 页面已独立：Settings › Providers（跨应用共享，供 Codex 与 Claude Code 选择/配置）。
+- Settings › Codex only manages Codex CLI runtime-related configuration (Model & Reasoning, Sandbox & Approvals, Notifications, Privacy, Raw Config).
+- Providers page is independent: Settings › Providers (cross-application shared, for Codex and Claude Code selection/configuration).
 - Notifications: TUI notifications toggle; system notifications bridge via `notify` (built‑in script path is managed by CodMate).
 - Privacy: expose `shell_environment_policy`, reasoning visibility, OTEL exporter; do not surface history persistence in phase 1.
 - Projects auto‑create a same‑id Profile on creation; renaming a project synchronizes the profile name. Conflict prompts are required.
