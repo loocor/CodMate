@@ -29,7 +29,7 @@ Status: macOS 15+, Swift 6, Xcode 16. Universal binary (arm64 + x86_64).
 - Codex Settings
   - Dedicated Settings › Codex page with tabs: Providers, Runtime, Notifications, Privacy, Raw Config.
   - Provider presets include K2, GLM, DeepSeek with “Get key” links and prefilled base URLs.
-  - System notifications bridge via a managed `codemate-notify` helper; TUI notifications toggle.
+  - System notifications bridge via a managed `codmate-notify` helper; TUI notifications toggle.
 - Dialectics (Diagnostics)
   - Sessions root probe (current vs default), counts/samples/errors with “Save Report…”.
   - Providers diagnostics: counts, duplicate IDs, stray managed bodies, canonical providers region preview (copy‑only).
@@ -125,7 +125,7 @@ xcrun stapler staple build/DerivedData/Build/Products/Release/CodMate.app
 
 ## Scripts
 - `scripts/gen-icons.sh` — generate `AppIcon.appiconset` from a source image or a directory of images.
-- `scripts/codemate-notify` — bridges Codex TUI `notify` events to macOS notifications.
+- `scripts/codmate-notify` — bridges Codex TUI `notify` events to macOS notifications.
 
 ## Project Layout
 ```

@@ -12,6 +12,7 @@
 		317DBA522EADF9EC005C01C0 /* FilenameSanitizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 317DBA4E2EADF9EC005C01C0 /* FilenameSanitizer.swift */; };
 		318405A32EA337CE00409C33 /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = 318405A22EA337CE00409C33 /* SwiftTerm */; };
 		31B6267A2EA279CC008CA40F /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 31B626792EA279CC008CA40F /* Assets.xcassets */; };
+		31B772F52EB0C300004397BC /* MCP in Frameworks */ = {isa = PBXBuildFile; productRef = 31B772F42EB0C300004397BC /* MCP */; };
 		41A0011C2B20026000000003 /* (null) in Sources */ = {isa = PBXBuildFile; };
 		41A001242B30040000000001 /* THIRD-PARTY-NOTICES.md in Resources */ = {isa = PBXBuildFile; fileRef = 41A001232B30040000000001 /* THIRD-PARTY-NOTICES.md */; };
 /* End PBXBuildFile section */
@@ -38,6 +39,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				318405A32EA337CE00409C33 /* SwiftTerm in Frameworks */,
+				31B772F52EB0C300004397BC /* MCP in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -138,6 +140,7 @@
 			mainGroup = 1A0000002A00000100000001;
 			packageReferences = (
 				318405A12EA337CE00409C33 /* XCLocalSwiftPackageReference "SwiftTerm" */,
+				31B772F32EB0C300004397BC /* XCRemoteSwiftPackageReference "swift-sdk" */,
 			);
 			productRefGroup = 1A00000A2A00000100000001 /* Products */;
 			projectDirPath = "";
@@ -364,11 +367,27 @@
 		};
 /* End XCLocalSwiftPackageReference section */
 
+/* Begin XCRemoteSwiftPackageReference section */
+		31B772F32EB0C300004397BC /* XCRemoteSwiftPackageReference "swift-sdk" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/modelcontextprotocol/swift-sdk.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.10.2;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
 /* Begin XCSwiftPackageProductDependency section */
 		318405A22EA337CE00409C33 /* SwiftTerm */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 318405A12EA337CE00409C33 /* XCLocalSwiftPackageReference "SwiftTerm" */;
 			productName = SwiftTerm;
+		};
+		31B772F42EB0C300004397BC /* MCP */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 31B772F32EB0C300004397BC /* XCRemoteSwiftPackageReference "swift-sdk" */;
+			productName = MCP;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
