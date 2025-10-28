@@ -42,15 +42,47 @@ extension SessionActions {
         else {
             throw SessionActionError.executableNotFound(executableURL)
         }
-        return try await withCheckedThrowingContinuation { continuation in
-            // Run process work off the main actor without capturing self across concurrency boundaries
-            let args: [String]
-            switch session.source {
-            case .codex:
-                args = buildResumeArguments(session: session, options: options)
-            case .claude:
-                args = ["--resume", session.id]
+        
+        // Prepare arguments first, including async MCP config if needed
+        var args: [String]
+        switch session.source {
+        case .codex:
+            args = buildResumeArguments(session: session, options: options)
+        case .claude:
+            args = ["--resume", session.id]
+            // Apply Claude advanced flags from resume options
+            if options.claudeVerbose { args.append("--verbose") }
+            if options.claudeDebug {
+                args.append("-d")
+                if let f = options.claudeDebugFilter, !f.isEmpty { args.append(f) }
             }
+            if let pm = options.claudePermissionMode, pm != .default {
+                args.append(contentsOf: ["--permission-mode", pm.rawValue])
+            }
+            if options.claudeSkipPermissions { args.append("--dangerously-skip-permissions") }
+            if options.claudeAllowSkipPermissions { args.append("--allow-dangerously-skip-permissions") }
+            if let allowed = options.claudeAllowedTools, !allowed.isEmpty {
+                args.append(contentsOf: ["--allowed-tools", allowed])
+            }
+            if let disallowed = options.claudeDisallowedTools, !disallowed.isEmpty {
+                args.append(contentsOf: ["--disallowed-tools", disallowed])
+            }
+            if let addDirs = options.claudeAddDirs, !addDirs.isEmpty {
+                // Split by comma and add multiple flags
+                let parts = addDirs.split(whereSeparator: { $0 == "," || $0.isWhitespace }).map { String($0) }.filter { !$0.isEmpty }
+                for dir in parts { args.append(contentsOf: ["--add-dir", dir]) }
+            }
+            if options.claudeIDE { args.append("--ide") }
+            if options.claudeStrictMCP { args.append("--strict-mcp-config") }
+            // Attach MCP servers config file (enabled only)
+            let mcpStore = MCPServersStore()
+            if let cfg = await mcpStore.exportEnabledForClaudeConfig() {
+                args.append(contentsOf: ["--mcp-config", cfg.path])
+            }
+            if let fb = options.claudeFallbackModel, !fb.isEmpty { args.append(contentsOf: ["--fallback-model", fb]) }
+        }
+        
+        return try await withCheckedThrowingContinuation { continuation in
             let cwd: URL = {
                 if FileManager.default.fileExists(atPath: session.cwd) {
                     return URL(fileURLWithPath: session.cwd, isDirectory: true)
@@ -75,6 +107,49 @@ extension SessionActions {
                         env["PATH"] = injectedPATH + ":" + current
                     } else {
                         env["PATH"] = injectedPATH
+                    }
+                    // Prepare environment overlays (Claude Code picks up Anthropic-compatible vars)
+                    if session.source == .claude {
+                        var envOverlays: [String: String] = [:]
+                        let registry = ProvidersRegistryService()
+                        let bindings = await registry.getBindings()
+                        let activeId = bindings.activeProvider?[ProvidersRegistryService.Consumer.claudeCode.rawValue]
+                        if let activeId, !activeId.isEmpty {
+                            let providers = await registry.listProviders()
+                            if let p = providers.first(where: { $0.id == activeId }) {
+                                let conn = p.connectors[ProvidersRegistryService.Consumer.claudeCode.rawValue]
+                                let loginMethod = conn?.loginMethod?.lowercased() ?? "api"
+                                if let base = conn?.baseURL, !base.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                    envOverlays["ANTHROPIC_BASE_URL"] = base
+                                }
+                                // Subscription login: do not inject token; rely on `claude login`
+                                if loginMethod != "subscription" {
+                                    // Map custom env key to ANTHROPIC_AUTH_TOKEN if available in current env
+                                    if let keyName = conn?.envKey, !keyName.isEmpty {
+                                        if let tokenVal = ProcessInfo.processInfo.environment[keyName], !tokenVal.isEmpty {
+                                            envOverlays["ANTHROPIC_AUTH_TOKEN"] = tokenVal
+                                        }
+                                    } else if let tokenVal = ProcessInfo.processInfo.environment["ANTHROPIC_AUTH_TOKEN"], !tokenVal.isEmpty {
+                                        envOverlays["ANTHROPIC_AUTH_TOKEN"] = tokenVal
+                                    }
+                                }
+                                // Aliases: default and small/fast
+                                if let aliases = conn?.modelAliases {
+                                    if let d = aliases["default"], !d.isEmpty { envOverlays["ANTHROPIC_MODEL"] = d }
+                                    if let h = aliases["haiku"], !h.isEmpty { envOverlays["ANTHROPIC_SMALL_FAST_MODEL"] = h }
+                                }
+                                // Fall back to registry default model if alias not set
+                                if envOverlays["ANTHROPIC_MODEL"] == nil,
+                                   let dm = bindings.defaultModel?[ProvidersRegistryService.Consumer.claudeCode.rawValue],
+                                   !dm.isEmpty {
+                                    envOverlays["ANTHROPIC_MODEL"] = dm
+                                }
+                            }
+                        }
+                        for (k, v) in envOverlays { env[k] = v }
+                    } else {
+                        // Built-in (no provider selected): respect login method default (subscription) by not injecting token.
+                        // Nothing to inject here; PATH is already set above.
                     }
                     process.environment = env
 

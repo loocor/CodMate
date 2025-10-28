@@ -10,6 +10,8 @@ actor ProvidersRegistryService {
         var baseURL: String?
         var wireAPI: String? // responses | chat
         var envKey: String?
+        // Login method for this consumer's connector: "api" (default) or "subscription" (Claude login)
+        var loginMethod: String?
         var queryParams: [String: String]?
         var httpHeaders: [String: String]?
         var envHttpHeaders: [String: String]?
@@ -68,7 +70,7 @@ actor ProvidersRegistryService {
     struct Paths { let home: URL; let fileURL: URL }
     static func defaultPaths(fileManager: FileManager = .default) -> Paths {
         let home = fileManager.homeDirectoryForCurrentUser
-        let dir = home.appendingPathComponent(".codemate", isDirectory: true)
+        let dir = home.appendingPathComponent(".codmate", isDirectory: true)
         return Paths(home: dir, fileURL: dir.appendingPathComponent("providers.json"))
     }
 

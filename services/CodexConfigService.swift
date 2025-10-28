@@ -182,7 +182,7 @@ actor CodexConfigService {
             .appendingPathComponent("CodMate", isDirectory: true)
             .appendingPathComponent("bin", isDirectory: true)
         try fm.createDirectory(at: bin, withIntermediateDirectories: true)
-        let target = bin.appendingPathComponent("codemate-notify")
+        let target = bin.appendingPathComponent("codmate-notify")
         try Self.notifyScript.write(to: target, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: target.path)
         return target
@@ -228,6 +228,42 @@ actor CodexConfigService {
             strayManagedBodies: stray,
             canonicalRegion: region
         )
+    }
+
+    // MARK: - MCP Servers (managed region)
+    private let mcpBeginMarker = "# codmate-mcp begin"
+    private let mcpEndMarker = "# codmate-mcp end"
+
+    func applyMCPServers(_ servers: [MCPServer]) throws {
+        var text = (try? String(contentsOf: paths.configURL, encoding: .utf8)) ?? ""
+        // Strip previous managed region if present
+        if let begin = text.range(of: mcpBeginMarker), let end = text.range(of: mcpEndMarker) {
+            text.removeSubrange(begin.lowerBound..<(end.upperBound))
+        }
+        // Build new region with enabled servers only
+        let enabled = servers.filter { $0.enabled }
+        guard !enabled.isEmpty else {
+            try writeConfig(text)
+            return
+        }
+        var region = "\n\n\(mcpBeginMarker)\n"
+        for s in enabled {
+            let header = "[mcp_servers.\(s.name)]\n"
+            var body: [String] = []
+            body.append("kind = \"\(s.kind.rawValue)\"")
+            if let url = s.url, !url.isEmpty { body.append("url = \"\(url)\"") }
+            if let cmd = s.command, !cmd.isEmpty { body.append("command = \"\(cmd)\"") }
+            if let args = s.args, !args.isEmpty {
+                let quoted = args.map { "\"\($0)\"" }.joined(separator: ", ")
+                body.append("args = [ \(quoted) ]")
+            }
+            if let env = s.env, !env.isEmpty { body.append("env = \(renderInlineTable(env))") }
+            if let headers = s.headers, !headers.isEmpty { body.append("headers = \(renderInlineTable(headers))") }
+            region += header + body.joined(separator: "\n") + "\n\n"
+        }
+        region += "\(mcpEndMarker)\n"
+        text += region
+        try writeConfig(text)
     }
 
     // MARK: - Privacy: shell_environment_policy
