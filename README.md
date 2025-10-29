@@ -9,7 +9,7 @@ Status: macOS 15+, Swift 6, Xcode 16. Universal binary (arm64 + x86_64).
 ## Features
 - Sidebar (Projects + Calendar)
   - Projects list with counts and a fixed “All” row; “New Project” sheet for name, directory, overview/instructions, and optional profile.
-  - Assign sessions to projects from the list row context menu; memberships are stored under `~/.codex/projects/`.
+  - Assign sessions to projects from the list row context menu; memberships are stored under `~/.codmate/projects/`.
   - Auto‑assign: sessions launched via New inside a project are auto‑assigned when `cwd` and start‑time match.
   - Calendar month view (fixed bottom, ~280pt) with per‑day counts and Created/Updated toggle.
 - List + search
@@ -25,7 +25,7 @@ Status: macOS 15+, Swift 6, Xcode 16. Universal binary (arm64 + x86_64).
   - Conversation timeline uses LazyVStack and differentiates user/assistant/tool/info bubbles.
 - Session metadata (rename/comment)
   - Click the title to edit name/comment.
-  - Stored per session under `~/.codex/notes/<sessionId-sanitized>.json`; first‑run migration from the legacy Application Support JSON.
+  - Stored per session under `~/.codmate/notes/<sessionId-sanitized>.json`; first‑run migration from the legacy Application Support JSON and automatic migration from `~/.codex/notes`.
 - Codex Settings
   - Dedicated Settings › Codex page with tabs: Providers, Runtime, Notifications, Privacy, Raw Config.
   - Provider presets include K2, GLM, DeepSeek with “Get key” links and prefilled base URLs.

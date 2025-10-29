@@ -19,9 +19,9 @@ actor SessionNotesStore {
 
     init(notesRoot: URL? = nil, fileManager: FileManager = .default) {
         self.fm = fileManager
-        // Default to ~/.codex/notes assuming sessions at ~/.codex/sessions
+        // Default to ~/.codmate/notes (centralized CodMate data root)
         let home = fileManager.homeDirectoryForCurrentUser
-        let defaultRoot = home.appendingPathComponent(".codex", isDirectory: true)
+        let defaultRoot = home.appendingPathComponent(".codmate", isDirectory: true)
             .appendingPathComponent("notes", isDirectory: true)
         self.notesRoot = notesRoot ?? defaultRoot
 
@@ -30,14 +30,19 @@ actor SessionNotesStore {
             .appendingPathComponent("io.umate.codex", isDirectory: true)
         self.legacyURL = legacyDir.appendingPathComponent("session-notes.json")
 
+        // First migrate from legacy ~/.codex/notes directory if present
+        Self.migrateLegacyNotesDirectoryIfNeeded(fm: fm, newNotesRoot: self.notesRoot)
         try? fm.createDirectory(at: self.notesRoot, withIntermediateDirectories: true)
-        // During init, actor isolation isn't available; use static helper
+        // During init, actor isolation isn't available; use static helper for old single-file JSON
         Self.performMigration(fm: fm, notesRoot: self.notesRoot, legacyURL: self.legacyURL)
     }
 
     // Compute default notes directory from sessions root
     static func defaultNotesRoot(for sessionsRoot: URL) -> URL {
-        sessionsRoot.deletingLastPathComponent().appendingPathComponent("notes", isDirectory: true)
+        // Kept for compatibility, but now always prefers centralized ~/.codmate/notes
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        return home.appendingPathComponent(".codmate", isDirectory: true)
+            .appendingPathComponent("notes", isDirectory: true)
     }
 
     // Update notes root (e.g., when sessions root changes)
@@ -116,6 +121,45 @@ actor SessionNotesStore {
             }
         }
         // Keep legacy file as-is; do not delete to avoid destructive surprises
+    }
+
+    /// Migrate notes directory from old `~/.codex/notes` to new `~/.codmate/notes`.
+    /// Prefer moving the entire directory if the destination is missing or empty; otherwise copy only missing files.
+    private static func migrateLegacyNotesDirectoryIfNeeded(fm: FileManager, newNotesRoot: URL) {
+        let home = fm.homeDirectoryForCurrentUser
+        let oldRoot = home.appendingPathComponent(".codex", isDirectory: true)
+            .appendingPathComponent("notes", isDirectory: true)
+        var isDir: ObjCBool = false
+        guard fm.fileExists(atPath: oldRoot.path, isDirectory: &isDir), isDir.boolValue else { return }
+
+        // Determine if new root exists and is empty
+        var newIsDir: ObjCBool = false
+        let newExists = fm.fileExists(atPath: newNotesRoot.path, isDirectory: &newIsDir) && newIsDir.boolValue
+        let newIsEmpty: Bool = {
+            guard newExists else { return true }
+            do { return try fm.contentsOfDirectory(atPath: newNotesRoot.path).isEmpty } catch { return true }
+        }()
+
+        if !newExists || newIsEmpty {
+            do {
+                if newExists && newIsEmpty { try? fm.removeItem(at: newNotesRoot) }
+                try fm.moveItem(at: oldRoot, to: newNotesRoot)
+                return
+            } catch {
+                // Fallback to copy flow
+            }
+        }
+        // Ensure destination exists for copy
+        try? fm.createDirectory(at: newNotesRoot, withIntermediateDirectories: true)
+        if let en = fm.enumerator(at: oldRoot, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles]) {
+            for case let url as URL in en {
+                if url.pathExtension.lowercased() != "json" { continue }
+                let dest = newNotesRoot.appendingPathComponent(url.lastPathComponent)
+                if !fm.fileExists(atPath: dest.path) {
+                    try? fm.copyItem(at: url, to: dest)
+                }
+            }
+        }
     }
 
     private func fileURL(for id: String) -> URL {

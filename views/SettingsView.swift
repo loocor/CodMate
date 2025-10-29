@@ -154,16 +154,16 @@ struct SettingsView: View {
                         Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 12) {
                             GridRow {
                                 VStack(alignment: .leading, spacing: 0) {
-                                    Label("Sessions Directory", systemImage: "folder")
+                                    Label("Projects Directory", systemImage: "folder")
                                         .font(.subheadline).fontWeight(.medium)
-                                    Text("Directory where Codex session files are stored")
+                                    Text("Directory where CodMate stores projects data")
                                         .font(.caption).foregroundColor(.secondary)
                                 }
-                                Text(preferences.sessionsRoot.path)
+                                Text(preferences.projectsRoot.path)
                                     .lineLimit(1)
                                     .truncationMode(.middle)
                                     .frame(maxWidth: .infinity, alignment: .trailing)
-                                Button("Change…", action: selectSessionsRoot)
+                                Button("Change…", action: selectProjectsRoot)
                                     .buttonStyle(.bordered)
                             }
                             gridDivider
@@ -580,18 +580,18 @@ struct SettingsView: View {
     }
 
 
-    private func selectSessionsRoot() {
+    private func selectProjectsRoot() {
         let panel = NSOpenPanel()
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
         panel.canCreateDirectories = true
-        panel.directoryURL = preferences.sessionsRoot
-        panel.message = "Select the directory where session files are stored"
+        panel.directoryURL = preferences.projectsRoot
+        panel.message = "Select the directory where CodMate stores projects data"
 
         panel.begin { response in
             guard response == .OK, let url = panel.url else { return }
-            Task { await viewModel.updateSessionsRoot(to: url) }
+            Task { await viewModel.updateProjectsRoot(to: url) }
         }
     }
 
@@ -641,8 +641,10 @@ struct SettingsView: View {
     }
 
     private func resetToDefaults() {
-        preferences.sessionsRoot = SessionPreferencesStore.defaultSessionsRoot(
+        preferences.projectsRoot = SessionPreferencesStore.defaultProjectsRoot(
             for: FileManager.default.homeDirectoryForCurrentUser)
+        preferences.notesRoot = SessionPreferencesStore.defaultNotesRoot(
+            for: preferences.sessionsRoot)
         preferences.codexExecutableURL = SessionPreferencesStore.defaultExecutableURL()
         preferences.claudeExecutableURL = SessionPreferencesStore.defaultClaudeExecutableURL()
         preferences.defaultResumeUseEmbeddedTerminal = true

@@ -10,6 +10,11 @@ final class SessionPreferencesStore: ObservableObject {
         didSet { persist() }
     }
 
+    // New: Projects data directory (metadata + memberships)
+    @Published var projectsRoot: URL {
+        didSet { persist() }
+    }
+
     @Published var codexExecutableURL: URL {
         didSet { persist() }
     }
@@ -22,6 +27,7 @@ final class SessionPreferencesStore: ObservableObject {
     private struct Keys {
         static let sessionsRootPath = "codex.sessions.rootPath"
         static let notesRootPath = "codex.notes.rootPath"
+        static let projectsRootPath = "codmate.projects.rootPath"
         static let executablePath = "codex.sessions.executablePath"
         static let claudeExecutablePath = "codex.sessions.claudeExecutablePath"
         static let resumeUseEmbedded = "codex.resume.useEmbedded"
@@ -56,7 +62,7 @@ final class SessionPreferencesStore: ObservableObject {
         self.defaults = defaults
         let homeURL = fileManager.homeDirectoryForCurrentUser
 
-        // Resolve sessions root without touching self
+        // Resolve sessions root without touching self (still used internally; no longer user-configurable)
         let resolvedSessionsRoot: URL = {
             if let storedRoot = defaults.string(forKey: Keys.sessionsRootPath) {
                 let url = URL(fileURLWithPath: storedRoot, isDirectory: true)
@@ -69,7 +75,7 @@ final class SessionPreferencesStore: ObservableObject {
             return SessionPreferencesStore.defaultSessionsRoot(for: homeURL)
         }()
 
-        // Resolve notes root (prefer stored path; else sibling of sessions root)
+        // Resolve notes root (prefer stored path; else centralized ~/.codmate/notes)
         let resolvedNotesRoot: URL = {
             if let storedNotes = defaults.string(forKey: Keys.notesRootPath) {
                 let url = URL(fileURLWithPath: storedNotes, isDirectory: true)
@@ -80,6 +86,16 @@ final class SessionPreferencesStore: ObservableObject {
                 }
             }
             return SessionPreferencesStore.defaultNotesRoot(for: resolvedSessionsRoot)
+        }()
+
+        // Resolve projects root (prefer stored path; else ~/.codmate/projects)
+        let resolvedProjectsRoot: URL = {
+            if let stored = defaults.string(forKey: Keys.projectsRootPath) {
+                let url = URL(fileURLWithPath: stored, isDirectory: true)
+                if fileManager.fileExists(atPath: url.path) { return url }
+                defaults.removeObject(forKey: Keys.projectsRootPath)
+            }
+            return SessionPreferencesStore.defaultProjectsRoot(for: homeURL)
         }()
 
         // Resolve executable path
@@ -113,6 +129,7 @@ final class SessionPreferencesStore: ObservableObject {
 
         self.codexExecutableURL = resolvedExec
         self.claudeExecutableURL = resolvedClaudeExec
+        self.projectsRoot = resolvedProjectsRoot
         // Resume defaults
         self.defaultResumeUseEmbeddedTerminal =
             defaults.object(forKey: Keys.resumeUseEmbedded) as? Bool ?? true
@@ -170,6 +187,7 @@ final class SessionPreferencesStore: ObservableObject {
     private func persist() {
         defaults.set(sessionsRoot.path, forKey: Keys.sessionsRootPath)
         defaults.set(notesRoot.path, forKey: Keys.notesRootPath)
+        defaults.set(projectsRoot.path, forKey: Keys.projectsRootPath)
         defaults.set(codexExecutableURL.path, forKey: Keys.executablePath)
         defaults.set(claudeExecutableURL.path, forKey: Keys.claudeExecutablePath)
     }
@@ -185,7 +203,15 @@ final class SessionPreferencesStore: ObservableObject {
     }
 
     static func defaultNotesRoot(for sessionsRoot: URL) -> URL {
-        sessionsRoot.deletingLastPathComponent().appendingPathComponent("notes", isDirectory: true)
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        return home.appendingPathComponent(".codmate", isDirectory: true)
+            .appendingPathComponent("notes", isDirectory: true)
+    }
+
+    static func defaultProjectsRoot(for homeDirectory: URL) -> URL {
+        homeDirectory
+            .appendingPathComponent(".codmate", isDirectory: true)
+            .appendingPathComponent("projects", isDirectory: true)
     }
 
     static func defaultExecutableURL() -> URL {

@@ -1,7 +1,7 @@
 import Foundation
 
 // ProjectsStore: manages project metadata and session memberships
-// Layout (under ~/.codex/projects):
+// Layout (under ~/.codmate/projects):
 //  - metadata/<projectId>.json  (one file per project)
 //  - memberships.json           (central mapping: { version, sessionToProject })
 
@@ -59,7 +59,8 @@ actor ProjectsStore {
 
         static func `default`(fileManager: FileManager = .default) -> Paths {
             let home = fileManager.homeDirectoryForCurrentUser
-            let root = home.appendingPathComponent(".codex", isDirectory: true)
+            // New centralized CodMate data root
+            let root = home.appendingPathComponent(".codmate", isDirectory: true)
                 .appendingPathComponent("projects", isDirectory: true)
             return Paths(
                 root: root,
@@ -79,6 +80,8 @@ actor ProjectsStore {
     init(paths: Paths = .default(), fileManager: FileManager = .default) {
         self.fm = fileManager
         self.paths = paths
+        // Before creating new directories, attempt legacy migration from ~/.codex/projects → ~/.codmate/projects
+        Self.migrateLegacyIfNeeded(to: paths, fm: fm)
         try? fm.createDirectory(at: paths.metadataDir, withIntermediateDirectories: true)
         // Load memberships
         if let data = try? Data(contentsOf: paths.membershipsURL),
@@ -173,6 +176,83 @@ actor ProjectsStore {
         if let data = try? JSONSerialization.data(withJSONObject: obj, options: [.prettyPrinted]) {
             try? fm.createDirectory(at: paths.root, withIntermediateDirectories: true)
             try? data.write(to: paths.membershipsURL, options: .atomic)
+        }
+    }
+
+    // MARK: - Legacy migration
+    /// Move or copy legacy data from `~/.codex/projects` into the new `~/.codmate/projects` location.
+    /// - Behavior:
+    ///   - If legacy root exists and new root is missing or empty, attempt a directory move.
+    ///   - If new root exists with content, copy over missing files (non-destructive) and keep legacy as-is.
+    private static func migrateLegacyIfNeeded(to paths: Paths, fm: FileManager) {
+        let home = fm.homeDirectoryForCurrentUser
+        let legacyRoot = home.appendingPathComponent(".codex", isDirectory: true)
+            .appendingPathComponent("projects", isDirectory: true)
+        let newRoot = paths.root
+
+        // Quick existence check
+        var isDir: ObjCBool = false
+        let legacyExists = fm.fileExists(atPath: legacyRoot.path, isDirectory: &isDir) && isDir.boolValue
+        guard legacyExists else { return }
+
+        // Ensure parent of new root exists
+        let newParent = newRoot.deletingLastPathComponent()
+        try? fm.createDirectory(at: newParent, withIntermediateDirectories: true)
+
+        // Determine if new root exists and is empty
+        var newIsDir: ObjCBool = false
+        let newExists = fm.fileExists(atPath: newRoot.path, isDirectory: &newIsDir) && newIsDir.boolValue
+        let newIsEmpty: Bool = {
+            guard newExists else { return true }
+            do {
+                let items = try fm.contentsOfDirectory(atPath: newRoot.path)
+                return items.isEmpty
+            } catch { return true }
+        }()
+
+        // Prefer moving the whole directory if safe
+        if !newExists || newIsEmpty {
+            do {
+                if newExists && newIsEmpty {
+                    // Remove empty shell so move succeeds
+                    try? fm.removeItem(at: newRoot)
+                }
+                try fm.moveItem(at: legacyRoot, to: newRoot)
+                return
+            } catch {
+                // Fall back to per-file copy if move fails (e.g., cross-device)
+            }
+        }
+
+        // Non-destructive copy of missing files
+        do {
+            try fm.createDirectory(at: newRoot, withIntermediateDirectories: true)
+
+            // Copy memberships.json if missing
+            let legacyMemberships = legacyRoot.appendingPathComponent("memberships.json")
+            let newMemberships = newRoot.appendingPathComponent("memberships.json")
+            if fm.fileExists(atPath: legacyMemberships.path) && !fm.fileExists(atPath: newMemberships.path) {
+                try? fm.copyItem(at: legacyMemberships, to: newMemberships)
+            }
+
+            // Copy metadata directory contents if missing
+            let legacyMetadata = legacyRoot.appendingPathComponent("metadata", isDirectory: true)
+            let newMetadata = newRoot.appendingPathComponent("metadata", isDirectory: true)
+            var isLegacyMetaDir: ObjCBool = false
+            if fm.fileExists(atPath: legacyMetadata.path, isDirectory: &isLegacyMetaDir), isLegacyMetaDir.boolValue {
+                try? fm.createDirectory(at: newMetadata, withIntermediateDirectories: true)
+                if let en = fm.enumerator(at: legacyMetadata, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles]) {
+                    for case let url as URL in en {
+                        if url.pathExtension.lowercased() != "json" { continue }
+                        let dest = newMetadata.appendingPathComponent(url.lastPathComponent)
+                        if !fm.fileExists(atPath: dest.path) {
+                            try? fm.copyItem(at: url, to: dest)
+                        }
+                    }
+                }
+            }
+        } catch {
+            // Best effort; do not block app startup on migration failures
         }
     }
 }

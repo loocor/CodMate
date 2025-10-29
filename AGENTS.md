@@ -80,7 +80,7 @@ Codex Settings
 Session Metadata (Rename/Comment)
 - Users can rename any session and attach a short comment.
 - Trigger: click the title at the top-left of the detail pane to open the editor.
-- Persistence: stored per file under a `notes` directory sibling to the `sessions` root (e.g., `~/.codex/notes/<sessionId-sanitized>.json`). A first-run migration copies entries from the legacy Application Support JSON.
+- Persistence: stored per file under `~/.codmate/notes/<sessionId-sanitized>.json`. A first-run migration copies entries from the legacy Application Support JSON and migrates from the legacy `~/.codex/notes` directory when present.
 - Display: the name replaces the ID in the detail header and list; the comment is used as the row snippet when present.
 
 About Surface

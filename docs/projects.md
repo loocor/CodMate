@@ -37,7 +37,7 @@ Persistence
 - Projects: Codex config at `~/.codex/config.toml` via `[projects.<id>]` tables.
   - Supported keys: `name`, `directory`, `trust_level`, `overview`, `instructions`, `profile`.
   - We read both `directory` and `path` for compatibility; we write `directory`.
-- Session-to-project mapping: stored in notes JSON under `~/.codex/notes/<sessionId>.json` along with title/comment.
+- Session-to-project mapping: stored in notes JSON under `~/.codmate/notes/<sessionId>.json` along with title/comment (with automatic migration from the legacy `~/.codex/notes`).
 
 View Model Changes
 - `SessionListViewModel`
@@ -76,4 +76,3 @@ Extensibility (v1.1+)
 - Directory inference: if a session’s `cwd` is under a project directory and no explicit assignment exists, consider it in that project (opt-in).
 - Project-level overrides for model, reasoning, sandbox/approval flags.
 - Auto-create and sync a same-id Profile; conflict prompts.
-

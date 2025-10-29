@@ -102,7 +102,7 @@ final class SessionListViewModel: ObservableObject {
 
     // Projects
     let configService = CodexConfigService()
-    let projectsStore = ProjectsStore()
+    var projectsStore: ProjectsStore
     let claudeProvider = ClaudeSessionProvider()
     @Published var projects: [Project] = []
     var projectCounts: [String: Int] = [:]
@@ -125,6 +125,14 @@ final class SessionListViewModel: ObservableObject {
         self.indexer = indexer
         self.actions = actions
         self.notesStore = SessionNotesStore(notesRoot: preferences.notesRoot)
+        // Initialize ProjectsStore using configurable projectsRoot (defaults to ~/.codmate/projects)
+        let pr = preferences.projectsRoot
+        let p = ProjectsStore.Paths(
+            root: pr,
+            metadataDir: pr.appendingPathComponent("metadata", isDirectory: true),
+            membershipsURL: pr.appendingPathComponent("memberships.json", isDirectory: false)
+        )
+        self.projectsStore = ProjectsStore(paths: p)
         // Default at startup: All Sessions (no directory filter) + today
         let today = Date()
         let cal = Calendar.current
@@ -337,6 +345,20 @@ final class SessionListViewModel: ObservableObject {
         var sessions = allSessions
         apply(notes: notes, to: &sessions)
         allSessions = sessions
+        applyFilters()
+    }
+
+    func updateProjectsRoot(to newURL: URL) async {
+        guard newURL != preferences.projectsRoot else { return }
+        preferences.projectsRoot = newURL
+        let p = ProjectsStore.Paths(
+            root: newURL,
+            metadataDir: newURL.appendingPathComponent("metadata", isDirectory: true),
+            membershipsURL: newURL.appendingPathComponent("memberships.json", isDirectory: false)
+        )
+        self.projectsStore = ProjectsStore(paths: p)
+        await loadProjects()
+        recomputeProjectCounts()
         applyFilters()
     }
 
