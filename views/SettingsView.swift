@@ -26,6 +26,9 @@ struct SettingsView: View {
                     window.toolbar = toolbar
                 }
                 window.title = "Settings"
+                // Ensure the system titlebar bottom hairline is shown to unify
+                // appearance across all settings pages.
+                window.titlebarSeparatorStyle = .line
 
                 var minSize = window.contentMinSize
                 minSize.width = max(minSize.width, 800)
@@ -65,12 +68,12 @@ struct SettingsView: View {
                 selectedCategoryView
                     .frame(maxWidth: .infinity, alignment: .topLeading)
                     .task { await codexVM.loadAll() }
-                    .navigationSplitViewColumnWidth(min: 460, ideal: 640, max: 1200)
+                    .navigationSplitViewColumnWidth(min: 640, ideal: 800, max: 1800)
             }
             .navigationSplitViewStyle(.balanced)
             .toolbar(removing: .sidebarToggle)
         }
-        .frame(minWidth: 800, minHeight: 560)
+        .frame(minWidth: 900, minHeight: 520)
     }
 
     private final class SettingsToolbarCoordinator: NSObject, NSToolbarDelegate {
@@ -568,9 +571,12 @@ struct SettingsView: View {
     }()
 
     private var mcpServerSettings: some View {
-        settingsScroll {
-            MCPServersSettingsPane(openMCPMateDownload: openMCPMateDownload)
-        }
+        // Avoid wrapping in ScrollView so the inner List controls scrolling
+        MCPServersSettingsPane(openMCPMateDownload: openMCPMateDownload)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .padding(.top, 24)
+            .padding(.horizontal, 24)
+            .padding(.bottom,24)
     }
 
 
@@ -662,7 +668,8 @@ struct SettingsView: View {
                 .padding(.horizontal, 24)
                 .padding(.bottom, 32)
         }
-        .scrollClipDisabled()
+        // Allow the scroll view to clip to its bounds so the system
+        // titlebar bottom separator (hairline) remains visible consistently.
     }
 
     @ViewBuilder

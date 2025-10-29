@@ -207,7 +207,7 @@ struct MCPServersSettingsPane: View {
                         }
                     }
                 }
-                .frame(minHeight: 200)
+                .frame(minHeight: 200, maxHeight: .infinity, alignment: .top)
             }
         }
         .task { await vm.loadServers() }
