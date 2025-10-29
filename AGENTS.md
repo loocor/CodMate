@@ -37,11 +37,14 @@ UI Rules (macOS specific)
 - Detail (right):
   - Sticky action bar at top: Resume, Reveal in Finder, Delete, Export Markdown.
   - Add “New” button next to Resume to start a fresh Codex session using the current session’s working directory and model.
+  - When an embedded terminal is running, show a “Prompts” button beside the folder (Reveal in Finder) icon. Clicking opens a searchable popover of preset command texts; selecting one inserts it into the embedded terminal input (does not auto-execute). User presses Return to run.
   - “Task Instructions” uses a DisclosureGroup; load lazily when expanded.
   - Conversation timeline uses LazyVStack; differentiate user/assistant/tool/info bubbles.
   - Timeline & Markdown visibility: Settings › General provides per-surface checkboxes to choose which message types are shown in the conversation timeline and included when exporting Markdown. Defaults: Timeline shows all except Environment Context (which has its own section); Markdown includes only User and Assistant.
   - Context menu in list rows adds: “Generate Title & 100-char Summary” to run LLM on-demand for the selected session.
-  - Embedded Terminal: One live shell per session when resumed in-app; switching sessions in the middle list switches the attached terminal. The shell keeps running when you navigate away. “Return to history” closes the running shell for the focused session.
+- Embedded Terminal: One live shell per session when resumed in-app; switching sessions in the middle list switches the attached terminal. The shell keeps running when you navigate away. “Return to history” closes the running shell for the focused session.
+  - Prompt picker: When embedded terminal is running, a Prompts button opens a searchable list. Prompts are merged from per-project `.codmate/prompts.json` (if present) and `~/.codmate/prompts.json` (user), de-duplicated by command, then layered with a few built‑ins. Items accept either `{ "label": "…", "command": "…" }` or a plain string (used for both). Selection inserts into the terminal input without executing. The header wrench button opens the preferred file (project if exists, else user). Typing a new command shows “Add …” to create a prompt in the preferred file. Deleting a built‑in prompt records it in a hidden list (`prompts-hidden.json` at project if project prompts exist, else at user), which suppresses that built‑in in the UI.
+  - Terminal shortcuts: (none for now). Clearing via shortcut is not implemented.
 
 Performance Contract
 - Fast path indexing: memory‑mapped reads; parse first ~400 lines + read tail ~64KB to correct `lastUpdatedAt`.

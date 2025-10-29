@@ -21,6 +21,65 @@ struct ContentView: View {
     @State private var showNewWithContext = false
     // When starting embedded sessions, record the initial command lines per-session
     @State private var embeddedInitialCommands: [SessionSummary.ID: String] = [:]
+    // Prompt picker state for embedded terminal quick-insert
+    @State private var showPromptPicker = false
+    @State private var promptQuery = ""
+    // Debounced query to keep filtering cheap on main thread
+    @State private var throttledPromptQuery = ""
+    @State private var promptDebounceTask: Task<Void, Never>? = nil
+    private struct SourcedPrompt: Identifiable, Hashable {
+        let id = UUID()
+        enum Source: Hashable { case project, user, builtin }
+        var prompt: PresetPromptsStore.Prompt
+        var source: Source
+        var label: String { prompt.label }
+        var command: String { prompt.command }
+        
+        // Custom Hashable implementation to hash based on content, not UUID
+        func hash(into hasher: inout Hasher) {
+            hasher.combine(prompt)
+            hasher.combine(source)
+        }
+        
+        static func == (lhs: SourcedPrompt, rhs: SourcedPrompt) -> Bool {
+            lhs.prompt == rhs.prompt && lhs.source == rhs.source
+        }
+    }
+    @State private var loadedPrompts: [SourcedPrompt] = []
+    @State private var hoveredPromptKey: String? = nil
+    private func promptKey(_ p: SourcedPrompt) -> String { p.command }
+    private func canDelete(_ p: SourcedPrompt) -> Bool { true }
+    @State private var pendingDelete: SourcedPrompt? = nil
+    // Build highlighted text where matches of `query` are tinted; non-matches use the provided base color
+    private func highlightedText(_ text: String, query: String, base: Color = .primary) -> Text {
+        guard !query.isEmpty else { return Text(text).foregroundStyle(base) }
+        var result = Text("")
+        var searchStart = text.startIndex
+        let end = text.endIndex
+        while searchStart < end, let r = text.range(of: query, options: [.caseInsensitive, .diacriticInsensitive], range: searchStart..<end) {
+            if r.lowerBound > searchStart {
+                let prefix = String(text[searchStart..<r.lowerBound])
+                result = result + Text(prefix).foregroundStyle(base)
+            }
+            let match = String(text[r])
+            result = result + Text(match).foregroundStyle(.tint)
+            searchStart = r.upperBound
+        }
+        if searchStart < end {
+            let tail = String(text[searchStart..<end])
+            result = result + Text(tail).foregroundStyle(base)
+        }
+        return result
+    }
+    private func builtinPrompts() -> [PresetPromptsStore.Prompt] {
+        [
+            .init(label: "git status", command: "git status"),
+            .init(label: "git pull --rebase --autostash", command: "git pull --rebase --autostash"),
+            .init(label: "rg -n TODO", command: "rg -n TODO"),
+            .init(label: "swift build", command: "swift build"),
+            .init(label: "swift test", command: "swift test"),
+        ]
+    }
     // Track pending rekey for embedded New so we can move the PTY to the real new session id
     struct PendingEmbeddedRekey {
         let anchorId: String
@@ -154,8 +213,6 @@ struct ContentView: View {
             isRunning: { runningSessionIDs.contains($0.id) },
             isUpdating: { viewModel.isActivelyUpdating($0.id) },
             isAwaitingFollowup: { viewModel.isAwaitingFollowup($0.id) },
-            onOpenEmbedded: (viewModel.preferences.defaultResumeUseEmbeddedTerminal
-                ? { startEmbedded(for: $0) } : nil),
             onPrimarySelect: { s in selectionPrimaryId = s.id }
         )
         .environmentObject(viewModel)
@@ -268,7 +325,9 @@ struct ContentView: View {
 
             HStack(spacing: 8) {
                 let focused = focusedSummary
+                let isFocusedRunning = focused.map { runningSessionIDs.contains($0.id) } ?? false
 
+                if !isFocusedRunning {
                 Menu {
                     if let focused = focusedSummary {
                         Button {
@@ -351,7 +410,9 @@ struct ContentView: View {
                 )
                 .menuStyle(.borderedButton)
                 .controlSize(.small)
+                }
 
+                if !isFocusedRunning {
                 Menu {
                     if focusedSummary != nil {
                         Button {
@@ -420,6 +481,7 @@ struct ContentView: View {
                 )
                 .menuStyle(.borderedButton)
                 .controlSize(.small)
+                }
 
                 Button {
                     if let focused = focusedSummary { viewModel.reveal(session: focused) }
@@ -430,23 +492,221 @@ struct ContentView: View {
                 .help("Reveal in Finder")
 
                 if let focused = focusedSummary, runningSessionIDs.contains(focused.id) {
+                    // Prompts picker: searchable quick insert into embedded terminal input
+                    Button {
+                        showPromptPicker.toggle()
+                    } label: {
+                        Image(systemName: "text.magnifyingglass")
+                    }
+                    .help("Insert preset command…")
+                    .popover(isPresented: $showPromptPicker, arrowEdge: .top) {
+                        VStack(spacing: 8) {
+                            HStack(alignment: .firstTextBaseline) {
+                                Text("Preset Commands")
+                                    .font(.headline)
+                                Spacer()
+                                Button {
+                                    // Provide a tiny default template
+                                    let template = loadedPrompts.isEmpty
+                                        ? [
+                                            SourcedPrompt(prompt: PresetPromptsStore.Prompt(label: "git status", command: "git status"), source: .builtin),
+                                            SourcedPrompt(prompt: PresetPromptsStore.Prompt(label: "swift build", command: "swift build"), source: .builtin),
+                                        ].map { $0.prompt }
+                                        : loadedPrompts.map { $0.prompt }
+                                    let cwd = focusedSummary?.cwd
+                                    Task { await PresetPromptsStore.shared.openOrCreatePreferredFile(for: cwd, withTemplate: template) }
+                                } label: {
+                                    Image(systemName: "wrench.and.screwdriver")
+                                }
+                                .buttonStyle(.borderless)
+                                .controlSize(.small)
+                                .help("Manage Prompts")
+                            }
+                            TextField("Search prompts", text: $promptQuery)
+                                .textFieldStyle(.roundedBorder)
+                            let q = throttledPromptQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+                            let filtered = loadedPrompts.filter { item in
+                                guard !q.isEmpty else { return true }
+                                return item.label.localizedCaseInsensitiveContains(q)
+                                    || item.command.localizedCaseInsensitiveContains(q)
+                            }
+                            let exactExists: Bool = {
+                                let q = throttledPromptQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+                                guard !q.isEmpty else { return true }
+                                return loadedPrompts.contains(where: { $0.label == q || $0.command == q })
+                            }()
+                            ScrollView {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    // Add-new row if query non-empty and no exact match
+                                    if !throttledPromptQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !exactExists {
+                                        Button {
+                                            let q = throttledPromptQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+                                            guard let focused = focusedSummary else { return }
+                                            Task {
+                                                _ = await PresetPromptsStore.shared.add(
+                                                    prompt: .init(label: q, command: q),
+                                                    for: focused.cwd
+                                                )
+                                                let items = await PresetPromptsStore.shared.load(for: focused.cwd)
+                                                let sourcedItems = items.map { SourcedPrompt(prompt: $0, source: .project) }
+                                                await MainActor.run { self.loadedPrompts = sourcedItems }
+                                                #if canImport(SwiftTerm)
+                                                    TerminalSessionManager.shared.focus(key: focused.id)
+                                                    TerminalSessionManager.shared.send(to: focused.id, text: q)
+                                                #endif
+                                                await MainActor.run {
+                                                    self.promptQuery = ""
+                                                    self.showPromptPicker = false
+                                                }
+                                            }
+                                        } label: {
+                                            HStack(spacing: 6) {
+                                                Image(systemName: "plus.circle")
+                                                Text("Add \(throttledPromptQuery)")
+                                                    .lineLimit(1)
+                                                Spacer(minLength: 0)
+                                            }
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                            .contentShape(Rectangle())
+                                        }
+                                        .buttonStyle(.plain)
+                                        .padding(.vertical, 6)
+                                        .padding(.horizontal, 6)
+                                        Divider()
+                                    }
+                                    if filtered.isEmpty {
+                                        Text("No matches")
+                                            .foregroundStyle(.secondary)
+                                            .frame(maxWidth: .infinity, alignment: .center)
+                                            .padding(.vertical, 12)
+                                    } else {
+                                        let maxShown = 200
+                                        let shown = Array(filtered.prefix(maxShown))
+                                        ForEach(shown, id: \.self) { item in
+                                            Button {
+                                                #if canImport(SwiftTerm)
+                                                    TerminalSessionManager.shared.focus(key: focused.id)
+                                                    TerminalSessionManager.shared.send(to: focused.id, text: item.command)
+                                                #endif
+                                                // Close and reset query for next time
+                                                promptQuery = ""
+                                                showPromptPicker = false
+                                            } label: {
+                                                HStack(spacing: 8) {
+                                                    VStack(alignment: .leading, spacing: 2) {
+                                                        highlightedText(item.label, query: q, base: .primary)
+                                                            .font(.system(.body))
+                                                            .lineLimit(1)
+                                                        if item.command != item.label {
+                                                            highlightedText(item.command, query: q, base: .secondary)
+                                                                .font(.system(.caption, design: .monospaced))
+                                                                .lineLimit(1)
+                                                        }
+                                                    }
+                                                    Spacer(minLength: 0)
+                                                    if canDelete(item) {
+                                                        Button {
+                                                            pendingDelete = item
+                                                        } label: {
+                                                            Image(systemName: "trash")
+                                                                .symbolVariant(.circle)
+                                                        }
+                                                        .buttonStyle(.borderless)
+                                                        .controlSize(.small)
+                                                        .help("Delete prompt")
+                                                        .opacity(hoveredPromptKey == promptKey(item) ? 1.0 : 0.0)
+                                                    }
+                                                }
+                                                .frame(maxWidth: .infinity, alignment: .leading)
+                                                .contentShape(Rectangle())
+                                            }
+                                            // Accessibility: announce label + command for the row
+                                            .accessibilityLabel(Text("\(item.label) \(item.command)"))
+                                            .onHover { hovering in hoveredPromptKey = hovering ? promptKey(item) : nil }
+                                            .buttonStyle(.plain)
+                                            .padding(.vertical, 6)
+                                            .padding(.horizontal, 6)
+                                            Divider()
+                                        }
+                                        if filtered.count > maxShown {
+                                            Text("Showing first \(maxShown) results — refine search to see more")
+                                                .font(.footnote)
+                                                .foregroundStyle(.secondary)
+                                                .padding(.top, 4)
+                                                .frame(maxWidth: .infinity, alignment: .leading)
+                                        }
+                                    }
+                                }
+                            }
+                            // Footer intentionally empty for compact layout
+                        }
+                        .padding(12)
+                        .frame(width: 360, height: 280)
+                    }
+                    .onChange(of: showPromptPicker) { _, isOpen in
+                        guard isOpen, let focused = focusedSummary else { return }
+                        Task {
+                            let projectOnly = await PresetPromptsStore.shared.loadProjectOnly(for: focused.cwd)
+                            let userOnly = await PresetPromptsStore.shared.loadUserOnly()
+                            let hidden = await PresetPromptsStore.shared.loadHidden(for: focused.cwd)
+                            var seen = Set<String>()
+                            var result: [SourcedPrompt] = []
+                            for p in projectOnly { if seen.insert(p.command).inserted { result.append(.init(prompt: p, source: .project)) } }
+                            for p in userOnly { if seen.insert(p.command).inserted { result.append(.init(prompt: p, source: .user)) } }
+                            for b in builtinPrompts() {
+                                guard !hidden.contains(b.command) else { continue }
+                                if seen.insert(b.command).inserted { result.append(.init(prompt: b, source: .builtin)) }
+                            }
+                            loadedPrompts = result
+                        }
+                        throttledPromptQuery = promptQuery
+                    }
+                    // Debounce search query updates to keep filtering snappy on large lists
+                    .onChange(of: promptQuery) { _, newValue in
+                        promptDebounceTask?.cancel()
+                        let value = newValue
+                        promptDebounceTask = Task { @MainActor in
+                            try? await Task.sleep(nanoseconds: 150_000_000)
+                            throttledPromptQuery = value
+                        }
+                    }
+                    .alert(item: $pendingDelete, content: { item in
+                        Alert(
+                            title: Text("Delete Prompt"),
+                            message: Text("Delete ‘\(item.label)’? This cannot be undone."),
+                            primaryButton: .destructive(Text("Delete"), action: {
+                                guard let focused = focusedSummary else { return }
+                                Task {
+                                    let location: PresetPromptsStore.PromptLocation = (item.source == .project) ? .project : (item.source == .user ? .user : .builtin)
+                                    _ = await PresetPromptsStore.shared.delete(prompt: item.prompt, location: location, workingDirectory: focused.cwd)
+                                    // reload current list
+                                    let projectOnly = await PresetPromptsStore.shared.loadProjectOnly(for: focused.cwd)
+                                    let userOnly = await PresetPromptsStore.shared.loadUserOnly()
+                                    let hidden = await PresetPromptsStore.shared.loadHidden(for: focused.cwd)
+                                    var seen = Set<String>()
+                                    var result: [SourcedPrompt] = []
+                                    for p in projectOnly { if seen.insert(p.command).inserted { result.append(.init(prompt: p, source: .project)) } }
+                                    for p in userOnly { if seen.insert(p.command).inserted { result.append(.init(prompt: p, source: .user)) } }
+                                    for b in builtinPrompts() {
+                                        guard !hidden.contains(b.command) else { continue }
+                                        if seen.insert(b.command).inserted { result.append(.init(prompt: b, source: .builtin)) }
+                                    }
+                                    await MainActor.run { loadedPrompts = result }
+                                }
+                            }),
+                            secondaryButton: .cancel({ pendingDelete = nil })
+                        )
+                    })
+                }
+
+                if let focused = focusedSummary, runningSessionIDs.contains(focused.id) {
+                    // Place the return button at the far right by making it the last item
                     Button {
                         stopEmbedded(forID: focused.id)
                     } label: {
                         Image(systemName: "arrow.uturn.backward")
                     }
                     .help("Return to history")
-
-                    Button {
-                        viewModel.copyRealResumeCommand(session: focused)
-                        Task {
-                            await SystemNotifier.shared.notify(
-                                title: "CodMate", body: "Real command copied")
-                        }
-                    } label: {
-                        Image(systemName: "doc.on.doc")
-                    }
-                    .help("Copy real resume command")
                 } else {
                     let canExport = (focusedSummary?.eventCount ?? 0) > 0 && !viewModel.isLoading
                     Button {
@@ -458,13 +718,15 @@ struct ContentView: View {
                     .help("Export Markdown")
                 }
 
-                Button(role: .destructive) {
-                    presentDeleteConfirmation()
-                } label: {
-                    Image(systemName: "trash")
+                if !isFocusedRunning {
+                    Button(role: .destructive) {
+                        presentDeleteConfirmation()
+                    } label: {
+                        Image(systemName: "trash")
+                    }
+                    .disabled(selection.isEmpty || isPerformingAction)
+                    .help("Delete")
                 }
-                .disabled(selection.isEmpty || isPerformingAction)
-                .help("Delete")
             }
             .buttonStyle(.bordered)
         }
@@ -547,6 +809,8 @@ struct ContentView: View {
         // Build the default resume commands for this session so TerminalHostView can inject them
         embeddedInitialCommands[session.id] = viewModel.buildResumeCommands(session: session)
         runningSessionIDs.insert(session.id)
+        // User已接手：清除待跟进高亮
+        viewModel.clearAwaitingFollowup(session.id)
         // Nudge Codex to redraw cleanly once it starts, by sending "/" then backspace
         #if canImport(SwiftTerm)
             TerminalSessionManager.shared.scheduleSlashNudge(forKey: session.id, delay: 1.0)
@@ -560,6 +824,8 @@ struct ContentView: View {
         #endif
         runningSessionIDs.remove(id)
         embeddedInitialCommands.removeValue(forKey: id)
+        // 退出内置终端：清除待跟进高亮
+        viewModel.clearAwaitingFollowup(id)
         if runningSessionIDs.isEmpty {
             isDetailMaximized = false
             columnVisibility = .all
