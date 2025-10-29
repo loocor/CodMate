@@ -31,9 +31,9 @@ Status: macOS 15+, Swift 6, Xcode 16. Universal binary (arm64 + x86_64).
   - Provider presets include K2, GLM, DeepSeek with “Get key” links and prefilled base URLs.
   - System notifications bridge via a managed `codmate-notify` helper; TUI notifications toggle.
 - Dialectics (Diagnostics)
-  - Sessions root probe (current vs default), counts/samples/errors with “Save Report…”.
-  - Providers diagnostics: counts, duplicate IDs, stray managed bodies, canonical providers region preview (copy‑only).
-  - CLI environment: preferred and resolved `codex` paths and a PATH snapshot.
+  - Codex sessions root probe (current vs default), counts/samples/errors with “Save Report…”.
+  - Claude sessions directory probe (default path), counts and sample files.
+  - CLI environment: preferred and resolved `codex` and `claude` paths and a PATH snapshot.
 
 ## Performance
 - Fast path indexing: memory‑mapped reads; parse the first ~64 lines plus tail sampling (up to ~1 MB) to fix `lastUpdatedAt`.
@@ -108,6 +108,20 @@ xcrun notarytool submit "$OUT" --keychain-profile <your-profile-name> --wait
 xcrun stapler staple "$OUT"
 xcrun stapler staple build/DerivedData/Build/Products/Release/CodMate.app
 ```
+
+### Versioning strategy (build script)
+- Marketing version (CFBundleShortVersionString): set with `BASE_VERSION` (e.g., `1.4.0`).
+- Build number (CFBundleVersion): controlled by `BUILD_NUMBER_STRATEGY`:
+  - `date` (default): `yyyymmddHHMM` (e.g., `202510291430`).
+  - `git`: `git rev-list --count HEAD`.
+  - `counter`: monotonically increments a file counter at `$BUILD_DIR/build-number` (override path via `BUILD_COUNTER_FILE`).
+- DMG name: `CodMate-<BASE_VERSION>+<BUILD_NUMBER>-<ARCH>.dmg`.
+- Override via environment variables when running the build script:
+```sh
+BASE_VERSION=1.4.0 BUILD_NUMBER_STRATEGY=date \
+  ./scripts/macos-build-notarized-dmg.sh
+```
+This sets CFBundleShortVersionString to `1.4.0`, CFBundleVersion to the computed build number, and names the DMG accordingly.
 
 ## CLI Integration (codex)
 - Executable resolution: user‑preferred path, then `/opt/homebrew/bin/codex`, `/usr/local/bin/codex`, then `env which codex`.

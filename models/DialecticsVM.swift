@@ -6,24 +6,37 @@ import AppKit
 @MainActor
 final class DialecticsVM: ObservableObject {
     @Published var sessions: SessionsDiagnostics? = nil
-    @Published var providers: CodexConfigService.ProviderDiagnostics? = nil
     @Published var resolvedCodexPath: String? = nil
+    @Published var resolvedClaudePath: String? = nil
     @Published var pathEnv: String = ProcessInfo.processInfo.environment["PATH"] ?? ""
 
     private let sessionsSvc = SessionsDiagnosticsService()
-    private let configSvc = CodexConfigService()
     private let actions = SessionActions()
 
     func runAll(preferences: SessionPreferencesStore) async {
         let home = FileManager.default.homeDirectoryForCurrentUser
         let defRoot = SessionPreferencesStore.defaultSessionsRoot(for: home)
-        let s = await sessionsSvc.run(currentRoot: preferences.sessionsRoot, defaultRoot: defRoot)
-        let p = await configSvc.diagnoseProviders()
+        let notesDefault = SessionPreferencesStore.defaultNotesRoot(for: defRoot)
+        let projectsDefault = SessionPreferencesStore.defaultProjectsRoot(for: home)
+        let claudeDefault = home.appendingPathComponent(".claude", isDirectory: true).appendingPathComponent("projects", isDirectory: true)
+        let claudeCurrent: URL? = FileManager.default.fileExists(atPath: claudeDefault.path) ? claudeDefault : nil
+        let s = await sessionsSvc.run(
+            currentRoot: preferences.sessionsRoot,
+            defaultRoot: defRoot,
+            notesCurrentRoot: preferences.notesRoot,
+            notesDefaultRoot: notesDefault,
+            projectsCurrentRoot: preferences.projectsRoot,
+            projectsDefaultRoot: projectsDefault,
+            claudeCurrentRoot: claudeCurrent,
+            claudeDefaultRoot: claudeDefault
+        )
         let resolved = actions.resolveExecutableURL(
             preferred: preferences.codexExecutableURL)?.path
+        let resolvedClaude = actions.resolveExecutableURL(
+            preferred: preferences.claudeExecutableURL, executableName: "claude")?.path
         self.sessions = s
-        self.providers = p
         self.resolvedCodexPath = resolved
+        self.resolvedClaudePath = resolvedClaude
         self.pathEnv = ProcessInfo.processInfo.environment["PATH"] ?? ""
     }
 
@@ -49,27 +62,12 @@ final class DialecticsVM: ObservableObject {
     }
 
     // MARK: - Report
-    struct ProviderSummary: Codable {
-        let id: String
-        let name: String?
-        let baseURL: String?
-        let managedByCodMate: Bool
-    }
-    struct ProvidersReport: Codable {
-        let configPath: String
-        let providers: [ProviderSummary]
-        let duplicateIDs: [String]
-        let strayManagedBodies: Int
-        let headerCounts: [String: Int]
-        let canonicalRegion: String  // sanitized env_key values
-    }
     struct CombinedReport: Codable {
         let timestamp: Date
         let appVersion: String
         let buildTime: String
         let osVersion: String
         let sessions: SessionsDiagnostics?
-        let providers: ProvidersReport?
         let cli: [String: String?]
     }
 
@@ -98,25 +96,11 @@ final class DialecticsVM: ObservableObject {
     @MainActor private func buildReport(preferences: SessionPreferencesStore, now: Date)
         -> CombinedReport
     {
-        let p = providers
-        let pr: ProvidersReport? = p.map { d in
-            let list = d.providers.map {
-                ProviderSummary(
-                    id: $0.id, name: $0.name, baseURL: $0.baseURL,
-                    managedByCodMate: $0.managedByCodMate)
-            }
-            return ProvidersReport(
-                configPath: d.configPath,
-                providers: list,
-                duplicateIDs: d.duplicateIDs,
-                strayManagedBodies: d.strayManagedBodies,
-                headerCounts: d.headerCounts,
-                canonicalRegion: sanitizeCanonicalRegion(d.canonicalRegion)
-            )
-        }
         let cli: [String: String?] = [
             "preferredPath": preferences.codexExecutableURL.path,
             "resolvedPath": resolvedCodexPath,
+            "preferredClaudePath": preferences.claudeExecutableURL.path,
+            "resolvedClaudePath": resolvedClaudePath,
             "PATH": pathEnv,
         ]
         return CombinedReport(
@@ -125,22 +109,7 @@ final class DialecticsVM: ObservableObject {
             buildTime: buildTime,
             osVersion: osVersion,
             sessions: sessions,
-            providers: pr,
             cli: cli
         )
-    }
-
-    private func sanitizeCanonicalRegion(_ text: String) -> String {
-        // Redact env_key values to avoid leaking secrets
-        var out: [String] = []
-        for raw in text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init) {
-            let t = raw.trimmingCharacters(in: .whitespaces)
-            if t.hasPrefix("env_key") {
-                out.append("env_key = \"***\"")
-            } else {
-                out.append(raw)
-            }
-        }
-        return out.joined(separator: "\n")
     }
 }

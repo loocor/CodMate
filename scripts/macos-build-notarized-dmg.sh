@@ -73,6 +73,39 @@ if [[ -z "$SIGNING_CERT" ]]; then
   fi
 fi
 
+# ------------------------------
+# Versioning strategy
+# - BASE_VERSION: semantic version you set (e.g., 1.4.0). Defaults to 0.0.0
+# - BUILD_NUMBER_STRATEGY: date | git | counter (default: date)
+# - BUILD_COUNTER_FILE: when strategy=counter, stores/increments the counter (default: $BUILD_DIR/build-number)
+# These values are applied to Xcode as MARKETING_VERSION (CFBundleShortVersionString)
+# and CURRENT_PROJECT_VERSION (CFBundleVersion). The DMG name uses "BASE_VERSION+BUILD_NUMBER".
+BASE_VERSION="${BASE_VERSION:-${VERSION:-0.0.0}}"
+BUILD_NUMBER_STRATEGY="${BUILD_NUMBER_STRATEGY:-date}"
+
+compute_build_number() {
+  case "$BUILD_NUMBER_STRATEGY" in
+    date)
+      # yyyymmddHHMM as a single numeric component satisfies CFBundleVersion format
+      date +%Y%m%d%H%M ;;
+    git)
+      (cd "$ROOT_DIR" && git rev-list --count HEAD 2>/dev/null) || echo 1 ;;
+    counter)
+      local f="${BUILD_COUNTER_FILE:-$BUILD_DIR/build-number}"
+      mkdir -p "$(dirname "$f")"
+      local n=0
+      if [[ -f "$f" ]]; then n=$(cat "$f" 2>/dev/null || echo 0); fi
+      n=$((n+1))
+      echo "$n" > "$f"
+      echo "$n" ;;
+    *)
+      date +%Y%m%d%H%M ;;
+  esac
+}
+
+BUILD_NUMBER="$(compute_build_number)"
+DISPLAY_VERSION="${BASE_VERSION}+${BUILD_NUMBER}"
+
 for ARCH in "${ARCH_MATRIX[@]}"; do
   ARCHIVE_PATH="$BUILD_DIR/$SCHEME-$ARCH.xcarchive"
   EXPORT_DIR="$BUILD_DIR/export-$ARCH"
@@ -87,6 +120,8 @@ for ARCH in "${ARCH_MATRIX[@]}"; do
       -destination 'generic/platform=macOS' \
       -derivedDataPath "$DERIVED_DATA" \
       -archivePath "$ARCHIVE_PATH" \
+      MARKETING_VERSION="$BASE_VERSION" \
+      CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
       archive \
       CODE_SIGN_STYLE=Automatic \
       DEVELOPMENT_TEAM="${TEAM_ID:-}" \
@@ -101,6 +136,8 @@ for ARCH in "${ARCH_MATRIX[@]}"; do
       -destination 'generic/platform=macOS' \
       -derivedDataPath "$DERIVED_DATA" \
       -archivePath "$ARCHIVE_PATH" \
+      MARKETING_VERSION="$BASE_VERSION" \
+      CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
       archive \
       CODE_SIGN_STYLE=Automatic \
       DEVELOPMENT_TEAM="${TEAM_ID:-}" \
@@ -169,13 +206,10 @@ PLIST
   echo "[info][$ARCH] Extracting version from Info.plist"
   APP_BUNDLE_ID=$(defaults read "$APP_PATH/Contents/Info" CFBundleIdentifier 2>/dev/null || true)
   APP_VERSION=$(defaults read "$APP_PATH/Contents/Info" CFBundleShortVersionString 2>/dev/null || true)
-  if [[ -n "${VERSION:-}" ]]; then
-    APP_VERSION="$VERSION"
-  fi
-  APP_VERSION=${APP_VERSION:-0.0.0}
+  APP_VERSION=${APP_VERSION:-$BASE_VERSION}
 
   PRODUCT_NAME=$(basename "$APP_PATH" .app)
-  DMG_NAME="$PRODUCT_NAME-$APP_VERSION-$ARCH.dmg"
+  DMG_NAME="$PRODUCT_NAME-$APP_VERSION+${BUILD_NUMBER}-$ARCH.dmg"
   DMG_PATH="$OUTPUT_DIR/$DMG_NAME"
 
 make_dmg_with_hdiutil() {
@@ -247,5 +281,5 @@ spctl -a -t open --context context:primary-signature -vv "$DMG_PATH" || true
 
 echo ""
 echo "Done [$ARCH]. DMG: $DMG_PATH"
-echo "Bundle ID: ${APP_BUNDLE_ID:-unknown}, Version: $APP_VERSION"
+echo "Bundle ID: ${APP_BUNDLE_ID:-unknown}, Version: $APP_VERSION (build $BUILD_NUMBER)"
 done

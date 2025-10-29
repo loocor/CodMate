@@ -53,9 +53,9 @@ struct DialecticsPane: View {
                     }
                 }
 
-                // Sessions diagnostics
+                // Codex sessions diagnostics
                 VStack(alignment: .leading, spacing: 10) {
-                    Text("Sessions Root").font(.headline).fontWeight(.semibold)
+                    Text("Codex Sessions Root").font(.headline).fontWeight(.semibold)
                     if let s = vm.sessions {
                         settingsCard {
                             DiagnosticsReportView(result: s)
@@ -67,69 +67,50 @@ struct DialecticsPane: View {
                     }
                 }
 
-                // Providers diagnostics
+                // Claude sessions diagnostics (moved above Notes)
                 VStack(alignment: .leading, spacing: 10) {
-                    Text("Providers").font(.headline).fontWeight(.semibold)
-                    if let p = vm.providers {
+                    Text("Claude Sessions Directory").font(.headline).fontWeight(.semibold)
+                    if let s = vm.sessions {
                         settingsCard {
-                            Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 8) {
-                            GridRow {
-                                Text("Config Path").font(.subheadline)
-                                Text(p.configPath).font(.caption).frame(
-                                    maxWidth: .infinity, alignment: .trailing)
+                            if let cc = s.claudeCurrent {
+                                DataPairReportView(current: cc, defaultProbe: s.claudeDefault)
+                                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                            } else {
+                                DataPairReportView(current: s.claudeDefault, defaultProbe: s.claudeDefault)
+                                    .frame(maxWidth: .infinity, alignment: .topLeading)
                             }
-                            GridRow {
-                                Text("Providers Count").font(.subheadline)
-                                Text("\(p.providers.count)").frame(
-                                    maxWidth: .infinity, alignment: .trailing)
-                            }
-                            GridRow {
-                                Text("Duplicate IDs").font(.subheadline)
-                                let d = p.duplicateIDs
-                                Text(d.isEmpty ? "(none)" : d.joined(separator: ", "))
-                                    .frame(maxWidth: .infinity, alignment: .trailing)
-                            }
-                            GridRow {
-                                Text("Stray Bodies").font(.subheadline)
-                                Text("\(p.strayManagedBodies)").frame(
-                                    maxWidth: .infinity, alignment: .trailing)
-                            }
-                            }
-                            HStack(spacing: 8) {
-                                Button {
-                                    NSPasteboard.general.clearContents()
-                                    NSPasteboard.general.setString(p.canonicalRegion, forType: .string)
-                                } label: {
-                                    Label("Copy Canonical Region", systemImage: "doc.on.doc")
-                                }
-                                .buttonStyle(.bordered)
-                                Button {
-                                    NSWorkspace.shared.open(URL(fileURLWithPath: p.configPath))
-                                } label: {
-                                    Label("Open config.toml", systemImage: "square.and.pencil")
-                                }
-                                .buttonStyle(.bordered)
-                            }
-                            ScrollView {
-                                Text(
-                                    p.canonicalRegion.isEmpty
-                                        ? "(no providers configured)" : p.canonicalRegion
-                                )
-                                .font(.system(.caption, design: .monospaced))
-                                .textSelection(.enabled)
-                                .frame(maxWidth: .infinity, alignment: .topLeading)
-                                .padding(8)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 8).fill(
-                                        Color(nsColor: .textBackgroundColor))
-                                )
-                            }.frame(maxHeight: 220)
                         }
                     } else {
-                        Text("No data yet. Click Run Diagnostics.").font(.caption).foregroundStyle(
-                            .secondary)
+                        Text("No data yet. Click Run Diagnostics.").font(.caption).foregroundStyle(.secondary)
                     }
                 }
+
+                // Notes diagnostics
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Notes Directory").font(.headline).fontWeight(.semibold)
+                    if let s = vm.sessions {
+                        settingsCard {
+                            DataPairReportView(current: s.notesCurrent, defaultProbe: s.notesDefault)
+                                .frame(maxWidth: .infinity, alignment: .topLeading)
+                        }
+                    } else {
+                        Text("No data yet. Click Run Diagnostics.").font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+
+                // Projects diagnostics
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Projects Directory").font(.headline).fontWeight(.semibold)
+                    if let s = vm.sessions {
+                        settingsCard {
+                            DataPairReportView(current: s.projectsCurrent, defaultProbe: s.projectsDefault)
+                                .frame(maxWidth: .infinity, alignment: .topLeading)
+                        }
+                    } else {
+                        Text("No data yet. Click Run Diagnostics.").font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+
 
                 // CLI diagnostics
                 VStack(alignment: .leading, spacing: 10) {
@@ -144,6 +125,16 @@ struct DialecticsPane: View {
                         GridRow {
                             Text("Resolved").font(.subheadline)
                             Text(vm.resolvedCodexPath ?? "(not found)").font(.caption).frame(
+                                maxWidth: .infinity, alignment: .trailing)
+                        }
+                        GridRow {
+                            Text("Preferred (Claude)").font(.subheadline)
+                            Text(preferences.claudeExecutableURL.path).font(.caption).frame(
+                                maxWidth: .infinity, alignment: .trailing)
+                        }
+                        GridRow {
+                            Text("Resolved (Claude)").font(.subheadline)
+                            Text(vm.resolvedClaudePath ?? "(not found)").font(.caption).frame(
                                 maxWidth: .infinity, alignment: .trailing)
                         }
                         GridRow {

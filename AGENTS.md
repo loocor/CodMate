@@ -89,7 +89,8 @@ About Surface
  - Include an “Open Source Licenses” entry that displays `THIRD-PARTY-NOTICES.md` (bundled if present; falls back to repository URL if missing).
 
 Diagnostics
-- Settings › General adds “Diagnose Sessions Directory” to probe the current sessions root and the default `~/.codex/sessions` path: existence, `.jsonl` count, sample files, and enumerator errors.
+- Settings › General adds “Diagnose Data Directories” to probe Sessions (`~/.codex/sessions`, `.jsonl`), Notes (`~/.codmate/notes`, `.json`), and Projects (`~/.codmate/projects`, `.json`) — existence, counts, sample files, and enumerator errors.
+  - Also probes Claude Code sessions (`~/.claude/projects`, `.jsonl`) for presence and counts.
 - When the current root has 0 sessions but the default has files, the UI suggests switching to the default path.
 - Users can “Save Report…” to export a JSON diagnostics file for troubleshooting.
 
@@ -104,10 +105,10 @@ File/Folder Layout
 
 Dialectics Page
 - Adds a dedicated Settings › Dialectics page (between MCP Server and About) that aggregates diagnostics:
-  - Sessions root probe (current vs default), counts and sample files, enumerator errors
-  - Providers diagnostics: counts, duplicate IDs, stray managed bodies (without header), canonical region preview (read‑only)
-  - CLI environment: preferred and resolved codex paths, PATH snapshot
-  - Report actions: copy canonical providers region, open config.toml
+  - Codex sessions root probe (current vs default), counts and sample files, enumerator errors
+  - Claude sessions directory probe (default path), counts and samples
+  - Notes and Projects directories probes (current vs default), counts and sample files
+  - CLI environment: preferred and resolved codex and Claude paths, PATH snapshot
   - Does not mutate config automatically; changes only happen via explicit user actions in other pages
 
 PR / Change Policy for Agents
