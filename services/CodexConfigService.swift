@@ -240,13 +240,18 @@ actor CodexConfigService {
         if let begin = text.range(of: mcpBeginMarker), let end = text.range(of: mcpEndMarker) {
             text.removeSubrange(begin.lowerBound..<(end.upperBound))
         }
+        // Normalize trailing whitespace/newlines to avoid accumulating blank lines
+        while let last = text.last, last == "\n" || last == "\r" || last == "\t" || last == " " {
+            text.removeLast()
+        }
         // Build new region with enabled servers only
         let enabled = servers.filter { $0.enabled }
         guard !enabled.isEmpty else {
             try writeConfig(text)
             return
         }
-        var region = "\n\n\(mcpBeginMarker)\n"
+        // Ensure at most a single empty line before the managed block
+        var region = (text.isEmpty ? "" : "\n\n") + "\(mcpBeginMarker)\n"
         for s in enabled {
             let header = "[mcp_servers.\(s.name)]\n"
             var body: [String] = []
