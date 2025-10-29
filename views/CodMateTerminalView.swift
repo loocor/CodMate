@@ -14,6 +14,8 @@ import Foundation
         override var isOpaque: Bool { false }
         // Lightweight scroll listener for overlay scrollbar in the host view
         var onScrolled: ((Double, CGFloat) -> Void)?
+        // Session identifier used to attribute OSC 777 notifications to a list row
+        var sessionID: String?
 
         deinit {}
 
@@ -158,6 +160,27 @@ import Foundation
         override public func scrolled(source: TerminalView, position: Double) {
             onScrolled?(position, self.scrollThumbsize)
         }
+
+        // TerminalDelegate notification hook: handle OSC 777 notifications emitted by the TUI/CLI.
+        public func notify(source: Terminal, title: String, body: String) {
+            Task { @MainActor in
+                await SystemNotifier.shared.notify(title: title, body: body)
+                if let sid = sessionID {
+                    // Treat any OSC 777 notification as an end-of-turn signal for embedded sessions.
+                    // This avoids schema/keyword mismatches between different TUIs.
+                    await SystemNotifier.shared.notifyAgentCompleted(sessionID: sid, message: body)
+                    // Heal focus/paint occasionally left odd by full‑screen TUIs exiting.
+                    // 1) Ensure this view regains first responder
+                    self.window?.makeFirstResponder(self)
+                    // 2) Nudge the terminal to redraw without altering shell state
+                    #if canImport(SwiftTerm)
+                        TerminalSessionManager.shared.scheduleSlashNudge(forKey: sid, delay: 0.15)
+                    #endif
+                }
+            }
+        }
+
+        private static func looksLikeCompletion(title: String, body: String) -> Bool { true }
 
         private func readImageData(from pb: NSPasteboard) -> Data? {
             // 1) Direct NSImage objects

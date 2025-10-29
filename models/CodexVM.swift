@@ -414,15 +414,33 @@ final class CodexVM: ObservableObject {
     }
 
     // Notifications
+    @Published var notifySelfTestResult: String? = nil
+    @Published var notifyBridgeHealthy: Bool = false
     func loadNotifications() async {
         tuiNotifications = await service.getTuiNotifications()
         let arr = await service.getNotifyArray()
         if let bridge = arr.first {
-            systemNotifications = true
-            notifyBridgePath = bridge
+            // If the configured bridge is missing or not executable, try to reinstall silently.
+            if FileManager.default.isExecutableFile(atPath: bridge) {
+                systemNotifications = true
+                notifyBridgePath = bridge
+                notifyBridgeHealthy = true
+            } else {
+                if let url = try? await service.ensureNotifyBridgeInstalled() {
+                    notifyBridgePath = url.path
+                    systemNotifications = true
+                    _ = try? await service.setNotifyArray([url.path])
+                    notifyBridgeHealthy = FileManager.default.isExecutableFile(atPath: url.path)
+                } else {
+                    systemNotifications = false
+                    notifyBridgePath = nil
+                    notifyBridgeHealthy = false
+                }
+            }
         } else {
             systemNotifications = false
             notifyBridgePath = nil
+            notifyBridgeHealthy = false
         }
     }
     func applyTuiNotifications() async {
@@ -436,11 +454,50 @@ final class CodexVM: ObservableObject {
                 let url = try await service.ensureNotifyBridgeInstalled()
                 notifyBridgePath = url.path
                 try await service.setNotifyArray([url.path])
+                notifyBridgeHealthy = FileManager.default.isExecutableFile(atPath: url.path)
             } else {
                 notifyBridgePath = nil
                 try await service.setNotifyArray(nil)
+                notifyBridgeHealthy = false
             }
         } catch { lastError = "Failed to configure system notifications" }
+    }
+
+    // Run a local self-test of the notify bridge; returns true on success
+    func runNotifySelfTest() async {
+        notifySelfTestResult = nil
+        // Always reinstall to ensure the latest bridge content (marker + escaping fixes)
+        let path: String = (try? await service.ensureNotifyBridgeInstalled().path) ?? (notifyBridgePath ?? "")
+        guard !path.isEmpty else {
+            notifySelfTestResult = "Bridge path unavailable"
+            return
+        }
+        let payload = #"{"type":"agent-turn-complete","last-assistant-message":"Self-test: turn done","thread-id":"codmate-selftest"}"#
+        do {
+            let proc = Process()
+            proc.executableURL = URL(fileURLWithPath: path)
+            proc.arguments = [payload, "--self-test"]
+            let outPipe = Pipe()
+            proc.standardOutput = outPipe
+            proc.standardError = Pipe()
+            try proc.run()
+            proc.waitUntilExit()
+            let outData = outPipe.fileHandleForReading.readDataToEndOfFile()
+            let outStr = String(data: outData, encoding: .utf8) ?? ""
+            if proc.terminationStatus == 0 {
+                if outStr.contains("__CODMATE_NOTIFIED__") {
+                    // 成功：显示一条轻量状态，避免“无反馈”的体验
+                    await SystemNotifier.shared.notify(title: "CodMate", body: "Notifications self-test sent")
+                    notifySelfTestResult = "Sent (check Notification Center)"
+                } else {
+                    notifySelfTestResult = "Bridge ran, but no notifier accepted (check Focus/Do Not Disturb / permissions)"
+                }
+            } else {
+                notifySelfTestResult = "Exited with status \(proc.terminationStatus)"
+            }
+        } catch {
+            notifySelfTestResult = "Failed to run bridge"
+        }
     }
 
     // Privacy

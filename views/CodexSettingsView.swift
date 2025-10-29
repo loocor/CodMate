@@ -243,6 +243,27 @@ struct CodexSettingsView: View {
                                 }
                             }
                         }
+                        gridDivider
+                        GridRow {
+                            VStack(alignment: .leading, spacing: 0) {
+                                Text("Self-test").font(.subheadline).fontWeight(.medium)
+                                Text("Send a sample event through the notify bridge.")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                            HStack(spacing: 8) {
+                                if codexVM.notifyBridgeHealthy {
+                                    Image(systemName: "checkmark.seal.fill").foregroundStyle(.green)
+                                } else {
+                                    Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                                }
+                                Button("Run Self-test") { Task { await codexVM.runNotifySelfTest() } }
+                                    .controlSize(.small)
+                                if let r = codexVM.notifySelfTestResult {
+                                    Text(r).font(.caption).foregroundStyle(.secondary)
+                                }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .trailing)
+                        }
                     }
         }
     }
