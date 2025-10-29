@@ -127,6 +127,7 @@ import SwiftUI
                 overlay.frame = CGRect(x: max(0, x), y: max(0, y), width: width, height: barH)
                 overlay.needsDisplay = true
             }
+
         }
 
         private func attachTerminalIfNeeded(in container: NSView, coordinator: Coordinator) {
@@ -154,6 +155,10 @@ import SwiftUI
                     bar.translatesAutoresizingMaskIntoConstraints = true
                     container.addSubview(bar)
                     coordinator.overlay = bar
+                }
+                // Ensure the embedded terminal gains focus for immediate input
+                DispatchQueue.main.async {
+                    container.window?.makeFirstResponder(v)
                 }
             }
             coordinator.scheduleRelayout(v)
