@@ -292,6 +292,10 @@ final class SessionListViewModel: ObservableObject {
     func isActivelyUpdating(_ id: String) -> Bool { activeUpdatingIDs.contains(id) }
     func isAwaitingFollowup(_ id: String) -> Bool { awaitingFollowupIDs.contains(id) }
 
+    func clearAwaitingFollowup(_ id: String) {
+        awaitingFollowupIDs.remove(id)
+    }
+
     // Cancel ongoing background tasks (fulltext, enrichment, scheduled refreshes, quick pulses).
     // Useful when a heavy modal/sheet is presented and the UI should stay responsive.
     func cancelHeavyWork() {
@@ -387,7 +391,7 @@ final class SessionListViewModel: ObservableObject {
                 Task { [monthStart, dimension] in
                     let precise = await indexer.computeCalendarCounts(
                         root: preferences.sessionsRoot, monthStart: monthStart, dimension: dimension)
-                    await MainActor.run {
+                    Task { @MainActor in
                         self.monthCountsCache[self.cacheKey(monthStart, dimension)] = precise
                     }
                 }

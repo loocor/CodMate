@@ -19,8 +19,6 @@ struct SessionListColumnView: View {
     var isUpdating: ((SessionSummary) -> Bool)? = nil
     // awaiting follow-up probe
     var isAwaitingFollowup: ((SessionSummary) -> Bool)? = nil
-    // open embedded terminal
-    var onOpenEmbedded: ((SessionSummary) -> Void)? = nil
     // notify which item is the user's primary (last clicked) for detail focus
     var onPrimarySelect: ((SessionSummary) -> Void)? = nil
     @EnvironmentObject private var viewModel: SessionListViewModel
@@ -90,11 +88,6 @@ struct SessionListColumnView: View {
                                     if session.source == .codex {
                                         Button { onResume(session) } label: {
                                             Label("Resume", systemImage: "play.fill")
-                                        }
-                                        if let openEmbedded = onOpenEmbedded {
-                                            Button { openEmbedded(session) } label: {
-                                                Label("Open Embedded Terminal", systemImage: "rectangle.badge.plus")
-                                            }
                                         }
                                     }
                                     Divider()
