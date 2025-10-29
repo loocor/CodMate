@@ -358,6 +358,18 @@ final class SessionListViewModel: ObservableObject {
         {
             let counts = countsForLoadedMonth(dimension: dimension)
             monthCountsCache[key] = counts
+            // In Created mode, the currently loaded dataset may only contain a
+            // single day (scope = .day). Schedule a background full-month scan
+            // to replace the approximation so other days populate correctly.
+            if dimension == .created {
+                Task { [monthStart, dimension] in
+                    let precise = await indexer.computeCalendarCounts(
+                        root: preferences.sessionsRoot, monthStart: monthStart, dimension: dimension)
+                    await MainActor.run {
+                        self.monthCountsCache[self.cacheKey(monthStart, dimension)] = precise
+                    }
+                }
+            }
             return counts
         }
         Task { [monthStart, dimension] in
