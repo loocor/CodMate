@@ -121,6 +121,34 @@ extension SessionListViewModel {
         return count
     }
 
+    // Calendar helper: days within the given month that have at least one session
+    // belonging to the currently selected project (including descendants), respecting
+    // each project's allowed sources. Returns nil when no project is selected.
+    func calendarEnabledDaysForSelectedProject(monthStart: Date, dimension: DateDimension) -> Set<Int>? {
+        guard let pid = selectedProjectId else { return nil }
+        let cal = Calendar.current
+
+        // Build allowed project set: include descendants of selected project
+        let descendants = Set(self.collectDescendants(of: pid, in: self.projects))
+        let allowedProjects: Set<String> = Set([pid] + Array(descendants))
+
+        // Resolve allowed sources per project
+        let allowedSourcesByProject = projects.reduce(into: [String: Set<ProjectSessionSource>]()) {
+            $0[$1.id] = $1.sources
+        }
+
+        var days: Set<Int> = []
+        for s in allSessions {
+            guard let assigned = projectMemberships[s.id], allowedProjects.contains(assigned) else { continue }
+            let allowed = allowedSourcesByProject[assigned] ?? ProjectSessionSource.allSet
+            if !allowed.contains(s.source.projectSource) { continue }
+            let ref: Date = (dimension == .created) ? s.startedAt : (s.lastUpdatedAt ?? s.startedAt)
+            guard cal.isDate(ref, equalTo: monthStart, toGranularity: .month) else { continue }
+            days.insert(cal.component(.day, from: ref))
+        }
+        return days
+    }
+
     func allSessionsInSameProject(as anchor: SessionSummary) -> [SessionSummary] {
         if let pid = projectMemberships[anchor.id] {
             let allowed = projects.first(where: { $0.id == pid })?.sources ?? ProjectSessionSource.allSet

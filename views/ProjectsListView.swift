@@ -30,7 +30,7 @@ struct ProjectsListView: View {
                         displayName: displayName(p),
                         visible: pair.visible,
                         total: pair.total,
-                        onNewSession: { viewModel.openNewSession(project: p) },
+                        onNewSession: { viewModel.newSession(project: p) },
                         onEdit: { editingProject = p; showEdit = true },
                         onDelete: { pendingDelete = p; showDeleteConfirm = true }
                     )
@@ -40,7 +40,7 @@ struct ProjectsListView: View {
                     .onTapGesture(count: 2) { editingProject = p; showEdit = true }
                     .onTapGesture { viewModel.setSelectedProject(p.id) }
                     .contextMenu {
-                        Button { viewModel.openNewSession(project: p) } label: {
+                        Button { viewModel.newSession(project: p) } label: {
                             Label("New Session", systemImage: "plus")
                         }
                         Button {

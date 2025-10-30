@@ -64,6 +64,7 @@ final class SessionListViewModel: ObservableObject {
     var notesSnapshot: [String: SessionNote] = [:]
     private var canonicalCwdCache: [String: String] = [:]
     private var directoryMonitor: DirectoryMonitor?
+    private var claudeDirectoryMonitor: DirectoryMonitor?
     private var directoryRefreshTask: Task<Void, Never>?
     private var enrichmentSnapshots: [String: Set<String>] = [:]
     private var suppressFilterNotifications = false
@@ -100,6 +101,14 @@ final class SessionListViewModel: ObservableObject {
     var pendingAssignIntents: [PendingAssignIntent] = []
     var intentsCleanupTask: Task<Void, Never>?
 
+    // Targeted incremental refresh hint, set when user triggers New
+    struct PendingIncrementalRefreshHint {
+        enum Kind { case codexDay(Date), claudeProject(String) }
+        let kind: Kind
+        let expiresAt: Date
+    }
+    private var pendingIncrementalHint: PendingIncrementalRefreshHint? = nil
+
     // Projects
     let configService = CodexConfigService()
     var projectsStore: ProjectsStore
@@ -115,6 +124,8 @@ final class SessionListViewModel: ObservableObject {
             applyFilters()
         }
     }
+    // Sidebar → Project-level New request when using embedded terminal
+    @Published var pendingEmbeddedProjectNew: Project? = nil
 
     init(
         preferences: SessionPreferencesStore,
@@ -142,6 +153,7 @@ final class SessionListViewModel: ObservableObject {
         self.selectedDays = [start]
         suppressFilterNotifications = false
         configureDirectoryMonitor()
+        configureClaudeDirectoryMonitor()
         Task { await loadProjects() }
         // Observe agent completion notifications to surface in list
         NotificationCenter.default.addObserver(
@@ -834,14 +846,39 @@ final class SessionListViewModel: ObservableObject {
         }
     }
 
+    private func configureClaudeDirectoryMonitor() {
+        claudeDirectoryMonitor?.cancel()
+        // Default Claude projects root: ~/.claude/projects
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        let projects = home
+            .appendingPathComponent(".claude", isDirectory: true)
+            .appendingPathComponent("projects", isDirectory: true)
+        guard FileManager.default.fileExists(atPath: projects.path) else {
+            claudeDirectoryMonitor = nil
+            return
+        }
+        claudeDirectoryMonitor = DirectoryMonitor(url: projects) { [weak self] in
+            Task { @MainActor in
+                // Only perform targeted incremental refresh when we have a matching hint
+                if let hint = self?.pendingIncrementalHint, Date() < (hint.expiresAt) {
+                    await self?.refreshIncremental(using: hint)
+                }
+            }
+        }
+    }
+
     private func scheduleDirectoryRefresh() {
         directoryRefreshTask?.cancel()
         directoryRefreshTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 400_000_000)
             guard !Task.isCancelled else { return }
             guard let self else { return }
-            self.enrichmentSnapshots.removeAll()
-            await self.refreshSessions(force: true)
+            if let hint = self.pendingIncrementalHint, Date() < hint.expiresAt {
+                await self.refreshIncremental(using: hint)
+            } else {
+                self.enrichmentSnapshots.removeAll()
+                await self.refreshSessions(force: true)
+            }
         }
     }
 
@@ -921,6 +958,62 @@ final class SessionListViewModel: ObservableObject {
         let comps = calendar.dateComponents([.year, .month], from: day)
         guard let year = comps.year, let month = comps.month else { return nil }
         return "\(dimension.rawValue)|\(year)-\(month)"
+    }
+
+    // MARK: - Incremental refresh for New
+    func setIncrementalHintForCodexToday(window seconds: TimeInterval = 10) {
+        let day = Calendar.current.startOfDay(for: Date())
+        pendingIncrementalHint = PendingIncrementalRefreshHint(
+            kind: .codexDay(day), expiresAt: Date().addingTimeInterval(seconds))
+    }
+
+    func setIncrementalHintForClaudeProject(directory: String, window seconds: TimeInterval = 10) {
+        pendingIncrementalHint = PendingIncrementalRefreshHint(
+            kind: .claudeProject(Self.canonicalPath(directory)),
+            expiresAt: Date().addingTimeInterval(seconds))
+    }
+
+    private func mergeAndApply(_ subset: [SessionSummary]) {
+        guard !subset.isEmpty else { return }
+        var map = Dictionary(uniqueKeysWithValues: allSessions.map { ($0.id, $0) })
+        let previousIDs = Set(allSessions.map { $0.id })
+        for var s in subset {
+            if let note = notesSnapshot[s.id] {
+                s.userTitle = note.title
+                s.userComment = note.comment
+            }
+            map[s.id] = s
+            if !previousIDs.contains(s.id) { self.handleAutoAssignIfMatches(s) }
+        }
+        allSessions = Array(map.values)
+        rebuildCanonicalCwdCache()
+        applyFilters()
+    }
+
+    private func dayOfToday() -> Date { Calendar.current.startOfDay(for: Date()) }
+
+    func refreshIncrementalForNewCodexToday() async {
+        do {
+            let subset = try await indexer.refreshSessions(
+                root: preferences.sessionsRoot, scope: .day(dayOfToday()))
+            await MainActor.run { self.mergeAndApply(subset) }
+        } catch {
+            // Swallow errors for incremental path; full refresh will recover if needed.
+        }
+    }
+
+    func refreshIncrementalForClaudeProject(directory: String) async {
+        let subset = await claudeProvider.sessions(inProjectDirectory: directory)
+        await MainActor.run { self.mergeAndApply(subset) }
+    }
+
+    private func refreshIncremental(using hint: PendingIncrementalRefreshHint) async {
+        switch hint.kind {
+        case .codexDay:
+            await refreshIncrementalForNewCodexToday()
+        case .claudeProject(let dir):
+            await refreshIncrementalForClaudeProject(directory: dir)
+        }
     }
 
     private func countsForLoadedMonth(dimension: DateDimension) -> [Int: Int] {

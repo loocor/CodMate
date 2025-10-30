@@ -151,12 +151,65 @@ extension SessionListViewModel {
         )
     }
 
-    func openNewSession(project: Project) {
-        _ = actions.openNewProject(
+    /// Unified Project "New Session" entry. Respects embedded/external preference
+    /// to reduce branching between Sidebar and Detail flows.
+    func newSession(project: Project) {
+        // Record intent so the new session can be auto-assigned to this project
+        recordIntentForProjectNew(project: project)
+
+        if preferences.defaultResumeUseEmbeddedTerminal {
+            // Embedded terminal path: signal ContentView to start an embedded
+            // shell anchored to this project and perform targeted refresh.
+            pendingEmbeddedProjectNew = project
+            setIncrementalHintForCodexToday()
+            // Also broadcast a notification for robustness across views
+            NotificationCenter.default.post(
+                name: .codMateStartEmbeddedNewProject,
+                object: nil,
+                userInfo: ["projectId": project.id]
+            )
+            Task { await SystemNotifier.shared.notify(title: "CodMate", body: "Starting embedded New…") }
+            return
+        }
+
+        // External terminal path: copy command and open preferred terminal.
+        actions.copyNewProjectCommands(
             project: project,
             executableURL: preferredExecutableURL(for: .codex),
             options: preferences.resumeOptions
         )
+
+        // Resolve preferred external terminal and open at the project directory
+        let app = preferences.defaultResumeExternalApp
+        let dir: String = {
+            let d = (project.directory ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            return d.isEmpty ? NSHomeDirectory() : d
+        }()
+
+        switch app {
+        case .iterm2:
+            // Build inline invocation for iTerm scheme and launch directly
+            let cmd = actions.buildNewProjectCLIInvocation(project: project, options: preferences.resumeOptions)
+            openPreferredTerminalViaScheme(app: .iterm2, directory: dir, command: cmd)
+        case .warp:
+            // Warp scheme cannot run a command; open path only and rely on clipboard
+            openPreferredTerminalViaScheme(app: .warp, directory: dir)
+        case .terminal:
+            // Fallback: open Apple Terminal at directory; user pastes from clipboard
+            _ = openAppleTerminal(at: dir)
+        case .none:
+            break
+        }
+
+        // Friendly nudge so users know the command was placed on clipboard
+        Task {
+            await SystemNotifier.shared.notify(
+                title: "CodMate", body: "Command copied. Paste it in the opened terminal.")
+        }
+
+        // Event-driven incremental refresh hint + proactive targeted refresh for today
+        setIncrementalHintForCodexToday()
+        Task { await self.refreshIncrementalForNewCodexToday() }
     }
 
     /// Build CLI invocation, respecting project profile if applicable.

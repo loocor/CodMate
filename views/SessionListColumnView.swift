@@ -41,13 +41,31 @@ struct SessionListColumnView: View {
 
             if sections.isEmpty && !isLoading {
                 // Center the empty state within the middle column area.
-                VStack {
+                VStack(spacing: 12) {
                     Spacer(minLength: 12)
                     ContentUnavailableView(
                         "No Sessions", systemImage: "tray",
                         description: Text(
                             "Adjust directories or launch Codex CLI to generate new session logs."))
                         .frame(maxWidth: .infinity)
+
+                    // Primary action: New Session (mirrors Sidebar › Project row › New Session)
+                    let selected = selectedProject()
+                    Button {
+                        if let p = selected {
+                            viewModel.newSession(project: p)
+                        }
+                    } label: {
+                        Label("New Session", systemImage: "plus")
+                            .frame(minWidth: 140)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.regular)
+                    .disabled(selected == nil)
+                    .help(selected == nil
+                          ? "Select a project in the sidebar to start a new session"
+                          : "Start a new session in \(projectDisplayName(selected!))")
+
                     Spacer()
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -174,6 +192,21 @@ struct SessionListColumnView: View {
 }
 
 extension SessionListColumnView {
+    private func selectedProject() -> Project? {
+        guard let pid = viewModel.selectedProjectId else { return nil }
+        return viewModel.projects.first(where: { $0.id == pid })
+    }
+
+    private func projectDisplayName(_ p: Project) -> String {
+        let trimmed = p.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty { return trimmed }
+        if let dir = p.directory, !dir.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            let base = URL(fileURLWithPath: dir, isDirectory: true).lastPathComponent
+            return base.isEmpty ? p.id : base
+        }
+        return p.id
+    }
+
     func selectionContains(_ id: SessionSummary.ID) -> Bool {
         selection.contains(id)
     }
