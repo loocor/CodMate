@@ -6,6 +6,10 @@ macOS SwiftUI app to browse, search, and resume Codex CLI sessions. It indexes `
 
 Status: macOS 15+, Swift 6, Xcode 16. Universal binary (arm64 + x86_64).
 
+## Download
+- Latest release (DMG): https://github.com/loocor/CodMate/releases/latest
+
+
 ## Features
 - Sidebar (Projects + Calendar)
   - Projects list with counts and a fixed “All” row; “New Project” sheet for name, directory, overview/instructions, and optional profile.
