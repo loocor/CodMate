@@ -16,6 +16,21 @@ struct ClaudeSessionParser {
         self.decoder = decoder
     }
 
+    /// Fast path: extract sessionId by scanning until a line that carries it.
+    /// Avoids doing full conversion work. Returns nil if not found.
+    func fastSessionId(at url: URL) -> String? {
+        guard let data = try? Data(contentsOf: url, options: [.mappedIfSafe]), !data.isEmpty else {
+            return nil
+        }
+        for var slice in data.split(separator: newline, omittingEmptySubsequences: true).prefix(256) {
+            if slice.last == carriageReturn { slice = slice.dropLast() }
+            guard !slice.isEmpty else { continue }
+            guard let line = decodeLine(Data(slice)) else { continue }
+            if let sid = line.sessionId, !sid.isEmpty { return sid }
+        }
+        return nil
+    }
+
     func parse(at url: URL, fileSize: UInt64? = nil) -> ClaudeParsedLog? {
         guard let data = try? Data(contentsOf: url, options: [.mappedIfSafe]),
               !data.isEmpty else { return nil }
