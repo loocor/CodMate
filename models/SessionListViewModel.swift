@@ -581,8 +581,8 @@ final class SessionListViewModel: ObservableObject {
             }
         }
 
-        // 5. Sorting
-        filtered = sortOrder.sort(filtered)
+        // 5. Sorting (dimension-aware for Recent)
+        filtered = sortOrder.sort(filtered, dimension: dateDimension)
 
         // 6. Grouping
         sections = Self.groupSessions(filtered, dimension: dateDimension)
@@ -599,9 +599,15 @@ final class SessionListViewModel: ObservableObject {
 
         var grouped: [Date: [SessionSummary]] = [:]
         for session in sessions {
-            // Always group by creation date (startedAt), regardless of dimension
-            // The dimension only affects filtering, not grouping
-            let referenceDate = session.startedAt
+            // Grouping honors the selected calendar dimension:
+            // - Created: group by startedAt
+            // - Last Updated: group by lastUpdatedAt (fallback to startedAt)
+            let referenceDate: Date = {
+                switch dimension {
+                case .created: return session.startedAt
+                case .updated: return session.lastUpdatedAt ?? session.startedAt
+                }
+            }()
             let day = calendar.startOfDay(for: referenceDate)
             grouped[day, default: []].append(session)
         }

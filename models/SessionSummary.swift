@@ -227,6 +227,24 @@ enum SessionSortOrder: String, CaseIterable, Identifiable {
             return sessions.sorted { ($0.fileSizeBytes ?? 0) > ($1.fileSizeBytes ?? 0) }
         }
     }
+
+    // Dimension-aware sorting variant used by the middle list. For "Recent",
+    // order by created vs. last-updated depending on the calendar mode; other
+    // sort orders fall back to the default behavior above.
+    func sort(_ sessions: [SessionSummary], dimension: DateDimension) -> [SessionSummary] {
+        switch self {
+        case .mostRecent:
+            let key: (SessionSummary) -> Date = {
+                switch dimension {
+                case .created: return $0.startedAt
+                case .updated: return $0.lastUpdatedAt ?? $0.startedAt
+                }
+            }
+            return sessions.sorted { key($0) > key($1) }
+        default:
+            return sort(sessions)
+        }
+    }
 }
 
 struct SessionDaySection: Identifiable, Hashable {
