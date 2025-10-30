@@ -66,12 +66,34 @@ actor MCPServersStore {
         try save(sorted)
     }
 
-    // Export enabled servers to a JSON file usable by Claude Code via --mcp-config
-    func exportEnabledForClaudeConfig() -> URL? {
+    // Export enabled servers to Claude Code config file (~/.claude.json)
+    // Claude Code accepts MCP configuration from:
+    // 1. ~/.claude.json (user-level config for all projects)
+    // 2. <project>/.mcp.json (project-shared config via git)
+    // 3. ~/.claude.json with project-specific overrides
+    //
+    // Safety strategy:
+    // - Only modifies the "mcpServers" field
+    // - Preserves all other existing configuration
+    // - Creates backup before writing
+    // - Uses atomic write to prevent partial corruption
+    func exportEnabledForClaudeConfig() throws {
         let list = load().filter { $0.enabled }
-        guard !list.isEmpty else { return nil }
-        let out = paths.home.appendingPathComponent("mcp-enabled-claude.json")
-        var obj: [String: Any] = [:]
+        let claudeConfigPath = fm.homeDirectoryForCurrentUser.appendingPathComponent(".claude.json")
+
+        // Step 1: Load existing config or create empty object
+        var existingConfig: [String: Any] = [:]
+        var existingData: Data? = nil
+
+        if fm.fileExists(atPath: claudeConfigPath.path) {
+            existingData = try? Data(contentsOf: claudeConfigPath)
+            if let data = existingData,
+               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                existingConfig = json
+            }
+        }
+
+        // Step 2: Build mcpServers object
         var serversObj: [String: Any] = [:]
         for s in list {
             var entry: [String: Any] = [:]
@@ -82,13 +104,23 @@ actor MCPServersStore {
             if let headers = s.headers { entry["headers"] = headers }
             serversObj[s.name] = entry
         }
-        obj["mcpServers"] = serversObj
-        if let data = try? JSONSerialization.data(withJSONObject: obj, options: [.prettyPrinted]) {
-            try? fm.createDirectory(at: paths.home, withIntermediateDirectories: true)
-            try? data.write(to: out, options: .atomic)
-            return out
+
+        // Step 3: Update or remove mcpServers key
+        if serversObj.isEmpty {
+            existingConfig.removeValue(forKey: "mcpServers")
+        } else {
+            existingConfig["mcpServers"] = serversObj
         }
-        return nil
+
+        // Step 4: Create backup if file exists
+        if let backupData = existingData {
+            let backupPath = claudeConfigPath.appendingPathExtension("backup")
+            try? backupData.write(to: backupPath, options: .atomic)
+        }
+
+        // Step 5: Write atomically to ~/.claude.json
+        let data = try JSONSerialization.data(withJSONObject: existingConfig, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
+        try data.write(to: claudeConfigPath, options: .atomic)
     }
 
     func delete(name: String) throws {

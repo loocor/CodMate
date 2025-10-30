@@ -383,8 +383,8 @@ private func applyEnabledServersToCodex() async {
         let list = await store.list()
         let codex = CodexConfigService()
         try? await codex.applyMCPServers(list)
-        // Keep Claude Code JSON in sync so Raw Config can preview path
-        let _ = await store.exportEnabledForClaudeConfig()
+        // Export to Claude Code config (~/.claude.json)
+        try? await store.exportEnabledForClaudeConfig()
     }
 }
 

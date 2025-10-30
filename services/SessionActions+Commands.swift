@@ -74,11 +74,9 @@ extension SessionActions {
             }
             if options.claudeIDE { args.append("--ide") }
             if options.claudeStrictMCP { args.append("--strict-mcp-config") }
-            // Attach MCP servers config file (enabled only)
+            // Export MCP servers to ~/.claude.json (Claude Code auto-loads from there)
             let mcpStore = MCPServersStore()
-            if let cfg = await mcpStore.exportEnabledForClaudeConfig() {
-                args.append(contentsOf: ["--mcp-config", cfg.path])
-            }
+            try? await mcpStore.exportEnabledForClaudeConfig()
             if let fb = options.claudeFallbackModel, !fb.isEmpty { args.append(contentsOf: ["--fallback-model", fb]) }
         }
         
