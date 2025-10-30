@@ -50,4 +50,5 @@ nonisolated extension SystemNotifier: UNUserNotificationCenterDelegate {
 
 extension Notification.Name {
     static let codMateAgentCompleted = Notification.Name("CodMate.AgentCompleted")
+    static let codMateStartEmbeddedNewProject = Notification.Name("CodMate.StartEmbeddedNewProject")
 }
