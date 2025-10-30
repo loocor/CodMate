@@ -239,35 +239,10 @@ struct ClaudeCodeSettingsView: View {
         }
     }
 
-    // MARK: - Runtime (combined permissions + advanced)
+    // MARK: - Runtime (Claude-native)
     private var runtimePane: some View {
         Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 14) {
-            GridRow {
-                VStack(alignment: .leading, spacing: 0) {
-                    Text("Sandbox").font(.subheadline).fontWeight(.medium)
-                    Text("Applies to sessions launched from CodMate.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-                Picker("", selection: $preferences.defaultResumeSandboxMode) {
-                    ForEach(SandboxMode.allCases) { Text($0.rawValue).tag($0) }
-                }
-                .labelsHidden()
-                .frame(maxWidth: .infinity, alignment: .trailing)
-            }
-            gridDivider
-            GridRow {
-                VStack(alignment: .leading, spacing: 0) {
-                    Text("Approvals").font(.subheadline).fontWeight(.medium)
-                    Text("Default approval policy for actions.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-                Picker("", selection: $preferences.defaultResumeApprovalPolicy) {
-                    ForEach(ApprovalPolicy.allCases) { Text($0.rawValue).tag($0) }
-                }
-                .labelsHidden()
-                .frame(maxWidth: .infinity, alignment: .trailing)
-            }
-            // Shortcuts specific to Codex (Full-auto / Danger bypass) are intentionally not shown in Claude Code settings
+            // Claude-native permission mode
             GridRow {
                 VStack(alignment: .leading, spacing: 0) {
                     Text("Permission Mode").font(.subheadline).fontWeight(.medium)
@@ -279,6 +254,26 @@ struct ClaudeCodeSettingsView: View {
                 }
                 .labelsHidden()
                 .frame(maxWidth: .infinity, alignment: .trailing)
+            }
+            gridDivider
+            // Dangerous permission skips (explicit)
+            GridRow {
+                VStack(alignment: .leading, spacing: 0) {
+                    Text("Skip Permissions (Dangerous)").font(.subheadline).fontWeight(.medium)
+                    Text("Bypass permission prompts; use with caution.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Toggle("Enable", isOn: $preferences.claudeSkipPermissions)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+            }
+            GridRow {
+                VStack(alignment: .leading, spacing: 0) {
+                    Text("Allow Skip Permissions").font(.subheadline).fontWeight(.medium)
+                    Text("Permit using the dangerous skip flag.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Toggle("Enable", isOn: $preferences.claudeAllowSkipPermissions)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
             }
             gridDivider
             GridRow {
@@ -297,7 +292,7 @@ struct ClaudeCodeSettingsView: View {
             gridDivider
             GridRow {
                 VStack(alignment: .leading, spacing: 0) {
-                    Text("Verbose").font(.subheadline).fontWeight(.medium)
+                    Text("Verbose Output").font(.subheadline).fontWeight(.medium)
                     Text("Override verbose mode from config.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
