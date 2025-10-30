@@ -132,12 +132,30 @@ import SwiftUI
 
         private func attachTerminalIfNeeded(in container: NSView, coordinator: Coordinator) {
             coordinator.container = container
+
+            // Fast-path: if we're already showing this terminal, just refresh theme and return
+            if let existing = coordinator.terminal,
+               existing.superview === container,
+               let existingKey = (existing as? CodMateTerminalView)?.sessionID,
+               existingKey == terminalKey {
+                // Terminal already attached, just update theme and font if changed
+                if existing.font != font {
+                    existing.font = font
+                }
+                applyTheme(existing)
+                coordinator.scheduleRelayout(existing)
+                return
+            }
+
+            // Get or create terminal view from manager (reuses existing if available)
             let v = TerminalSessionManager.shared.view(
                 for: terminalKey, initialCommands: initialCommands, font: font)
             applyTheme(v)
             v.disableBuiltInScroller()
             // Freeze grid reflow during live-resize; reflow once at the end to avoid duplicate/garbled text
             v.deferReflowDuringLiveResize = true
+
+            // Detach and reattach if this terminal is in a different container
             if v.superview !== container {
                 v.removeFromSuperview()
                 v.translatesAutoresizingMaskIntoConstraints = false

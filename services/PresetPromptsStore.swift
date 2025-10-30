@@ -194,7 +194,7 @@ actor PresetPromptsStore {
 
     @discardableResult
     func addHidden(command: String, for workingDirectory: String?) -> URL? {
-        let fm = FileManager.default
+        let _ = FileManager.default
         // Prefer project-level hidden when project file exists; else user-level
         let preferredProject = projectFileExists(for: workingDirectory)
         let url = preferredProject ? projectHiddenURL(for: workingDirectory!) : userHiddenURL()
