@@ -4,6 +4,9 @@ struct CalendarMonthView: View {
     let monthStart: Date
     let counts: [Int: Int]
     let selectedDays: Set<Date>
+    // When provided, days not in this set will have their count text dimmed
+    // to indicate no sessions for the currently selected project on that day.
+    let enabledDays: Set<Int>?
     let onSelectDay: (Date) -> Void
 
     var body: some View {
@@ -94,7 +97,11 @@ struct CalendarMonthView: View {
             }
 
             if day > 0, let count = counts[day], count > 0 {
-                sessionCount(count: count)
+                let dimmed: Bool = {
+                    guard let enabledDays else { return false }
+                    return !enabledDays.contains(day)
+                }()
+                sessionCount(count: count, dimmed: dimmed)
             }
         }
         .overlay(
@@ -110,14 +117,14 @@ struct CalendarMonthView: View {
             .padding(4)
     }
 
-    private func sessionCount(count: Int) -> some View {
+    private func sessionCount(count: Int, dimmed: Bool) -> some View {
         VStack {
             Spacer()
             HStack {
                 Spacer()
                 Text("\(count)")
                     .font(.body.bold())
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(dimmed ? Color.secondary.opacity(0.5) : Color.primary)
                     .padding(4)
             }
         }
@@ -170,7 +177,8 @@ struct CalendarMonthView: View {
     return CalendarMonthView(
         monthStart: monthStart,
         counts: mockCounts,
-        selectedDays: [calendar.date(from: DateComponents(year: 2024, month: 12, day: 15))!]
+        selectedDays: [calendar.date(from: DateComponents(year: 2024, month: 12, day: 15))!],
+        enabledDays: nil
     ) { selectedDay in
         print("Selected day: \(selectedDay)")
     }
