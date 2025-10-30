@@ -21,6 +21,9 @@ struct ContentView: View {
     @State private var showNewWithContext = false
     // When starting embedded sessions, record the initial command lines per-session
     @State private var embeddedInitialCommands: [SessionSummary.ID: String] = [:]
+    // Confirm stopping a running embedded terminal
+    private struct ConfirmStopState: Identifiable { let id = UUID(); let sessionId: String }
+    @State private var confirmStopState: ConfirmStopState? = nil
     // Prompt picker state for embedded terminal quick-insert
     @State private var showPromptPicker = false
     @State private var promptQuery = ""
@@ -34,13 +37,13 @@ struct ContentView: View {
         var source: Source
         var label: String { prompt.label }
         var command: String { prompt.command }
-        
+
         // Custom Hashable implementation to hash based on content, not UUID
         func hash(into hasher: inout Hasher) {
             hasher.combine(prompt)
             hasher.combine(source)
         }
-        
+
         static func == (lhs: SourcedPrompt, rhs: SourcedPrompt) -> Bool {
             lhs.prompt == rhs.prompt && lhs.source == rhs.source
         }
@@ -85,6 +88,7 @@ struct ContentView: View {
         let anchorId: String
         let expectedCwd: String
         let t0: Date
+        let selectOnSuccess: Bool
     }
     @State private var pendingEmbeddedRekeys: [PendingEmbeddedRekey] = []
     // Provide a simple font chooser that prefers CJK-capable monospace
@@ -148,10 +152,43 @@ struct ContentView: View {
             alertState = AlertState(title: "Operation Failed", message: message)
             viewModel.errorMessage = nil
         }
+        .onChange(of: viewModel.pendingEmbeddedProjectNew) { _, project in
+            guard let project else { return }
+            // Start an embedded terminal for project-level New
+            startEmbeddedNewForProject(project)
+            // Clear one-shot request
+            viewModel.pendingEmbeddedProjectNew = nil
+        }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 refreshToolbarContent
             }
+        }
+        // Fallback event bus: react to embedded New for project even if binding changes are coalesced
+        .onReceive(NotificationCenter.default.publisher(for: .codMateStartEmbeddedNewProject)) { note in
+            if let pid = note.userInfo?["projectId"] as? String,
+               let project = viewModel.projects.first(where: { $0.id == pid }) {
+                startEmbeddedNewForProject(project)
+            }
+        }
+        // Confirm stopping a running embedded session (place before any .alert modifiers)
+        .confirmationDialog(
+            "Stop running session?",
+            isPresented: Binding<Bool>(
+                get: { confirmStopState != nil },
+                set: { if !$0 { confirmStopState = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Stop", role: .destructive) {
+                if let st = confirmStopState {
+                    stopEmbedded(forID: st.sessionId)
+                    confirmStopState = nil
+                }
+            }
+            Button("Cancel", role: .cancel) { confirmStopState = nil }
+        } message: {
+            Text("The embedded terminal appears to be running. Stopping now will terminate the current Codex/Claude task.")
         }
         .alert(item: $alertState) { state in
             Alert(
@@ -261,41 +298,49 @@ struct ContentView: View {
             Divider()
 
             Group {
-                if let focused = focusedSummary {
-                    if runningSessionIDs.contains(focused.id) {
-                        TerminalHostView(
-                            terminalKey: focused.id,
-                            initialCommands: embeddedInitialCommands[focused.id]
-                                ?? viewModel.buildResumeCommands(session: focused),
-                            font: makeTerminalFont(size: 12),
-                            isDark: colorScheme == .dark
-                        )
-                        .id(focused.id)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .padding(.horizontal, 16)
-                        // Left list acts as the terminal switcher across sessions
-                    } else {
-                        SessionDetailView(
-                            summary: focused,
-                            isProcessing: isPerformingAction,
-                            onResume: {
-                                guard let current = focusedSummary else { return }
-                                if viewModel.preferences.defaultResumeUseEmbeddedTerminal {
-                                    startEmbedded(for: current)
-                                } else {
-                                    openPreferredExternal(for: current)
-                                }
-                            },
-                            onReveal: {
-                                guard let current = focusedSummary else { return }
-                                viewModel.reveal(session: current)
-                            },
-                            onDelete: presentDeleteConfirmation,
-                            columnVisibility: $columnVisibility
-                        )
-                        .environmentObject(viewModel)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                    }
+                if let focused = focusedSummary, runningSessionIDs.contains(focused.id) {
+                    TerminalHostView(
+                        terminalKey: focused.id,
+                        initialCommands: embeddedInitialCommands[focused.id]
+                            ?? viewModel.buildResumeCommands(session: focused),
+                        font: makeTerminalFont(size: 12),
+                        isDark: colorScheme == .dark
+                    )
+                    .id(focused.id)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .padding(.horizontal, 16)
+                } else if let anchorId = fallbackRunningAnchorId() {
+                    // Fallback: show virtual-anchor terminal even when no focused session is running
+                    TerminalHostView(
+                        terminalKey: anchorId,
+                        initialCommands: embeddedInitialCommands[anchorId] ?? "",
+                        font: makeTerminalFont(size: 12),
+                        isDark: colorScheme == .dark
+                    )
+                    .id(anchorId)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .padding(.horizontal, 16)
+                } else if let focused = focusedSummary {
+                    SessionDetailView(
+                        summary: focused,
+                        isProcessing: isPerformingAction,
+                        onResume: {
+                            guard let current = focusedSummary else { return }
+                            if viewModel.preferences.defaultResumeUseEmbeddedTerminal {
+                                startEmbedded(for: current)
+                            } else {
+                                openPreferredExternal(for: current)
+                            }
+                        },
+                        onReveal: {
+                            guard let current = focusedSummary else { return }
+                            viewModel.reveal(session: current)
+                        },
+                        onDelete: presentDeleteConfirmation,
+                        columnVisibility: $columnVisibility
+                    )
+                    .environmentObject(viewModel)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 } else {
                     placeholder
                 }
@@ -701,9 +746,12 @@ struct ContentView: View {
 
                 if let focused = focusedSummary, runningSessionIDs.contains(focused.id) {
                     // Place the return button at the far right by making it the last item
-                    Button {
-                        stopEmbedded(forID: focused.id)
-                    } label: {
+                    Button { requestStopEmbedded(forID: focused.id) } label: {
+                        Image(systemName: "arrow.uturn.backward")
+                    }
+                    .help("Return to history")
+                } else if let anchor = fallbackRunningAnchorId() {
+                    Button { requestStopEmbedded(forID: anchor) } label: {
                         Image(systemName: "arrow.uturn.backward")
                     }
                     .help("Return to history")
@@ -798,6 +846,10 @@ struct ContentView: View {
         Task {
             await viewModel.delete(summaries: summaries)
             await MainActor.run {
+                // Best-effort: stop any embedded terminals for deleted sessions
+                #if canImport(SwiftTerm)
+                    for s in summaries { TerminalSessionManager.shared.stop(key: s.id) }
+                #endif
                 isPerformingAction = false
                 selection.subtract(ids)
                 normalizeSelection()
@@ -829,6 +881,41 @@ struct ContentView: View {
         if runningSessionIDs.isEmpty {
             isDetailMaximized = false
             columnVisibility = .all
+        }
+    }
+
+    private func isTerminalLikelyRunning(forID id: SessionSummary.ID) -> Bool {
+        // Multi-layer detection for more accurate running state:
+        // 1. Check if terminal manager reports a running process
+        #if canImport(SwiftTerm)
+        if TerminalSessionManager.shared.hasRunningProcess(key: id) {
+            return true
+        }
+        #endif
+
+        // 2. Check if this is a pending new session (anchor awaiting rekey)
+        if pendingEmbeddedRekeys.contains(where: { $0.anchorId == id }) {
+            return true
+        }
+
+        // 3. Check recent file activity heartbeat (session actively writing)
+        if viewModel.isActivelyUpdating(id) {
+            return true
+        }
+
+        return false
+    }
+
+    private func requestStopEmbedded(forID id: SessionSummary.ID) {
+        // Always check current running state before showing confirmation
+        let isRunning = isTerminalLikelyRunning(forID: id)
+
+        if isRunning {
+            // Show confirmation dialog for running sessions
+            confirmStopState = ConfirmStopState(sessionId: id)
+        } else {
+            // Directly stop if not running
+            stopEmbedded(forID: id)
         }
     }
 
@@ -868,14 +955,72 @@ struct ContentView: View {
         // avoids reflow artifacts and isolates scrollback while the new session runs.
         let preclear = "printf '\\033[?1049h\\033[H\\033[2J'"
 
-        embeddedInitialCommands[target.id] =
+        // Use virtual anchor id to avoid hijacking an existing session's running state
+        let anchorId = "new-anchor:detail:\(target.id):\(Int(Date().timeIntervalSince1970)))"
+        embeddedInitialCommands[anchorId] =
             preclear + "\n" + cd + "\n" + exports + "\n" + command + "\n"
-        runningSessionIDs.insert(target.id)
+        runningSessionIDs.insert(anchorId)
         // Record pending rekey so that when the new session appears, we can move this PTY to the real id
         pendingEmbeddedRekeys.append(
             PendingEmbeddedRekey(
-                anchorId: target.id, expectedCwd: canonicalizePath(cwd), t0: Date())
+                anchorId: anchorId, expectedCwd: canonicalizePath(cwd), t0: Date(), selectOnSuccess: true)
         )
+        // Event-driven incremental refresh: set a hint so directory monitor triggers a targeted refresh
+        if target.source == .codex {
+            viewModel.setIncrementalHintForCodexToday()
+        } else {
+            viewModel.setIncrementalHintForClaudeProject(directory: cwd)
+        }
+        // Proactively trigger a targeted incremental refresh for immediate visibility
+        Task {
+            if target.source == .codex {
+                await viewModel.refreshIncrementalForNewCodexToday()
+            } else {
+                await viewModel.refreshIncrementalForClaudeProject(directory: cwd)
+            }
+        }
+        // Ensure terminal is visible
+        isDetailMaximized = true
+        columnVisibility = .detailOnly
+    }
+
+    private func startEmbeddedNewForProject(_ project: Project) {
+        // Build 'new project' invocation and inject into embedded terminal
+        let dir: String = {
+            let d = (project.directory ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            return d.isEmpty ? NSHomeDirectory() : d
+        }()
+        let cd = "cd " + shellEscapeForCD(dir)
+        let injectedPATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:${PATH}"
+        var exportLines = [
+            "export LANG=zh_CN.UTF-8",
+            "export LC_ALL=zh_CN.UTF-8",
+            "export LC_CTYPE=zh_CN.UTF-8",
+            "export TERM=xterm-256color",
+            // Always Codex for project New currently
+            "export CODEX_DISABLE_COLOR_QUERY=1",
+        ]
+        let exports = exportLines.joined(separator: "; ")
+        let invocation = viewModel.buildNewProjectCLIInvocation(project: project)
+        let command = "PATH=\(injectedPATH) \(invocation)"
+        let preclear = "printf '\\033[?1049h\\033[H\\033[2J'"
+
+        // Always use a virtual anchor for project-level New
+        let anchorId = "new-anchor:project:\(project.id):\(Int(Date().timeIntervalSince1970)))"
+        embeddedInitialCommands[anchorId] = preclear + "\n" + cd + "\n" + exports + "\n" + command + "\n"
+        runningSessionIDs.insert(anchorId)
+        // Pending rekey: when the new session lands under this cwd, move PTY to the real id
+        pendingEmbeddedRekeys.append(
+            PendingEmbeddedRekey(
+                anchorId: anchorId, expectedCwd: canonicalizePath(dir), t0: Date(), selectOnSuccess: true)
+        )
+        // Event-driven incremental refresh: scoped to today's Codex folder
+        viewModel.setIncrementalHintForCodexToday()
+        // Proactively refresh today's subset so the new item appears quickly
+        Task { await viewModel.refreshIncrementalForNewCodexToday() }
+        // Maximize detail to show embedded terminal
+        isDetailMaximized = true
+        columnVisibility = .detailOnly
     }
 
     private func openPreferredExternal(for session: SessionSummary) {
@@ -904,6 +1049,20 @@ struct ContentView: View {
         viewModel.recordIntentForDetailNew(anchor: session)
         let app = viewModel.preferences.defaultResumeExternalApp
         let dir = workingDirectory(for: session)
+        // Event hint for targeted incremental refresh on FS change
+        if session.source == .codex {
+            viewModel.setIncrementalHintForCodexToday()
+        } else {
+            viewModel.setIncrementalHintForClaudeProject(directory: dir)
+        }
+        // Also proactively refresh the targeted subset for faster UI update
+        Task {
+            if session.source == .codex {
+                await viewModel.refreshIncrementalForNewCodexToday()
+            } else {
+                await viewModel.refreshIncrementalForClaudeProject(directory: dir)
+            }
+        }
         switch app {
         case .iterm2:
             let cmd = viewModel.buildNewSessionCLIInvocationRespectingProject(session: session)
@@ -1060,6 +1219,15 @@ extension ContentView {
         return standardized
     }
 
+    // Return a virtual-anchor id if any is running (no real focused session ties)
+    private func fallbackRunningAnchorId() -> String? {
+        let realIds = Set(summaryLookup.keys)
+        // Prefer explicit new-anchor keys
+        if let id = runningSessionIDs.first(where: { $0.hasPrefix("new-anchor:") }) { return id }
+        // Otherwise any running id that is not a current summary (e.g., synthetic or stale)
+        return runningSessionIDs.first(where: { !realIds.contains($0) })
+    }
+
     private func reconcilePendingEmbeddedRekeys() {
         guard !pendingEmbeddedRekeys.isEmpty else { return }
         let all = viewModel.sections.flatMap(\.sessions)
@@ -1086,11 +1254,20 @@ extension ContentView {
                     runningSessionIDs.remove(pending.anchorId)
                     runningSessionIDs.insert(winner.id)
                 }
-                if selection.contains(pending.anchorId) {
+                if pending.selectOnSuccess || selection.contains(pending.anchorId) {
                     selection = [winner.id]
                 }
             } else {
-                if now.timeIntervalSince(pending.t0) < 180 { remaining.append(pending) }
+                if now.timeIntervalSince(pending.t0) < 180 {
+                    remaining.append(pending)
+                } else {
+                    // Timeout: stop the anchor terminal to avoid lingering shells
+                    #if canImport(SwiftTerm)
+                        TerminalSessionManager.shared.stop(key: pending.anchorId)
+                    #endif
+                    runningSessionIDs.remove(pending.anchorId)
+                    embeddedInitialCommands.removeValue(forKey: pending.anchorId)
+                }
             }
         }
         pendingEmbeddedRekeys = remaining

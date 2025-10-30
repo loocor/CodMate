@@ -6,6 +6,9 @@ import SwiftUI
 
 @main
 struct CodMateApp: App {
+    #if os(macOS)
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+    #endif
     @StateObject private var listViewModel: SessionListViewModel
     @StateObject private var preferences: SessionPreferencesStore
     @State private var settingsSelection: SettingCategory = .general
@@ -76,3 +79,43 @@ private struct SettingsWindowContainer: View {
             .environmentObject(listViewModel)
     }
 }
+
+#if os(macOS)
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationWillTerminate(_ notification: Notification) {
+        #if canImport(SwiftTerm)
+            // Synchronously stop all terminal sessions to ensure clean exit
+            // This prevents orphaned codex/claude processes when app quits
+            let manager = TerminalSessionManager.shared
+
+            // Use sync mode to block until all processes are killed
+            // This ensures no orphaned processes when app terminates
+            manager.stopAll(withPrefix: "", sync: true)
+
+            // No sleep needed - sync mode blocks until processes are dead
+        #endif
+    }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        #if canImport(SwiftTerm)
+            // Check if there are any running terminal sessions
+            let manager = TerminalSessionManager.shared
+            if manager.hasAnyRunningProcesses() {
+                // Show confirmation dialog
+                let alert = NSAlert()
+                alert.messageText = "Stop Running Sessions?"
+                alert.informativeText = "There are Codex/Claude Code sessions still running. Quitting now will terminate them."
+                alert.alertStyle = .warning
+                alert.addButton(withTitle: "Quit")
+                alert.addButton(withTitle: "Cancel")
+
+                let response = alert.runModal()
+                if response == .alertSecondButtonReturn {
+                    return .terminateCancel
+                }
+            }
+        #endif
+        return .terminateNow
+    }
+}
+#endif

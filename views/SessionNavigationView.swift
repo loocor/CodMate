@@ -110,7 +110,8 @@ struct SessionNavigationView: View {
             CalendarMonthView(
                 monthStart: monthStart,
                 counts: viewModel.calendarCounts(for: monthStart, dimension: dimension),
-                selectedDays: viewModel.selectedDays
+                selectedDays: viewModel.selectedDays,
+                enabledDays: viewModel.calendarEnabledDaysForSelectedProject(monthStart: monthStart, dimension: dimension)
             ) { picked in
                 // Cmd-click toggles selection; plain click selects single day / clears when same
                 #if os(macOS)

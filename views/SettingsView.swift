@@ -519,6 +519,9 @@ struct SettingsView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     LabeledContent("Version") { Text(versionString) }
                     LabeledContent("Build Timestamp") { Text(buildTimestampString) }
+                    LabeledContent("Latest Release") {
+                        Link(releasesURL.absoluteString, destination: releasesURL)
+                    }
                     LabeledContent("Project URL") {
                         Link(projectURL.absoluteString, destination: projectURL)
                     }
@@ -560,6 +563,7 @@ struct SettingsView: View {
 
     private var projectURL: URL { URL(string: "https://umate.ai/codmate")! }
     private var repoURL: URL { URL(string: "https://github.com/loocor/CodMate")! }
+    private var releasesURL: URL { URL(string: "https://github.com/loocor/CodMate/releases/latest")! }
     private var mcpMateURL: URL { URL(string: "https://mcpmate.io/")! }
     private let mcpMateTagline = "Dedicated MCP orchestration for Codex workflows."
 
