@@ -209,7 +209,20 @@ PLIST
   APP_VERSION=${APP_VERSION:-$BASE_VERSION}
 
   PRODUCT_NAME=$(basename "$APP_PATH" .app)
-  DMG_NAME="$PRODUCT_NAME-$APP_VERSION+${BUILD_NUMBER}-$ARCH.dmg"
+  # Output naming for GitHub Releases "latest/download" links
+  # We intentionally use fixed filenames so the website can link to stable paths:
+  #   - codmate-arm64.dmg
+  #   - codmate-x86_64.dmg
+  # If you need the old versioned naming, set RELEASE_NAMING=versioned when invoking this script.
+  if [[ "${RELEASE_NAMING:-fixed}" == "versioned" ]]; then
+    DMG_NAME="$PRODUCT_NAME-$APP_VERSION+${BUILD_NUMBER}-$ARCH.dmg"
+  else
+    case "$ARCH" in
+      arm64)   DMG_NAME="codmate-arm64.dmg" ;;
+      x86_64)  DMG_NAME="codmate-x86_64.dmg" ;;
+      *)       DMG_NAME="$PRODUCT_NAME-$ARCH.dmg" ;;
+    esac
+  fi
   DMG_PATH="$OUTPUT_DIR/$DMG_NAME"
 
 make_dmg_with_hdiutil() {
