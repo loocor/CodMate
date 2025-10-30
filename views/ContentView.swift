@@ -309,17 +309,6 @@ struct ContentView: View {
                     .id(focused.id)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .padding(.horizontal, 16)
-                } else if let anchorId = fallbackRunningAnchorId() {
-                    // Fallback: show virtual-anchor terminal even when no focused session is running
-                    TerminalHostView(
-                        terminalKey: anchorId,
-                        initialCommands: embeddedInitialCommands[anchorId] ?? "",
-                        font: makeTerminalFont(size: 12),
-                        isDark: colorScheme == .dark
-                    )
-                    .id(anchorId)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .padding(.horizontal, 16)
                 } else if let focused = focusedSummary {
                     SessionDetailView(
                         summary: focused,
@@ -341,6 +330,17 @@ struct ContentView: View {
                     )
                     .environmentObject(viewModel)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                } else if let anchorId = fallbackRunningAnchorId() {
+                    // No focused session: allow showing the virtual-anchor terminal
+                    TerminalHostView(
+                        terminalKey: anchorId,
+                        initialCommands: embeddedInitialCommands[anchorId] ?? "",
+                        font: makeTerminalFont(size: 12),
+                        isDark: colorScheme == .dark
+                    )
+                    .id(anchorId)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .padding(.horizontal, 16)
                 } else {
                     placeholder
                 }
@@ -528,6 +528,16 @@ struct ContentView: View {
                 .controlSize(.small)
                 }
 
+                // Dynamic file size (show only when embedded terminal is active)
+                if let focused = focusedSummary, isFocusedRunning {
+                    HStack(spacing: 6) {
+                        Image(systemName: "externaldrive")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(.secondary)
+                        LiveFileSizeText(url: focused.fileURL)
+                    }
+                }
+
                 Button {
                     if let focused = focusedSummary { viewModel.reveal(session: focused) }
                 } label: {
@@ -594,15 +604,21 @@ struct ContentView: View {
                                                 )
                                                 let items = await PresetPromptsStore.shared.load(for: focused.cwd)
                                                 let sourcedItems = items.map { SourcedPrompt(prompt: $0, source: .project) }
-                                                await MainActor.run { self.loadedPrompts = sourcedItems }
-                                                #if canImport(SwiftTerm)
-                                                    TerminalSessionManager.shared.focus(key: focused.id)
-                                                    TerminalSessionManager.shared.send(to: focused.id, text: q)
-                                                #endif
                                                 await MainActor.run {
+                                                    self.loadedPrompts = sourcedItems
+                                                    // Close popover first to restore terminal focus cleanly
                                                     self.promptQuery = ""
                                                     self.showPromptPicker = false
                                                 }
+                                                #if canImport(SwiftTerm)
+                                                    // After the popover closes, focus and insert on the main thread
+                                                    await MainActor.run {
+                                                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                                                            TerminalSessionManager.shared.focus(key: focused.id)
+                                                            TerminalSessionManager.shared.send(to: focused.id, text: q)
+                                                        }
+                                                    }
+                                                #endif
                                             }
                                         } label: {
                                             HStack(spacing: 6) {
@@ -629,13 +645,17 @@ struct ContentView: View {
                                         let shown = Array(filtered.prefix(maxShown))
                                         ForEach(shown, id: \.self) { item in
                                             Button {
-                                                #if canImport(SwiftTerm)
-                                                    TerminalSessionManager.shared.focus(key: focused.id)
-                                                    TerminalSessionManager.shared.send(to: focused.id, text: item.command)
-                                                #endif
-                                                // Close and reset query for next time
+                                                // Close and reset query first to avoid focus conflicts
+                                                let textToInsert = item.command
                                                 promptQuery = ""
                                                 showPromptPicker = false
+                                                #if canImport(SwiftTerm)
+                                                    // Focus and insert after a short delay on main queue
+                                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                                                        TerminalSessionManager.shared.focus(key: focused.id)
+                                                        TerminalSessionManager.shared.send(to: focused.id, text: textToInsert)
+                                                    }
+                                                #endif
                                             } label: {
                                                 HStack(spacing: 8) {
                                                     VStack(alignment: .leading, spacing: 2) {
@@ -992,12 +1012,11 @@ struct ContentView: View {
         }()
         let cd = "cd " + shellEscapeForCD(dir)
         let injectedPATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:${PATH}"
-        var exportLines = [
+        let exportLines = [
             "export LANG=zh_CN.UTF-8",
             "export LC_ALL=zh_CN.UTF-8",
             "export LC_CTYPE=zh_CN.UTF-8",
             "export TERM=xterm-256color",
-            // Always Codex for project New currently
             "export CODEX_DISABLE_COLOR_QUERY=1",
         ]
         let exports = exportLines.joined(separator: "; ")

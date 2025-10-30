@@ -106,6 +106,8 @@ struct SessionDetailView: View {
         }
     }
 
+    
+
     @State private var instructionsExpanded = false
     @State private var instructionsLoading = false
     @State private var instructionsText: String?
