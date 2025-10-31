@@ -2,47 +2,15 @@ import AppKit
 import Foundation
 
 extension SessionActions {
-    func resolveExecutableURL(preferred: URL?, executableName: String = "codex") -> URL? {
-        if let preferred, fileManager.isExecutableFile(atPath: preferred.path) { return preferred }
-        // Try /opt/homebrew/bin, /usr/local/bin, PATH via /usr/bin/which
-        let candidates = [
-            "/opt/homebrew/bin/\(executableName)",
-            "/usr/local/bin/\(executableName)",
-            "/usr/bin/\(executableName)",
-            "/bin/\(executableName)",
-        ]
-        for path in candidates {
-            if fileManager.isExecutableFile(atPath: path) { return URL(fileURLWithPath: path) }
-        }
-        // which codex
-        let which = Process()
-        which.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        which.arguments = ["which", executableName]
-        let pipe = Pipe()
-        which.standardOutput = pipe
-        which.standardError = Pipe()
-        try? which.run()
-        which.waitUntilExit()
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        if which.terminationStatus == 0,
-            let str = String(data: data, encoding: .utf8)?.trimmingCharacters(
-                in: .whitespacesAndNewlines), !str.isEmpty
-        {
-            if fileManager.isExecutableFile(atPath: str) { return URL(fileURLWithPath: str) }
-        }
-        return nil
-    }
 
     @MainActor
     func resume(session: SessionSummary, executableURL: URL, options: ResumeOptions) async throws
         -> ProcessResult
     {
+        // Always invoke via /usr/bin/env to rely on system PATH resolution.
+        // This removes the need for user-configured CLI paths and aligns with app policy.
         let exeName = session.source == .codex ? "codex" : "claude"
-        guard let exec = resolveExecutableURL(preferred: executableURL, executableName: exeName)
-        else {
-            throw SessionActionError.executableNotFound(executableURL)
-        }
-        
+
         // Prepare arguments first, including async MCP config if needed
         var args: [String]
         switch session.source {
@@ -61,6 +29,7 @@ extension SessionActions {
             }
             if options.claudeSkipPermissions { args.append("--dangerously-skip-permissions") }
             if options.claudeAllowSkipPermissions { args.append("--allow-dangerously-skip-permissions") }
+            if options.claudeAllowUnsandboxedCommands { args.append("--allow-unsandboxed-commands") }
             if let allowed = options.claudeAllowedTools, !allowed.isEmpty {
                 args.append(contentsOf: ["--allowed-tools", allowed])
             }
@@ -91,8 +60,9 @@ extension SessionActions {
             Task.detached {
                 do {
                     let process = Process()
-                    process.executableURL = exec
-                    process.arguments = args
+                    // Use env to resolve the executable on PATH
+                    process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+                    process.arguments = [exeName] + args
                     // Prefer original session cwd if exists
                     process.currentDirectoryURL = cwd
 
@@ -225,8 +195,35 @@ extension SessionActions {
             // Resume should preserve original session semantics; do not override flags.
             return "\(exe) resume \(conversationId(for: session))"
         case .claude:
-            let args = ["--resume", session.id].map(shellQuoteIfNeeded)
-            return ([exe] + args).joined(separator: " ")
+            var parts: [String] = [exe]
+            parts.append("--resume")
+            parts.append(shellQuoteIfNeeded(session.id))
+            // Apply Claude runtime flags on resume as well, to match actual launch behavior
+            if options.claudeVerbose { parts.append("--verbose") }
+            if options.claudeDebug {
+                parts.append("-d")
+                if let f = options.claudeDebugFilter, !f.isEmpty { parts.append(shellQuoteIfNeeded(f)) }
+            }
+            if let pm = options.claudePermissionMode, pm != .default {
+                parts.append(contentsOf: ["--permission-mode", shellQuoteIfNeeded(pm.rawValue)])
+            }
+            if options.claudeSkipPermissions { parts.append("--dangerously-skip-permissions") }
+            if options.claudeAllowSkipPermissions { parts.append("--allow-dangerously-skip-permissions") }
+            if options.claudeAllowUnsandboxedCommands { parts.append("--allow-unsandboxed-commands") }
+            if let allowed = options.claudeAllowedTools, !allowed.isEmpty {
+                parts.append(contentsOf: ["--allowed-tools", shellQuoteIfNeeded(allowed)])
+            }
+            if let disallowed = options.claudeDisallowedTools, !disallowed.isEmpty {
+                parts.append(contentsOf: ["--disallowed-tools", shellQuoteIfNeeded(disallowed)])
+            }
+            if let addDirs = options.claudeAddDirs, !addDirs.isEmpty {
+                let dirParts = addDirs.split(whereSeparator: { $0 == "," || $0.isWhitespace }).map { String($0) }.filter { !$0.isEmpty }
+                for dir in dirParts { parts.append(contentsOf: ["--add-dir", shellQuoteIfNeeded(dir)]) }
+            }
+            if options.claudeIDE { parts.append("--ide") }
+            if options.claudeStrictMCP { parts.append("--strict-mcp-config") }
+            if let fb = options.claudeFallbackModel, !fb.isEmpty { parts.append(contentsOf: ["--fallback-model", shellQuoteIfNeeded(fb)]) }
+            return parts.joined(separator: " ")
         }
     }
 
@@ -234,7 +231,12 @@ extension SessionActions {
         -> [String]
     {
         var args: [String] = []
-        // Do not append --model for Codex new sessions; rely on project profile or global config
+        // Preserve model for Codex default New (non-project) to ensure CLI has a model
+        if session.source == .codex,
+           let m = session.model?.trimmingCharacters(in: .whitespacesAndNewlines), !m.isEmpty {
+            args += ["--model", m]
+        }
+        // Attach sandbox/approval flags from options
         args += flags(from: options)
         return args
     }
@@ -311,6 +313,7 @@ extension SessionActions {
             }
             if options.claudeSkipPermissions { parts.append("--dangerously-skip-permissions") }
             if options.claudeAllowSkipPermissions { parts.append("--allow-dangerously-skip-permissions") }
+            if options.claudeAllowUnsandboxedCommands { parts.append("--allow-unsandboxed-commands") }
             if let allowed = options.claudeAllowedTools, !allowed.isEmpty {
                 parts.append(contentsOf: ["--allowed-tools", shellQuoteIfNeeded(allowed)])
             }
@@ -393,10 +396,7 @@ extension SessionActions {
             FileManager.default.fileExists(atPath: session.cwd)
             ? session.cwd : session.fileURL.deletingLastPathComponent().path
         let cd = "cd " + shellEscapedPath(cwd)
-        let execName = session.source == .codex ? "codex" : "claude"
-        let execPath =
-            resolveExecutableURL(preferred: executableURL, executableName: execName)?.path
-            ?? execName
+        let execPath = session.source == .codex ? "codex" : "claude"
         let resume = buildResumeCLIInvocation(
             session: session, executablePath: execPath, options: options)
         return cd + "\n" + resume + "\n"
@@ -988,12 +988,10 @@ extension SessionActions {
     func copyRealResumeInvocation(
         session: SessionSummary, executableURL: URL, options: ResumeOptions
     ) {
+        // Always prefer bare command; let PATH resolve the binary
         let execName = session.source == .codex ? "codex" : "claude"
-        let execPath =
-            resolveExecutableURL(preferred: executableURL, executableName: execName)?.path
-            ?? executableURL.path
         let cmd = buildResumeCLIInvocation(
-            session: session, executablePath: execPath, options: options)
+            session: session, executablePath: execName, options: options)
         let pb = NSPasteboard.general
         pb.clearContents()
         pb.setString(cmd + "\n", forType: .string)

@@ -16,10 +16,9 @@ extension SessionListViewModel {
     }
 
     private func preferredExecutableURL(for source: SessionSource) -> URL {
-        switch source {
-        case .codex: return preferences.codexExecutableURL
-        case .claude: return preferences.claudeExecutableURL
-        }
+        // Deprecated: executable paths are no longer user-configurable.
+        // Keep a placeholder URL to satisfy legacy APIs; execution uses PATH.
+        return URL(fileURLWithPath: "/usr/bin/env")
     }
 
     func copyResumeCommands(session: SessionSummary) {
@@ -81,14 +80,10 @@ extension SessionListViewModel {
     }
 
     func buildResumeCLIInvocation(session: SessionSummary) -> String {
-        let execPath =
-            actions.resolveExecutableURL(
-                preferred: preferredExecutableURL(for: session.source),
-                executableName: session.source == .codex ? "codex" : "claude")?.path
-            ?? preferredExecutableURL(for: session.source).path
+        let execName = (session.source == .codex) ? "codex" : "claude"
         return actions.buildResumeCLIInvocation(
             session: session,
-            executablePath: execPath,
+            executablePath: execName,
             options: preferences.resumeOptions
         )
     }
@@ -99,21 +94,12 @@ extension SessionListViewModel {
             let p = projects.first(where: { $0.id == pid }),
             p.profile != nil || (p.profileId?.isEmpty == false)
         {
-            let execPath =
-                actions.resolveExecutableURL(
-                    preferred: preferredExecutableURL(for: .codex), executableName: "codex")?.path
-                ?? preferredExecutableURL(for: .codex).path
             return actions.buildResumeUsingProjectProfileCLIInvocation(
-                session: session, project: p, executablePath: execPath,
+                session: session, project: p, executablePath: "codex",
                 options: preferences.resumeOptions)
         }
-        let execPath =
-            actions.resolveExecutableURL(
-                preferred: preferredExecutableURL(for: session.source),
-                executableName: session.source == .codex ? "codex" : "claude")?.path
-            ?? preferredExecutableURL(for: session.source).path
         return actions.buildResumeCLIInvocation(
-            session: session, executablePath: execPath, options: preferences.resumeOptions)
+            session: session, executablePath: (session.source == .codex ? "codex" : "claude"), options: preferences.resumeOptions)
     }
 
     func copyNewSessionCommands(session: SessionSummary) {

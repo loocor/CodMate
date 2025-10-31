@@ -15,21 +15,13 @@ final class SessionPreferencesStore: ObservableObject {
         didSet { persist() }
     }
 
-    @Published var codexExecutableURL: URL {
-        didSet { persist() }
-    }
-
-    @Published var claudeExecutableURL: URL {
-        didSet { persist() }
-    }
 
     private let defaults: UserDefaults
     private struct Keys {
         static let sessionsRootPath = "codex.sessions.rootPath"
         static let notesRootPath = "codex.notes.rootPath"
         static let projectsRootPath = "codmate.projects.rootPath"
-        static let executablePath = "codex.sessions.executablePath"
-        static let claudeExecutablePath = "codex.sessions.claudeExecutablePath"
+        // Removed: CLI executable paths; rely on PATH resolution
         static let resumeUseEmbedded = "codex.resume.useEmbedded"
         static let resumeCopyClipboard = "codex.resume.copyClipboard"
         static let resumeExternalApp = "codex.resume.externalApp"
@@ -53,6 +45,7 @@ final class SessionPreferencesStore: ObservableObject {
         static let claudeFallbackModel = "claude.fallbackModel"
         static let claudeSkipPermissions = "claude.skipPermissions"
         static let claudeAllowSkipPermissions = "claude.allowSkipPermissions"
+        static let claudeAllowUnsandboxedCommands = "claude.allowUnsandboxedCommands"
     }
 
     init(
@@ -98,37 +91,9 @@ final class SessionPreferencesStore: ObservableObject {
             return SessionPreferencesStore.defaultProjectsRoot(for: homeURL)
         }()
 
-        // Resolve executable path
-        let resolvedExec: URL = {
-            if let storedExec = defaults.string(forKey: Keys.executablePath) {
-                let url = URL(fileURLWithPath: storedExec)
-                if fileManager.isExecutableFile(atPath: url.path) {
-                    return url
-                } else {
-                    defaults.removeObject(forKey: Keys.executablePath)
-                }
-            }
-            return SessionPreferencesStore.defaultExecutableURL()
-        }()
-
         // Assign after all are computed to avoid using self before init completes
         self.sessionsRoot = resolvedSessionsRoot
         self.notesRoot = resolvedNotesRoot
-        // Resolve claude executable path
-        let resolvedClaudeExec: URL = {
-            if let storedExec = defaults.string(forKey: Keys.claudeExecutablePath) {
-                let url = URL(fileURLWithPath: storedExec)
-                if fileManager.isExecutableFile(atPath: url.path) {
-                    return url
-                } else {
-                    defaults.removeObject(forKey: Keys.claudeExecutablePath)
-                }
-            }
-            return SessionPreferencesStore.defaultClaudeExecutableURL()
-        }()
-
-        self.codexExecutableURL = resolvedExec
-        self.claudeExecutableURL = resolvedClaudeExec
         self.projectsRoot = resolvedProjectsRoot
         // Resume defaults
         self.defaultResumeUseEmbeddedTerminal =
@@ -182,14 +147,14 @@ final class SessionPreferencesStore: ObservableObject {
         self.claudeFallbackModel = defaults.string(forKey: Keys.claudeFallbackModel) ?? ""
         self.claudeSkipPermissions = defaults.object(forKey: Keys.claudeSkipPermissions) as? Bool ?? false
         self.claudeAllowSkipPermissions = defaults.object(forKey: Keys.claudeAllowSkipPermissions) as? Bool ?? false
+        self.claudeAllowUnsandboxedCommands = defaults.object(forKey: Keys.claudeAllowUnsandboxedCommands) as? Bool ?? false
     }
 
     private func persist() {
         defaults.set(sessionsRoot.path, forKey: Keys.sessionsRootPath)
         defaults.set(notesRoot.path, forKey: Keys.notesRootPath)
         defaults.set(projectsRoot.path, forKey: Keys.projectsRootPath)
-        defaults.set(codexExecutableURL.path, forKey: Keys.executablePath)
-        defaults.set(claudeExecutableURL.path, forKey: Keys.claudeExecutablePath)
+        // CLI paths removed – nothing to persist here
     }
 
     convenience init(defaults: UserDefaults = .standard) {
@@ -214,13 +179,7 @@ final class SessionPreferencesStore: ObservableObject {
             .appendingPathComponent("projects", isDirectory: true)
     }
 
-    static func defaultExecutableURL() -> URL {
-        URL(fileURLWithPath: "/usr/local/bin/codex")
-    }
-
-    static func defaultClaudeExecutableURL() -> URL {
-        URL(fileURLWithPath: "/usr/local/bin/claude")
-    }
+    // Removed: default executable URLs – resolution uses PATH
 
     // MARK: - Legacy coercion helpers
     private static func coerceSandboxMode(_ raw: String) -> SandboxMode? {
@@ -301,6 +260,7 @@ final class SessionPreferencesStore: ObservableObject {
         opt.claudeFallbackModel = claudeFallbackModel.isEmpty ? nil : claudeFallbackModel
         opt.claudeSkipPermissions = claudeSkipPermissions
         opt.claudeAllowSkipPermissions = claudeAllowSkipPermissions
+        opt.claudeAllowUnsandboxedCommands = claudeAllowUnsandboxedCommands
         return opt
     }
 
@@ -317,4 +277,5 @@ final class SessionPreferencesStore: ObservableObject {
     @Published var claudeFallbackModel: String { didSet { defaults.set(claudeFallbackModel, forKey: Keys.claudeFallbackModel) } }
     @Published var claudeSkipPermissions: Bool { didSet { defaults.set(claudeSkipPermissions, forKey: Keys.claudeSkipPermissions) } }
     @Published var claudeAllowSkipPermissions: Bool { didSet { defaults.set(claudeAllowSkipPermissions, forKey: Keys.claudeAllowSkipPermissions) } }
+    @Published var claudeAllowUnsandboxedCommands: Bool { didSet { defaults.set(claudeAllowUnsandboxedCommands, forKey: Keys.claudeAllowUnsandboxedCommands) } }
 }

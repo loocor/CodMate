@@ -181,36 +181,6 @@ struct SettingsView: View {
                                 Button("Change…", action: selectNotesRoot)
                                     .buttonStyle(.bordered)
                             }
-                            gridDivider
-                            GridRow {
-                                VStack(alignment: .leading, spacing: 0) {
-                                    Label("Codex CLI Path", systemImage: "terminal")
-                                        .font(.subheadline).fontWeight(.medium)
-                                    Text("Path to the codex executable")
-                                        .font(.caption).foregroundColor(.secondary)
-                                }
-                                Text(preferences.codexExecutableURL.path)
-                                    .lineLimit(1)
-                                    .truncationMode(.middle)
-                                    .frame(maxWidth: .infinity, alignment: .trailing)
-                                Button("Change…", action: selectCodexExecutable)
-                                    .buttonStyle(.bordered)
-                            }
-                            gridDivider
-                            GridRow {
-                                VStack(alignment: .leading, spacing: 0) {
-                                    Label("Claude CLI Path", systemImage: "terminal")
-                                        .font(.subheadline).fontWeight(.medium)
-                                    Text("Path to the claude executable")
-                                        .font(.caption).foregroundColor(.secondary)
-                                }
-                                Text(preferences.claudeExecutableURL.path)
-                                    .lineLimit(1)
-                                    .truncationMode(.middle)
-                                    .frame(maxWidth: .infinity, alignment: .trailing)
-                                Button("Change…", action: selectClaudeExecutable)
-                                    .buttonStyle(.bordered)
-                            }
                         }
                     }
                 }
@@ -599,35 +569,7 @@ struct SettingsView: View {
         }
     }
 
-    private func selectCodexExecutable() {
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = true
-        panel.canChooseDirectories = false
-        panel.allowsMultipleSelection = false
-        panel.allowedContentTypes = [.unixExecutable, .executable]
-        panel.directoryURL = preferences.codexExecutableURL.deletingLastPathComponent()
-        panel.message = "Select the codex executable"
-
-        panel.begin { response in
-            guard response == .OK, let url = panel.url else { return }
-            preferences.codexExecutableURL = url
-        }
-    }
-
-    private func selectClaudeExecutable() {
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = true
-        panel.canChooseDirectories = false
-        panel.allowsMultipleSelection = false
-        panel.allowedContentTypes = [.unixExecutable, .executable]
-        panel.directoryURL = preferences.claudeExecutableURL.deletingLastPathComponent()
-        panel.message = "Select the claude executable"
-
-        panel.begin { response in
-            guard response == .OK, let url = panel.url else { return }
-            preferences.claudeExecutableURL = url
-        }
-    }
+    // Removed Codex/Claude executable choosers – rely on PATH
 
     private func selectNotesRoot() {
         let panel = NSOpenPanel()
@@ -649,8 +591,7 @@ struct SettingsView: View {
             for: FileManager.default.homeDirectoryForCurrentUser)
         preferences.notesRoot = SessionPreferencesStore.defaultNotesRoot(
             for: preferences.sessionsRoot)
-        preferences.codexExecutableURL = SessionPreferencesStore.defaultExecutableURL()
-        preferences.claudeExecutableURL = SessionPreferencesStore.defaultClaudeExecutableURL()
+        // CLI paths are not user-configurable; rely on PATH
         preferences.defaultResumeUseEmbeddedTerminal = true
         preferences.defaultResumeCopyToClipboard = true
         preferences.defaultResumeExternalApp = .terminal

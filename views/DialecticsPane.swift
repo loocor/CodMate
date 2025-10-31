@@ -118,24 +118,16 @@ struct DialecticsPane: View {
                     settingsCard {
                         Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 8) {
                         GridRow {
-                            Text("Preferred").font(.subheadline)
-                            Text(preferences.codexExecutableURL.path).font(.caption).frame(
-                                maxWidth: .infinity, alignment: .trailing)
+                            Text("codex on PATH").font(.subheadline)
+                            Text(vm.codexPresent ? (vm.codexVersion ?? "Yes") : "N/A")
+                                .font(.caption)
+                                .frame(maxWidth: .infinity, alignment: .trailing)
                         }
                         GridRow {
-                            Text("Resolved").font(.subheadline)
-                            Text(vm.resolvedCodexPath ?? "(not found)").font(.caption).frame(
-                                maxWidth: .infinity, alignment: .trailing)
-                        }
-                        GridRow {
-                            Text("Preferred (Claude)").font(.subheadline)
-                            Text(preferences.claudeExecutableURL.path).font(.caption).frame(
-                                maxWidth: .infinity, alignment: .trailing)
-                        }
-                        GridRow {
-                            Text("Resolved (Claude)").font(.subheadline)
-                            Text(vm.resolvedClaudePath ?? "(not found)").font(.caption).frame(
-                                maxWidth: .infinity, alignment: .trailing)
+                            Text("claude on PATH").font(.subheadline)
+                            Text(vm.claudePresent ? (vm.claudeVersion ?? "Yes") : "N/A")
+                                .font(.caption)
+                                .frame(maxWidth: .infinity, alignment: .trailing)
                         }
                         GridRow {
                             Text("PATH").font(.subheadline)
