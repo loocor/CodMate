@@ -49,6 +49,37 @@ struct ProjectsListView: View {
                         } label: {
                             Label("New Subproject", systemImage: "plus.square.on.square")
                         }
+                        Divider()
+
+                        // Open in Editor submenu
+                        Menu {
+                            ForEach(EditorApp.allCases) { editor in
+                                Button {
+                                    viewModel.openProjectInEditor(p, using: editor)
+                                } label: {
+                                    HStack {
+                                        Label(editor.title, systemImage: "chevron.left.forwardslash.chevron.right")
+                                        if !editor.isInstalled {
+                                            Text("(Not Installed)")
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                        }
+                                    }
+                                }
+                                .disabled(!editor.isInstalled)
+                            }
+                        } label: {
+                            Label("Open in", systemImage: "arrow.up.forward.app")
+                        }
+                        .disabled(p.directory == nil || p.directory?.isEmpty == true)
+
+                        Button {
+                            viewModel.revealProjectDirectory(p)
+                        } label: {
+                            Label("Reveal in Finder", systemImage: "folder")
+                        }
+                        .disabled(p.directory == nil || p.directory?.isEmpty == true)
+
                         Button { editingProject = p; showEdit = true } label: {
                             Label("Edit Project / Property", systemImage: "pencil")
                         }
@@ -674,7 +705,7 @@ struct ProjectEditorSheet: View {
         }
     }
 
-    
+
 }
 private struct ProjectTreeNode: Identifiable, Hashable {
     let id: String
