@@ -14,7 +14,6 @@ struct ContentView: View {
     @State private var deleteConfirmationPresented = false
     @State private var alertState: AlertState?
     @State private var selectingSessionsRoot = false
-    @State private var selectingExecutable = false
     // Track which sessions are running in embedded terminal
     @State private var runningSessionIDs = Set<SessionSummary.ID>()
     @State private var isDetailMaximized = false
@@ -215,13 +214,7 @@ struct ContentView: View {
         ) { result in
             handleFolderSelection(result: result, update: viewModel.updateSessionsRoot)
         }
-        .fileImporter(
-            isPresented: $selectingExecutable,
-            allowedContentTypes: [.unixExecutable],
-            allowsMultipleSelection: false
-        ) { result in
-            handleExecutableSelection(result: result)
-        }
+        // Removed CLI chooser; rely entirely on PATH for CLI resolution
     }
 
     private func sidebarContent(sidebarMaxWidth: CGFloat) -> some View {
@@ -298,7 +291,20 @@ struct ContentView: View {
             Divider()
 
             Group {
-                if let focused = focusedSummary, runningSessionIDs.contains(focused.id) {
+                // Priority 1: Check for virtual anchor (new session in progress)
+                if let anchorId = fallbackRunningAnchorId() {
+                    // Virtual anchor terminal for new session
+                    TerminalHostView(
+                        terminalKey: anchorId,
+                        initialCommands: embeddedInitialCommands[anchorId] ?? "",
+                        font: makeTerminalFont(size: 12),
+                        isDark: colorScheme == .dark
+                    )
+                    .id(anchorId)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .padding(.horizontal, 16)
+                } else if let focused = focusedSummary, runningSessionIDs.contains(focused.id) {
+                    // Real session with running terminal
                     TerminalHostView(
                         terminalKey: focused.id,
                         initialCommands: embeddedInitialCommands[focused.id]
@@ -310,6 +316,7 @@ struct ContentView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .padding(.horizontal, 16)
                 } else if let focused = focusedSummary {
+                    // Normal session detail view
                     SessionDetailView(
                         summary: focused,
                         isProcessing: isPerformingAction,
@@ -330,17 +337,6 @@ struct ContentView: View {
                     )
                     .environmentObject(viewModel)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                } else if let anchorId = fallbackRunningAnchorId() {
-                    // No focused session: allow showing the virtual-anchor terminal
-                    TerminalHostView(
-                        terminalKey: anchorId,
-                        initialCommands: embeddedInitialCommands[anchorId] ?? "",
-                        font: makeTerminalFont(size: 12),
-                        isDark: colorScheme == .dark
-                    )
-                    .id(anchorId)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .padding(.horizontal, 16)
                 } else {
                     placeholder
                 }
@@ -350,7 +346,21 @@ struct ContentView: View {
 
     private var detailActionBar: some View {
         HStack(spacing: 12) {
-            if let focused = focusedSummary {
+            // Check if we're showing a virtual anchor (new session)
+            let hasRunningAnchor = fallbackRunningAnchorId() != nil
+
+            if hasRunningAnchor {
+                // Show generic title for new session terminal, with a subtle note
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("New Session")
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+                    Text("Appears in list after first message")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            } else if let focused = focusedSummary {
                 HStack(spacing: 6) {
                     Text(focused.effectiveTitle)
                         .font(.headline)
@@ -371,8 +381,9 @@ struct ContentView: View {
             HStack(spacing: 8) {
                 let focused = focusedSummary
                 let isFocusedRunning = focused.map { runningSessionIDs.contains($0.id) } ?? false
+                let hasRunningAnchor = fallbackRunningAnchorId() != nil
 
-                if !isFocusedRunning {
+                if !isFocusedRunning && !hasRunningAnchor {
                 Menu {
                     if let focused = focusedSummary {
                         Button {
@@ -457,7 +468,7 @@ struct ContentView: View {
                 .controlSize(.small)
                 }
 
-                if !isFocusedRunning {
+                if !isFocusedRunning && !hasRunningAnchor {
                 Menu {
                     if focusedSummary != nil {
                         Button {
@@ -528,7 +539,7 @@ struct ContentView: View {
                 .controlSize(.small)
                 }
 
-                // Dynamic file size (show only when embedded terminal is active)
+                // Dynamic file size (show only when embedded terminal is active for a real session)
                 if let focused = focusedSummary, isFocusedRunning {
                     HStack(spacing: 6) {
                         Image(systemName: "externaldrive")
@@ -786,7 +797,7 @@ struct ContentView: View {
                     .help("Export Markdown")
                 }
 
-                if !isFocusedRunning {
+                if !isFocusedRunning && !hasRunningAnchor {
                     Button(role: .destructive) {
                         presentDeleteConfirmation()
                     } label: {
@@ -995,10 +1006,29 @@ struct ContentView: View {
         Task {
             if target.source == .codex {
                 await viewModel.refreshIncrementalForNewCodexToday()
+                // Follow-up probes to catch late file creation (non-recursive FS monitor)
+                try? await Task.sleep(nanoseconds: 600_000_000)
+                await viewModel.refreshIncrementalForNewCodexToday()
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+                await viewModel.refreshIncrementalForNewCodexToday()
             } else {
+                // Claude Code: more aggressive refresh schedule because CLI may delay writing content
+                await viewModel.refreshIncrementalForClaudeProject(directory: cwd)
+                // Follow-up probes to catch file creation and content fill
+                try? await Task.sleep(nanoseconds: 600_000_000)  // 0.6s
+                await viewModel.refreshIncrementalForClaudeProject(directory: cwd)
+                try? await Task.sleep(nanoseconds: 1_500_000_000) // 1.5s
+                await viewModel.refreshIncrementalForClaudeProject(directory: cwd)
+                try? await Task.sleep(nanoseconds: 3_000_000_000) // 3s
+                await viewModel.refreshIncrementalForClaudeProject(directory: cwd)
+                try? await Task.sleep(nanoseconds: 5_000_000_000) // 5s
+                await viewModel.refreshIncrementalForClaudeProject(directory: cwd)
+                try? await Task.sleep(nanoseconds: 10_000_000_000) // 10s
                 await viewModel.refreshIncrementalForClaudeProject(directory: cwd)
             }
         }
+        // Clear selection so fallbackRunningAnchorId() can display the virtual anchor terminal
+        selection.removeAll()
         // Ensure terminal is visible
         isDetailMaximized = true
         columnVisibility = .detailOnly
@@ -1036,7 +1066,16 @@ struct ContentView: View {
         // Event-driven incremental refresh: scoped to today's Codex folder
         viewModel.setIncrementalHintForCodexToday()
         // Proactively refresh today's subset so the new item appears quickly
-        Task { await viewModel.refreshIncrementalForNewCodexToday() }
+        Task {
+            await viewModel.refreshIncrementalForNewCodexToday()
+            // Follow-up probes to catch late file creation
+            try? await Task.sleep(nanoseconds: 600_000_000)
+            await viewModel.refreshIncrementalForNewCodexToday()
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            await viewModel.refreshIncrementalForNewCodexToday()
+        }
+        // Clear selection so fallbackRunningAnchorId() can display the virtual anchor terminal
+        selection.removeAll()
         // Maximize detail to show embedded terminal
         isDetailMaximized = true
         columnVisibility = .detailOnly
@@ -1078,7 +1117,17 @@ struct ContentView: View {
         Task {
             if session.source == .codex {
                 await viewModel.refreshIncrementalForNewCodexToday()
+                // Follow-up probes to catch late file creation
+                try? await Task.sleep(nanoseconds: 600_000_000)
+                await viewModel.refreshIncrementalForNewCodexToday()
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+                await viewModel.refreshIncrementalForNewCodexToday()
             } else {
+                await viewModel.refreshIncrementalForClaudeProject(directory: dir)
+                // Follow-up probes to catch late file creation
+                try? await Task.sleep(nanoseconds: 600_000_000)
+                await viewModel.refreshIncrementalForClaudeProject(directory: dir)
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
                 await viewModel.refreshIncrementalForClaudeProject(directory: dir)
             }
         }
@@ -1207,18 +1256,7 @@ struct ContentView: View {
         }
     }
 
-    private func handleExecutableSelection(result: Result<[URL], Error>) {
-        switch result {
-        case .success(let urls):
-            selectingExecutable = false
-            guard let url = urls.first else { return }
-            viewModel.updateExecutablePath(to: url)
-        case .failure(let error):
-            selectingExecutable = false
-            alertState = AlertState(
-                title: "Failed to choose CLI", message: error.localizedDescription)
-        }
-    }
+    // Removed: executable chooser handler
 
     private var placeholder: some View {
         ContentUnavailableView(

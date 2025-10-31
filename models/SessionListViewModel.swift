@@ -65,6 +65,7 @@ final class SessionListViewModel: ObservableObject {
     private var canonicalCwdCache: [String: String] = [:]
     private var directoryMonitor: DirectoryMonitor?
     private var claudeDirectoryMonitor: DirectoryMonitor?
+    private var claudeProjectMonitor: DirectoryMonitor?
     private var directoryRefreshTask: Task<Void, Never>?
     private var enrichmentSnapshots: [String: Set<String>] = [:]
     private var suppressFilterNotifications = false
@@ -378,9 +379,7 @@ final class SessionListViewModel: ObservableObject {
         applyFilters()
     }
 
-    func updateExecutablePath(to newURL: URL) {
-        preferences.codexExecutableURL = newURL
-    }
+    // Removed: executable path updates – CLI resolution uses PATH
 
     var totalSessionCount: Int {
         globalSessionCount
@@ -973,10 +972,41 @@ final class SessionListViewModel: ObservableObject {
             kind: .codexDay(day), expiresAt: Date().addingTimeInterval(seconds))
     }
 
-    func setIncrementalHintForClaudeProject(directory: String, window seconds: TimeInterval = 10) {
+    func setIncrementalHintForClaudeProject(directory: String, window seconds: TimeInterval = 120) {
+        let canonical = Self.canonicalPath(directory)
         pendingIncrementalHint = PendingIncrementalRefreshHint(
-            kind: .claudeProject(Self.canonicalPath(directory)),
+            kind: .claudeProject(canonical),
             expiresAt: Date().addingTimeInterval(seconds))
+
+        // Point a dedicated monitor at this project's folder to receive events for nested writes.
+        // Claude writes session files inside ~/.claude/projects/<encoded-cwd>/, which are not visible
+        // to a non-recursive top-level directory watcher.
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        let projectsRoot = home
+            .appendingPathComponent(".claude", isDirectory: true)
+            .appendingPathComponent("projects", isDirectory: true)
+        let encoded = Self.encodeClaudeProjectFolder(from: canonical)
+        let projectURL = projectsRoot.appendingPathComponent(encoded, isDirectory: true)
+        if FileManager.default.fileExists(atPath: projectURL.path) {
+            if let monitor = claudeProjectMonitor {
+                monitor.updateURL(projectURL)
+            } else {
+                claudeProjectMonitor = DirectoryMonitor(url: projectURL) { [weak self] in
+                    Task { await self?.refreshIncrementalForClaudeProject(directory: canonical) }
+                }
+            }
+        }
+    }
+
+    // Claude project folder encoding mirrors ClaudeSessionProvider.encodeProjectFolder
+    private static func encodeClaudeProjectFolder(from cwd: String) -> String {
+        let expanded = (cwd as NSString).expandingTildeInPath
+        var standardized = URL(fileURLWithPath: expanded).standardizedFileURL.path
+        if standardized.hasSuffix("/") && standardized.count > 1 { standardized.removeLast() }
+        var name = standardized.replacingOccurrences(of: ":", with: "-")
+        name = name.replacingOccurrences(of: "/", with: "-")
+        if !name.hasPrefix("-") { name = "-" + name }
+        return name
     }
 
     private func mergeAndApply(_ subset: [SessionSummary]) {
