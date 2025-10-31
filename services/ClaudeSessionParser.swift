@@ -32,6 +32,12 @@ struct ClaudeSessionParser {
     }
 
     func parse(at url: URL, fileSize: UInt64? = nil) -> ClaudeParsedLog? {
+        // Skip agent-*.jsonl files entirely (sidechain warmup files)
+        let filename = url.deletingPathExtension().lastPathComponent
+        if filename.hasPrefix("agent-") {
+            return nil
+        }
+
         guard let data = try? Data(contentsOf: url, options: [.mappedIfSafe]),
               !data.isEmpty else { return nil }
 

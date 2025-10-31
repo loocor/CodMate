@@ -59,6 +59,7 @@ struct ResumeOptions {
     var claudeFallbackModel: String? = nil
     var claudeSkipPermissions: Bool = false
     var claudeAllowSkipPermissions: Bool = false
+    var claudeAllowUnsandboxedCommands: Bool = false
 }
 
 extension ResumeOptions {

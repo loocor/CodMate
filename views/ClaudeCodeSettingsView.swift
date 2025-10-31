@@ -174,6 +174,7 @@ struct ClaudeCodeSettingsView: View {
         lines.append("permission-mode=\(preferences.claudePermissionMode.rawValue)")
         lines.append("sandbox=\(preferences.defaultResumeSandboxMode.rawValue)")
         lines.append("approvals=\(preferences.defaultResumeApprovalPolicy.rawValue)")
+        lines.append("allow-unsandboxed-commands=\(preferences.claudeAllowUnsandboxedCommands ? "true" : "false")")
         if preferences.claudeDebug { lines.append("debug=true filter=\(preferences.claudeDebugFilter)") } else { lines.append("debug=false") }
         lines.append("verbose=\(preferences.claudeVerbose ? "true" : "false")")
         lines.append("ide=\(preferences.claudeIDE ? "true" : "false")")
@@ -194,6 +195,7 @@ struct ClaudeCodeSettingsView: View {
             } else { example.append("--debug") }
         }
         if preferences.claudeVerbose { example.append("--verbose") }
+        if preferences.claudeAllowUnsandboxedCommands { example.append("--allow-unsandboxed-commands") }
         // Tools
         if !preferences.claudeAllowedTools.trimmingCharacters(in: .whitespaces).isEmpty {
             example.append("--allowed-tools \"\(preferences.claudeAllowedTools)\"")
@@ -273,6 +275,15 @@ struct ClaudeCodeSettingsView: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Toggle("Enable", isOn: $preferences.claudeAllowSkipPermissions)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+            }
+            GridRow {
+                VStack(alignment: .leading, spacing: 0) {
+                    Text("Allow Unsandboxed Commands").font(.subheadline).fontWeight(.medium)
+                    Text("Policy-level switch. Turn OFF to disable the 'dangerouslyDisableSandbox' escape hatch.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Toggle("Enable", isOn: $preferences.claudeAllowUnsandboxedCommands)
                     .frame(maxWidth: .infinity, alignment: .trailing)
             }
             gridDivider
