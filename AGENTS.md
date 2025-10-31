@@ -62,8 +62,8 @@ Coding Guidelines
 - Testability: keep parsers and small helpers pure; avoid `Process()`/AppKit in ViewModel.
 
 CLI Integration (codex)
-- Resolve executable path: prefer user setting; fallback to `/opt/homebrew/bin` → `/usr/local/bin` → `env which codex`.
-- Always set `PATH` to include `/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin` before launching.
+- Do not expose user-configurable CLI paths. Always invoke via `/usr/bin/env codex` (or `claude`) so resolution happens on system `PATH`.
+- Always set `PATH` to include `/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin` before launching for robustness.
 - `resume` runs with `currentDirectoryURL` = original session `cwd` when it exists (fallback: log file directory).
 - New command options exposed in Settings › Command:
    - Sandbox policy (`-s/--sandbox`): `read-only`, `workspace-write`, `danger-full-access`.
