@@ -85,7 +85,9 @@ struct ProjectsListView: View {
                         }
                         Divider()
                         Button(role: .destructive) {
-                            Task { await viewModel.deleteProject(id: p.id) }
+                            // Route through the same confirmation flow used by the row action menu
+                            pendingDelete = p
+                            showDeleteConfirm = true
                         } label: {
                             Label("Delete Project", systemImage: "trash")
                         }
@@ -149,7 +151,7 @@ struct ProjectsListView: View {
                 Button("Cancel", role: .cancel) { pendingDelete = nil }
             }
         } message: { prj in
-            Text("Sessions remain intact. This only removes the project record.")
+            Text("Sessions remain intact. This only removes the project record. This action cannot be undone.")
         }
     }
 
@@ -187,17 +189,6 @@ private struct ProjectRow: View {
                     .font(.caption2.monospacedDigit())
                     .foregroundStyle(.tertiary)
             }
-            Menu {
-                Button("New Session", action: onNewSession)
-                Button("Edit Project / Property", action: onEdit)
-                Divider()
-                Button("Delete Project", role: .destructive, action: onDelete)
-            } label: {
-                Image(systemName: "ellipsis")
-            }
-            .menuIndicator(.hidden)
-            .buttonStyle(.plain)
-            .help("Project actions")
         }
         .frame(height: 16)
         .padding(.vertical, 8)

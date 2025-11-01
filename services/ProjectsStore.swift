@@ -128,7 +128,11 @@ actor ProjectsStore {
         // Remove meta
         projects.removeValue(forKey: id)
         let metaURL = paths.metadataDir.appendingPathComponent(id + ".json")
-        try? fm.removeItem(at: metaURL)
+        // Move to Trash instead of permanent deletion for safety
+        var resulting: NSURL?
+        if fm.fileExists(atPath: metaURL.path) {
+            do { try fm.trashItem(at: metaURL, resultingItemURL: &resulting) } catch { /* best-effort */ }
+        }
         // Unassign all sessions under this project
         var changed = false
         for (sid, pid) in sessionToProject where pid == id {

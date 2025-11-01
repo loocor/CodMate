@@ -84,7 +84,11 @@ actor SessionNotesStore {
 
     func remove(id: String) {
         let url = fileURL(for: id)
-        try? fm.removeItem(at: url)
+        // Move to Trash rather than hard delete to allow recovery
+        var resulting: NSURL?
+        if fm.fileExists(atPath: url.path) {
+            try? fm.trashItem(at: url, resultingItemURL: &resulting)
+        }
     }
 
     func all() -> [String: SessionNote] {
