@@ -38,6 +38,10 @@ UI Rules (macOS specific)
   - Sticky action bar at top: Resume, Reveal in Finder, Delete, Export Markdown.
   - Add “New” button next to Resume to start a fresh Codex session using the current session’s working directory and model.
   - When an embedded terminal is running, show a “Prompts” button beside the folder (Reveal in Finder) icon. Clicking opens a searchable popover of preset command texts; selecting one inserts it into the embedded terminal input (does not auto-execute). User presses Return to run.
+  - Review mode: the list.bullet.rectangle button toggles a full-area Review view (third mode, alongside Conversation and Internal Terminal). In Review mode the detail area is fully occupied by a Git Changes surface. It:
+    - Auto-detects the Git repo at the session’s working directory (uses `/usr/bin/env git` and a robust PATH).
+    - Lists changed files with stage/unstage toggles and shows a unified diff or a raw file preview (updates on save). Preview is text-only in phase 1.
+    - Provides a commit box. In full-area mode it uses a multi-line editor with more space.
   - “Task Instructions” uses a DisclosureGroup; load lazily when expanded.
   - Conversation timeline uses LazyVStack; differentiate user/assistant/tool/info bubbles.
   - Timeline & Markdown visibility: Settings › General provides per-surface checkboxes to choose which message types are shown in the conversation timeline and included when exporting Markdown. Defaults: Timeline shows all except Environment Context (which has its own section); Markdown includes only User and Assistant.

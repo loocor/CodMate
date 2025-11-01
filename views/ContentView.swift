@@ -82,6 +82,8 @@ struct ContentView: View {
             .init(label: "swift test", command: "swift test"),
         ]
     }
+    @State private var showReviewMode = false
+    @State private var reviewAutoMaximized = false
     // Track pending rekey for embedded New so we can move the PTY to the real new session id
     struct PendingEmbeddedRekey {
         let anchorId: String
@@ -290,56 +292,68 @@ struct ContentView: View {
 
             Divider()
 
-            Group {
-                // Priority 1: Check for virtual anchor (new session in progress)
-                if let anchorId = fallbackRunningAnchorId() {
-                    // Virtual anchor terminal for new session
-                    TerminalHostView(
-                        terminalKey: anchorId,
-                        initialCommands: embeddedInitialCommands[anchorId] ?? "",
-                        font: makeTerminalFont(size: 12),
-                        isDark: colorScheme == .dark
-                    )
-                    .id(anchorId)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .padding(.horizontal, 16)
-                } else if let focused = focusedSummary, runningSessionIDs.contains(focused.id) {
-                    // Real session with running terminal
-                    TerminalHostView(
-                        terminalKey: focused.id,
-                        initialCommands: embeddedInitialCommands[focused.id]
-                            ?? viewModel.buildResumeCommands(session: focused),
-                        font: makeTerminalFont(size: 12),
-                        isDark: colorScheme == .dark
-                    )
-                    .id(focused.id)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .padding(.horizontal, 16)
-                } else if let focused = focusedSummary {
-                    // Normal session detail view
-                    SessionDetailView(
-                        summary: focused,
-                        isProcessing: isPerformingAction,
-                        onResume: {
-                            guard let current = focusedSummary else { return }
-                            if viewModel.preferences.defaultResumeUseEmbeddedTerminal {
-                                startEmbedded(for: current)
-                            } else {
-                                openPreferredExternal(for: current)
-                            }
-                        },
-                        onReveal: {
-                            guard let current = focusedSummary else { return }
-                            viewModel.reveal(session: current)
-                        },
-                        onDelete: presentDeleteConfirmation,
-                        columnVisibility: $columnVisibility
-                    )
-                    .environmentObject(viewModel)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                } else {
-                    placeholder
-                }
+            mainDetailContent
+        }
+    }
+
+    private var mainDetailContent: some View {
+        Group {
+            // Priority 1: Check for virtual anchor (new session in progress)
+            if let anchorId = fallbackRunningAnchorId() {
+                // Virtual anchor terminal for new session
+                TerminalHostView(
+                    terminalKey: anchorId,
+                    initialCommands: embeddedInitialCommands[anchorId] ?? "",
+                    font: makeTerminalFont(size: 12),
+                    isDark: colorScheme == .dark
+                )
+                .id(anchorId)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding(.horizontal, 16)
+            } else if let focused = focusedSummary, runningSessionIDs.contains(focused.id) {
+                // Real session with running terminal
+                TerminalHostView(
+                    terminalKey: focused.id,
+                    initialCommands: embeddedInitialCommands[focused.id]
+                        ?? viewModel.buildResumeCommands(session: focused),
+                    font: makeTerminalFont(size: 12),
+                    isDark: colorScheme == .dark
+                )
+                .id(focused.id)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding(.horizontal, 16)
+            } else if showReviewMode, let ws = focusedSummary.map({ workingDirectory(for: $0) }) {
+                // Full review mode: occupy the whole detail area
+                GitChangesPanel(
+                    workingDirectory: URL(fileURLWithPath: ws, isDirectory: true),
+                    presentation: .full
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding(16)
+            } else if let focused = focusedSummary {
+                // Normal session detail view
+                SessionDetailView(
+                    summary: focused,
+                    isProcessing: isPerformingAction,
+                    onResume: {
+                        guard let current = focusedSummary else { return }
+                        if viewModel.preferences.defaultResumeUseEmbeddedTerminal {
+                            startEmbedded(for: current)
+                        } else {
+                            openPreferredExternal(for: current)
+                        }
+                    },
+                    onReveal: {
+                        guard let current = focusedSummary else { return }
+                        viewModel.reveal(session: current)
+                    },
+                    onDelete: presentDeleteConfirmation,
+                    columnVisibility: $columnVisibility
+                )
+                .environmentObject(viewModel)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            } else {
+                placeholder
             }
         }
     }
@@ -549,13 +563,22 @@ struct ContentView: View {
                     }
                 }
 
-                Button {
-                    if let focused = focusedSummary { viewModel.reveal(session: focused) }
-                } label: {
-                    Image(systemName: "folder")
-                }
+                Button { if let focused = focusedSummary { viewModel.reveal(session: focused) } } label: { Image(systemName: "folder") }
                 .disabled(focusedSummary == nil)
                 .help("Reveal in Finder")
+
+                // Toggle Review Mode (full-area Changes) + auto maximize detail
+                Button {
+                    let newValue = !showReviewMode
+                    showReviewMode = newValue
+                    if newValue {
+                        if !isDetailMaximized { toggleDetailMaximized(); reviewAutoMaximized = true }
+                    } else {
+                        if reviewAutoMaximized { toggleDetailMaximized(); reviewAutoMaximized = false }
+                    }
+                } label: { Image(systemName: "list.bullet.rectangle") }
+                .disabled(focusedSummary == nil)
+                .help("Toggle Review Mode")
 
                 if let focused = focusedSummary, runningSessionIDs.contains(focused.id) {
                     // Prompts picker: searchable quick insert into embedded terminal input
