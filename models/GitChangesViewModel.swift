@@ -136,6 +136,33 @@ final class GitChangesViewModel: ObservableObject {
         await refreshStatus()
     }
 
+    // Explicit stage only
+    func stage(paths: [String]) async {
+        guard let repo = self.repo, !paths.isEmpty else { return }
+        await service.stage(in: repo, paths: paths)
+        await refreshStatus()
+    }
+
+    // Explicit unstage only
+    func unstage(paths: [String]) async {
+        guard let repo = self.repo, !paths.isEmpty else { return }
+        await service.unstage(in: repo, paths: paths)
+        await refreshStatus()
+    }
+
+    // Folder action: stage remaining if not all staged, otherwise unstage all
+    func applyFolderStaging(for dirKey: String, paths: [String]) async {
+        guard !paths.isEmpty else { return }
+        let stagedSet: Set<String> = Set(changes.compactMap { ($0.staged != nil) ? $0.path : nil })
+        let allStaged = paths.allSatisfy { stagedSet.contains($0) }
+        if allStaged {
+            await unstage(paths: paths)
+        } else {
+            let toStage = paths.filter { !stagedSet.contains($0) }
+            await stage(paths: toStage)
+        }
+    }
+
     func commit() async {
         guard let repo = self.repo else { return }
         let code = await service.commit(in: repo, message: commitMessage)

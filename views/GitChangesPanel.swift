@@ -28,11 +28,14 @@ struct GitChangesPanel: View {
     // Hover state for quick actions
     @State private var hoverFilePath: String? = nil
     @State private var hoverDirKey: String? = nil
+    @State private var hoverEditPath: String? = nil
+    @State private var hoverRevertPath: String? = nil
+    @State private var hoverStagePath: String? = nil
+    @State private var hoverDirButtonPath: String? = nil
     @State private var hoverStagedHeader: Bool = false
     @State private var hoverUnstagedHeader: Bool = false
     @State private var pendingDiscardPaths: [String] = []
     @State private var showDiscardAlert: Bool = false
-    @State private var showGlobalMenu: Bool = false
     // Use an optional Int for segmented momentary actions: 0=collapse, 1=expand
     // @State private var treeToggleIndex: Int? = nil // 已移除，改用直接按钮
     // Layout constraints
@@ -45,6 +48,10 @@ struct GitChangesPanel: View {
     private let indentStep: CGFloat = 16
     private let chevronWidth: CGFloat = 16
     private let quickActionWidth: CGFloat = 18
+    private let quickActionHeight: CGFloat = 16
+    private let trailingPad: CGFloat = 8
+    private let hoverButtonSpacing: CGFloat = 8
+    private let statusBadgeWidth: CGFloat = 18
     // Viewer options (defaults: line numbers ON, wrap OFF)
     private let wrapText: Bool = false
     private let showLineNumbers: Bool = true
@@ -122,9 +129,22 @@ struct GitChangesPanel: View {
         .task(id: workingDirectory) {
             vm.attach(to: workingDirectory)
         }
-        .onAppear { rebuildNodes(); rebuildDisplayed() }
-        .onChange(of: vm.changes) { _, _ in rebuildNodes() }
+        .onAppear { rebuildNodes(); rebuildDisplayed(); ensureExpandAllIfNeeded() }
+        .onAppear {
+            // 初次展开所有目录（仅一次，不覆盖用户后续操作）
+            ensureExpandAllIfNeeded()
+        }
+        .onChange(of: vm.changes) { _, _ in rebuildNodes(); ensureExpandAllIfNeeded() }
         .onChange(of: treeQuery) { _, _ in rebuildDisplayed() }
+    }
+
+    private func ensureExpandAllIfNeeded() {
+        if expandedDirs.isEmpty {
+            var keys: [String] = []
+            keys += allDirectoryKeys(nodes: cachedNodesStaged)
+            keys += allDirectoryKeys(nodes: cachedNodesUnstaged)
+            expandedDirs = Set(keys)
+        }
     }
 
     private var header: some View {
@@ -254,17 +274,11 @@ struct GitChangesPanel: View {
     // MARK: - Left pane (toolbar + tree)
     private var leftPane: some View {
         VStack(spacing: 6) {
-            // Toolbar - Redesigned with explicit layout control
-            GeometryReader { toolbarGeo in
-                let availableWidth = toolbarGeo.size.width
-                let pickerWidth: CGFloat = 56 // 两个28pt的正方形按钮
-                let menuWidth: CGFloat = 30 // 增加到 30pt 给 menu 更多空间
+            // Toolbar - Search fills, buttons右对齐
+            GeometryReader { _ in
                 let spacing: CGFloat = 8
-                let totalFixedWidth = pickerWidth + menuWidth + (spacing * 2)
-                let searchWidth = max(80, availableWidth - totalFixedWidth)
-
-                HStack(spacing: 0) {
-                    // Search box - calculated width
+                HStack(spacing: spacing) {
+                    // Search box expands to fill
                     HStack(spacing: 6) {
                         Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
                         TextField("Search", text: $treeQuery)
@@ -275,14 +289,9 @@ struct GitChangesPanel: View {
                     .background(
                         RoundedRectangle(cornerRadius: 8).stroke(Color.secondary.opacity(0.2))
                     )
-                    .frame(width: searchWidth)
+                    .frame(maxWidth: .infinity)
 
-                    // Fixed spacing
-                    Rectangle()
-                        .fill(Color.clear)
-                        .frame(width: spacing, height: 1)
-
-                    // Collapse/Expand button group - transparent buttons
+                    // Collapse/Expand buttons
                     HStack(spacing: 0) {
                         // Collapse All button
                         Button {
@@ -329,53 +338,6 @@ struct GitChangesPanel: View {
                             }
                         }
                     }
-                    .frame(width: pickerWidth, alignment: .center)
-
-                    // Fixed spacing
-                    Rectangle()
-                        .fill(Color.clear)
-                        .frame(width: spacing, height: 1)
-
-                    // Three-dot menu - custom popover (hide arrow)
-                    HStack {
-                        Button {
-                            showGlobalMenu.toggle()
-                        } label: {
-                            Image(systemName: "ellipsis")
-                                .foregroundStyle(.secondary)
-                                .font(.system(size: 13))
-                        }
-                        .buttonStyle(.plain)
-                        .popover(isPresented: $showGlobalMenu) {
-                            PopMenuList(
-                                items: [
-                                    .init(title: "Stage All") {
-                                        showGlobalMenu = false
-                                        Task {
-                                            let paths = vm.changes.filter { $0.staged == nil }.map { $0.path }
-                                            await vm.toggleStage(for: paths)
-                                        }
-                                    },
-                                    .init(title: "Unstage All") {
-                                        showGlobalMenu = false
-                                        Task {
-                                            let paths = vm.changes.filter { $0.staged != nil }.map { $0.path }
-                                            await vm.toggleStage(for: paths)
-                                        }
-                                    }
-                                ],
-                                tail: [
-                                    .init(title: "Discard All Changes…", role: .destructive) {
-                                        pendingDiscardPaths = vm.changes.map { $0.path }
-                                        showGlobalMenu = false
-                                        showDiscardAlert = true
-                                    }
-                                ]
-                            )
-                            .frame(width: 220)
-                        }
-                    }
-                    .frame(width: menuWidth, alignment: .leading)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -557,22 +519,31 @@ struct GitChangesPanel: View {
                             .font(.system(size: 13))
                             .lineLimit(1)
                         Spacer(minLength: 0)
-                        // Hover quick action: Stage/Unstage entire folder
+                    }
+                    .padding(.trailing, (hoverDirKey == (node.dirPath ?? "")) ? (quickActionWidth + trailingPad) : trailingPad)
+                    .overlay(alignment: .trailing) {
                         if let dir = node.dirPath {
-                            let hasStaged = vm.changes.contains { $0.path.hasPrefix(dir + "/") && $0.staged != nil }
-                            Button(action: {
-                                Task {
-                                    let paths = filePaths(under: dir)
-                                    guard !paths.isEmpty else { return }
-                                    await vm.toggleStage(for: paths)
+                            let allPaths = filePaths(under: dir)
+                            let stagedSet: Set<String> = Set(vm.changes.compactMap { ($0.staged != nil) ? $0.path : nil })
+                            let allStaged = !allPaths.isEmpty && allPaths.allSatisfy { stagedSet.contains($0) }
+                            HStack(spacing: hoverButtonSpacing) {
+                                Button(action: {
+                                    Task {
+                                        let paths = filePaths(under: dir)
+                                        guard !paths.isEmpty else { return }
+                                        await vm.applyFolderStaging(for: dir, paths: paths)
+                                    }
+                                }) {
+                                    Image(systemName: allStaged ? "minus.circle" : "plus.circle")
                                 }
-                            }) {
-                                Image(systemName: hasStaged ? "minus.circle" : "plus.circle")
+                                .buttonStyle(.plain)
+                                .onHover { inside in
+                                    if inside { hoverDirButtonPath = dir } else if hoverDirButtonPath == dir { hoverDirButtonPath = nil }
+                                }
+                                .frame(width: quickActionWidth, height: quickActionHeight)
                             }
-                            .buttonStyle(.plain)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle((hoverDirButtonPath == dir) ? Color.accentColor : Color.secondary)
                             .opacity((hoverDirKey == dir) ? 1 : 0)
-                            .frame(width: quickActionWidth)
                         }
                     }
                 }
@@ -594,15 +565,15 @@ struct GitChangesPanel: View {
                 }
                 .contextMenu {
                     if let dir = node.dirPath {
-                        Button("Stage Folder") {
-                            Task { await vm.toggleStage(for: filePaths(under: dir)) }
-                        }
-                        Button("Unstage Folder") {
-                            Task { await vm.toggleStage(for: filePaths(under: dir)) }
+                        let allPaths = filePaths(under: dir)
+                        let stagedSet: Set<String> = Set(vm.changes.compactMap { ($0.staged != nil) ? $0.path : nil })
+                        let allStaged = !allPaths.isEmpty && allPaths.allSatisfy { stagedSet.contains($0) }
+                        Button(allStaged ? "Unstage Folder" : "Stage Folder") {
+                            Task { await vm.applyFolderStaging(for: dir, paths: allPaths) }
                         }
                         Divider()
                         Button("Discard Folder Changes…", role: .destructive) {
-                            pendingDiscardPaths = filePaths(under: dir)
+                            pendingDiscardPaths = allPaths
                             showDiscardAlert = true
                         }
                     }
@@ -633,41 +604,63 @@ struct GitChangesPanel: View {
                         Circle()
                             .fill(statusColor(for: path))
                             .frame(width: 6, height: 6)
+                        let icon = fileTypeIconName(for: path)
+                        Image(systemName: icon.name)
+                            .font(.system(size: 12))
+                            .foregroundStyle(icon.color)
                         Text(node.name)
                             .font(.system(size: 13))
                             .lineLimit(1)
                         Spacer(minLength: 0)
-                        // Hover quick action: Open with default editor (single click)
-                        Button { vm.openFile(path, using: preferences.defaultFileEditor) } label: {
-                            Image(systemName: "square.and.pencil")
-                        }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(.secondary)
-                        .opacity((hoverFilePath == path) ? 1 : 0)
-                        .frame(width: quickActionWidth)
-                        // Hover quick action: Discard file (VSCode-style revert icon)
-                        Button(action: {
-                            pendingDiscardPaths = [path]
-                            showDiscardAlert = true
-                        }) {
-                            Image(systemName: "arrow.uturn.backward.circle")
-                        }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(.secondary)
-                        .opacity((hoverFilePath == path) ? 1 : 0)
-                        .frame(width: quickActionWidth)
-                        // Hover quick action: Stage/Unstage
-                        Button(action: { Task { await vm.toggleStage(for: [path]) } }) {
-                            Image(systemName: staged ? "minus.circle" : "plus.circle")
-                        }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(.secondary)
-                        .opacity((hoverFilePath == path) ? 1 : 0)
-                        .frame(width: quickActionWidth)
-                        // Status badge (最右侧)
-                        if let change = vm.changes.first(where: { $0.path == path }) {
-                            statusBadge(for: change)
-                                .padding(.trailing, 6)
+                        // 标签不在主 HStack 中绘制，改到 overlay，避免重复与位移
+                    }
+                    // 右侧保留标签宽度；hover 时再额外预留按钮空间
+                    .padding(.trailing, (hoverFilePath == path)
+                        ? (statusBadgeWidth + trailingPad + quickActionWidth*3 + hoverButtonSpacing*2)
+                        : (statusBadgeWidth + trailingPad))
+                    .overlay(alignment: .trailing) {
+                        HStack(spacing: hoverButtonSpacing) {
+                            // 按钮只在行 hover 时显示；每个按钮自身 hover 才变色
+                            if hoverFilePath == path {
+                                Button { vm.openFile(path, using: preferences.defaultFileEditor) } label: {
+                                    Image(systemName: "square.and.pencil")
+                                        .foregroundStyle((hoverEditPath == path) ? Color.accentColor : Color.secondary)
+                                }
+                                .buttonStyle(.plain)
+                                .onHover { inside in
+                                    if inside { hoverEditPath = path } else if hoverEditPath == path { hoverEditPath = nil }
+                                }
+                                .frame(width: quickActionWidth, height: quickActionHeight)
+
+                                Button(action: {
+                                    pendingDiscardPaths = [path]
+                                    showDiscardAlert = true
+                                }) {
+                                    Image(systemName: "arrow.uturn.backward.circle")
+                                        .foregroundStyle((hoverRevertPath == path) ? Color.red : Color.secondary)
+                                }
+                                .buttonStyle(.plain)
+                                .onHover { inside in
+                                    if inside { hoverRevertPath = path } else if hoverRevertPath == path { hoverRevertPath = nil }
+                                }
+                                .frame(width: quickActionWidth, height: quickActionHeight)
+
+                                Button(action: { Task { await vm.toggleStage(for: [path]) } }) {
+                                    Image(systemName: staged ? "minus.circle" : "plus.circle")
+                                        .foregroundStyle((hoverStagePath == path) ? Color.accentColor : Color.secondary)
+                                }
+                                .buttonStyle(.plain)
+                                .onHover { inside in
+                                    if inside { hoverStagePath = path } else if hoverStagePath == path { hoverStagePath = nil }
+                                }
+                                .frame(width: quickActionWidth, height: quickActionHeight)
+                            }
+
+                            // 标签始终靠右
+                            if let change = vm.changes.first(where: { $0.path == path }) {
+                                statusBadge(for: change)
+                                    .frame(height: quickActionHeight)
+                            }
                         }
                     }
                 }
@@ -721,6 +714,21 @@ struct GitChangesPanel: View {
             }
         }
         return Color.secondary.opacity(0.3)
+    }
+
+    // Simple file type icon mapping
+    private func fileTypeIconName(for path: String) -> (name: String, color: Color) {
+        let ext = URL(fileURLWithPath: path).pathExtension.lowercased()
+        switch ext {
+        case "swift": return ("swift", .orange)
+        case "md": return ("doc.text", .green)
+        case "json": return ("curlybraces", .teal)
+        case "yml", "yaml": return ("list.bullet", .indigo)
+        case "js", "ts", "tsx", "jsx": return ("chevron.left.slash.chevron.right", .yellow)
+        case "png", "jpg", "jpeg", "gif", "svg": return ("photo", .purple)
+        case "sh", "zsh", "bash": return ("terminal", .gray)
+        default: return ("doc.plaintext", .secondary)
+        }
     }
 
     // Helper: Status badge text

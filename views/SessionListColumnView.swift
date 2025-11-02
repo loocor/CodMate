@@ -26,6 +26,7 @@ struct SessionListColumnView: View {
     @State private var newProjectPrefill: ProjectEditorSheet.Prefill? = nil
     @State private var newProjectAssignIDs: [String] = []
     @State private var lastClickedID: String? = nil
+    @State private var containerWidth: CGFloat = 0
 
     var body: some View {
         VStack(spacing: 0) {
@@ -168,6 +169,13 @@ struct SessionListColumnView: View {
             )
             .environmentObject(viewModel)
         }
+        .background(GeometryReader { geo in
+            Color.clear
+                .preference(key: ListColumnWidthKey.self, value: geo.size.width)
+        })
+        .onPreferenceChange(ListColumnWidthKey.self) { w in
+            containerWidth = w
+        }
     }
 
     private var header: some View {
@@ -180,14 +188,25 @@ struct SessionListColumnView: View {
             )
             .frame(maxWidth: .infinity)
 
-            EqualWidthSegmentedControl(
-                items: Array(SessionSortOrder.allCases),
-                selection: $sortOrder,
-                title: { $0.title }
-            )
-            .frame(maxWidth: .infinity)
+            // Hide segmented control when column width is too small to avoid squashed layout
+            if containerWidth >= 340 {
+                EqualWidthSegmentedControl(
+                    items: Array(SessionSortOrder.allCases),
+                    selection: $sortOrder,
+                    title: { $0.title }
+                )
+                .frame(maxWidth: .infinity)
+                .transition(.opacity.combined(with: .move(edge: .leading)))
+            }
         }
         .frame(maxWidth: .infinity)
+    }
+}
+
+private struct ListColumnWidthKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
     }
 }
 
@@ -408,11 +427,31 @@ private struct EqualWidthSegmentedControl<Item: Identifiable & Hashable>: NSView
         // Selection
         if let idx = items.firstIndex(of: selection) { control.selectedSegment = idx }
         else { control.selectedSegment = -1 }
+
+        // Ensure segments expand after the middle column resizes from 0 → normal.
+        let containerWidth = container.bounds.width
+        if context.coordinator.lastContainerWidth != containerWidth {
+            context.coordinator.lastContainerWidth = containerWidth
+            if #available(macOS 13.0, *) {
+                control.segmentDistribution = .fillEqually
+            }
+            // Force a fresh layout pass now and in next runloop to avoid "scrunched" state.
+            control.invalidateIntrinsicContentSize()
+            control.needsLayout = true
+            control.layoutSubtreeIfNeeded()
+            DispatchQueue.main.async {
+                control.invalidateIntrinsicContentSize()
+                control.needsLayout = true
+                control.layoutSubtreeIfNeeded()
+            }
+        }
+
         if #available(macOS 13.0, *) {
-            control.segmentDistribution = .fillEqually
+            // Nothing else; fillEqually handles widths.
         } else {
-            // Fallback: try to equalize manually
-            if let superWidth = control.superview?.bounds.width {
+            // Fallback: try to equalize manually each update
+            let superWidth = control.superview?.bounds.width ?? containerWidth
+            if superWidth > 0 {
                 let width = max(60.0, superWidth / CGFloat(max(1, items.count)))
                 for i in 0..<control.segmentCount { control.setWidth(width, forSegment: i) }
             }
@@ -429,6 +468,7 @@ private struct EqualWidthSegmentedControl<Item: Identifiable & Hashable>: NSView
     final class Coordinator: NSObject {
         weak var control: NSSegmentedControl?
         var parent: EqualWidthSegmentedControl
+        var lastContainerWidth: CGFloat = -1
         init(_ parent: EqualWidthSegmentedControl) { self.parent = parent }
         @objc func changed(_ sender: NSSegmentedControl) {
             let idx = sender.selectedSegment

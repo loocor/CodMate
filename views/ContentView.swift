@@ -148,7 +148,7 @@ struct ContentView: View {
         } detail: {
             detailColumn
         }
-        .navigationSplitViewStyle(.balanced)
+        .navigationSplitViewStyle(.prominentDetail)
         .onAppear { applyVisibilityFromStorage(animated: false) }
         
         let viewWithTasks = applyTaskAndChangeModifiers(to: baseView)
@@ -214,10 +214,6 @@ struct ContentView: View {
             // Toggle middle list visibility via global shortcut (Cmd+2)
             .onReceive(NotificationCenter.default.publisher(for: .codMateToggleList)) { _ in
                 toggleListVisibility()
-            }
-            // On app active, re-apply stored visibility to avoid drift
-            .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-                applyVisibilityFromStorage(animated: true)
             }
     }
     
@@ -297,14 +293,14 @@ struct ContentView: View {
             isAwaitingFollowup: { viewModel.isAwaitingFollowup($0.id) },
             onPrimarySelect: { s in selectionPrimaryId = s.id }
         )
+        .id(isListHidden ? "list-hidden" : "list-shown")
         .environmentObject(viewModel)
         .navigationSplitViewColumnWidth(
             min: isListHidden ? 0 : 360,
             ideal: isListHidden ? 0 : 420,
             max: isListHidden ? 0 : 480
         )
-        .frame(minWidth: isListHidden ? 0 : 360)
-        .opacity(isListHidden ? 0 : 1)
+        // Rely on columnWidth for size; avoid separate frame/opacity animations
         .allowsHitTesting(!isListHidden)
         .sheet(item: $viewModel.editingSession, onDismiss: { viewModel.cancelEdits() }) { _ in
             EditSessionMetaView(viewModel: viewModel)
@@ -349,7 +345,9 @@ struct ContentView: View {
 
             Divider()
 
+            // Keep detail visually anchored; avoid animating with list hide/show
             mainDetailContent
+                .animation(nil, value: isListHidden)
         }
     }
 
@@ -1318,10 +1316,9 @@ struct ContentView: View {
     }
 
     private func toggleListVisibility() {
-        withAnimation(.easeInOut(duration: 0.15)) {
-            isListHidden.toggle()
-            storeListHidden = isListHidden
-        }
+        // Revert to non-animated toggle to keep detail anchored and stable
+        isListHidden.toggle()
+        storeListHidden = isListHidden
     }
 
     private func applyVisibilityFromStorage(animated: Bool) {
