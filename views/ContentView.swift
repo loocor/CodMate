@@ -353,8 +353,22 @@ struct ContentView: View {
 
     private var mainDetailContent: some View {
         Group {
-            // Priority 1: Check for virtual anchor (new session in progress)
-            if let anchorId = fallbackRunningAnchorId() {
+            // Priority 1: Review mode should take precedence over terminal views
+            if showReviewMode, let focused = focusedSummary, let ws = focusedSummary.map({ workingDirectory(for: $0) }) {
+                // Full review mode: occupy the whole detail area
+                // Bind per-session review panel state so UI is preserved while toggling.
+                GitChangesPanel(
+                    workingDirectory: URL(fileURLWithPath: ws, isDirectory: true),
+                    presentation: .full,
+                    preferences: viewModel.preferences,
+                    savedState: Binding<ReviewPanelState>(
+                        get: { viewModel.reviewPanelStates[focused.id] ?? ReviewPanelState() },
+                        set: { viewModel.reviewPanelStates[focused.id] = $0 }
+                    )
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding(16)
+            } else if let anchorId = fallbackRunningAnchorId() {
                 // Virtual anchor terminal for new session
                 TerminalHostView(
                     terminalKey: anchorId,
@@ -377,15 +391,6 @@ struct ContentView: View {
                 .id(focused.id)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .padding(.horizontal, 16)
-            } else if showReviewMode, let ws = focusedSummary.map({ workingDirectory(for: $0) }) {
-                // Full review mode: occupy the whole detail area
-                GitChangesPanel(
-                    workingDirectory: URL(fileURLWithPath: ws, isDirectory: true),
-                    presentation: .full,
-                    preferences: viewModel.preferences
-                )
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .padding(16)
             } else if let focused = focusedSummary {
                 // Normal session detail view
                 SessionDetailView(
@@ -619,14 +624,16 @@ struct ContentView: View {
                     }
                 }
 
-                Button { if let focused = focusedSummary { viewModel.reveal(session: focused) } } label: { Image(systemName: "folder") }
+                Button { if let focused = focusedSummary { viewModel.reveal(session: focused) } } label: { Image(systemName: "finder") }
                 .disabled(focusedSummary == nil)
                 .help("Reveal in Finder")
 
-                // Toggle Review Mode (full-area Changes)
-                Button {
-                    showReviewMode.toggle()
-                } label: { Image(systemName: "list.bullet.rectangle") }
+                // Toggle Review Mode (full-area Changes) as a pressed/unpressed button
+                Toggle(isOn: $showReviewMode) {
+                    Image(systemName: "arrow.triangle.branch")
+                }
+                .toggleStyle(.button)
+                .controlSize(.small)
                 .disabled(focusedSummary == nil)
                 .help("Toggle Review Mode")
 

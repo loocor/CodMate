@@ -86,6 +86,10 @@ final class SessionListViewModel: ObservableObject {
     @Published private(set) var activeUpdatingIDs: Set<String> = []
     @Published private(set) var awaitingFollowupIDs: Set<String> = []
 
+    // Persist Review (Git Changes) panel UI state per session so toggling
+    // between Conversation, Terminal and Review preserves context.
+    @Published var reviewPanelStates: [String: ReviewPanelState] = [:]
+
     // Auto-assign: pending intents created when user clicks New
     struct PendingAssignIntent: Identifiable, Sendable, Hashable {
         let id = UUID()

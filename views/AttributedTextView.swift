@@ -142,8 +142,55 @@ struct AttributedTextView: NSViewRepresentable {
                 for i in 0..<len { if buf[i] == 10 { nl.append(i) } }
                 buf.deallocate()
             }
+            var diffRightNumbers: [Int?] = []
+            var diffLeftNumbers: [Int?] = []
+            var diffMaxRight: Int = 0
+            var diffMaxLeft: Int = 0
             if isDiff {
                 DiffStyler.apply(to: attr)
+                // Build mapping from visual lines → right-side (new file) line numbers
+                let full = input as NSString
+                var mapR: [Int?] = []
+                var mapL: [Int?] = []
+                mapR.reserveCapacity(nl.count + 1)
+                mapL.reserveCapacity(nl.count + 1)
+                var currentRight: Int? = nil
+                var currentLeft: Int? = nil
+                var lineIndex = 0
+                full.enumerateSubstrings(in: NSRange(location: 0, length: full.length), options: .byLines) { _, range, _, stop in
+                    defer { lineIndex += 1 }
+                    guard range.length > 0 else { mapR.append(nil); mapL.append(nil); return }
+                    let firstChar = full.substring(with: NSRange(location: range.location, length: 1))
+                    // Detect hunk header: @@ -l,ct +r,ct @@
+                    if DiffStyler_lineStarts(with: "@@", in: full, at: range) {
+                        // Parse left/right starts
+                        let lineStr = full.substring(with: range)
+                        currentRight = parseRightStart(fromHunkHeader: lineStr)
+                        currentLeft = parseLeftStart(fromHunkHeader: lineStr)
+                        mapR.append(nil)
+                        mapL.append(nil)
+                        return
+                    }
+                    // Ignore file headers
+                    if DiffStyler_lineStarts(with: "diff --git", in: full, at: range) || DiffStyler_lineStarts(with: "index ", in: full, at: range) || DiffStyler_lineStarts(with: "+++", in: full, at: range) || DiffStyler_lineStarts(with: "---", in: full, at: range) {
+                        mapR.append(nil); mapL.append(nil); return
+                    }
+                    if firstChar == "+" && !DiffStyler_lineStarts(with: "+++", in: full, at: range) {
+                        if let r0 = currentRight { mapR.append(r0); diffMaxRight = max(diffMaxRight, r0); currentRight = r0 + 1 } else { mapR.append(nil) }
+                        mapL.append(nil)
+                    } else if firstChar == " " {
+                        if let r0 = currentRight { mapR.append(r0); diffMaxRight = max(diffMaxRight, r0); currentRight = r0 + 1 } else { mapR.append(nil) }
+                        if let l0 = currentLeft { mapL.append(l0); diffMaxLeft = max(diffMaxLeft, l0); currentLeft = l0 + 1 } else { mapL.append(nil) }
+                    } else if firstChar == "-" && !DiffStyler_lineStarts(with: "---", in: full, at: range) {
+                        if let l0 = currentLeft { mapL.append(l0); diffMaxLeft = max(diffMaxLeft, l0); currentLeft = l0 + 1 } else { mapL.append(nil) }
+                        mapR.append(nil)
+                    } else {
+                        mapR.append(nil)
+                        mapL.append(nil)
+                    }
+                }
+                diffRightNumbers = mapR
+                diffLeftNumbers = mapL
             } else {
                 // Light syntax hints for common formats
                 SyntaxStyler.applyLight(to: attr)
@@ -153,10 +200,14 @@ struct AttributedTextView: NSViewRepresentable {
                 tv.textStorage?.setAttributedString(attr)
                 if let lm = tv.layoutManager as? LineNumberLayoutManager {
                     lm.newlineOffsets = nl
+                    lm.diffMode = isDiff
+                    lm.diffRightLineNumbers = diffRightNumbers
+                    lm.diffLeftLineNumbers = diffLeftNumbers
                 }
                 // Dynamic gutter width based on maximum line number digits
                 let totalLines = max(1, nl.count + 1)
-                let digits = max(2, String(totalLines).count)
+                let targetMax = isDiff ? max(1, max(diffMaxRight, diffMaxLeft)) : totalLines
+                let digits = max(2, String(targetMax).count)
                 let sample = String(repeating: "8", count: digits) as NSString
                 let numWidth = sample.size(withAttributes: [.font: font]).width
                 let gap: CGFloat = 3 // spacing between numbers and separator
@@ -205,39 +256,116 @@ private enum DiffStyler {
 }
 
 private enum SyntaxStyler {
+
+    // Cached regex patterns (compiled once for performance)
+    private static let keywordPattern: NSRegularExpression? = {
+        // Common keywords across multiple languages (combined into one regex)
+        let keywords = [
+            // JavaScript/TypeScript
+            "function", "const", "let", "var", "if", "else", "return", "for", "while",
+            "import", "export", "class", "extends", "async", "await", "try", "catch",
+            // Swift
+            "func", "struct", "enum", "protocol", "private", "public", "guard", "defer",
+            // Python
+            "def", "lambda", "with", "as", "pass", "yield", "raise", "except",
+            // Rust
+            "fn", "impl", "trait", "mod", "use", "pub", "mut", "unsafe",
+            // Go
+            "package", "type", "interface", "chan", "go", "range",
+            // Common control flow
+            "switch", "case", "default", "break", "continue",
+            // Common types and values
+            "int", "bool", "string", "float", "void",
+            "null", "true", "false", "nil", "undefined",
+            // YAML/TOML specific
+            "yes", "no", "on", "off"
+        ]
+        let pattern = "\\b(" + keywords.joined(separator: "|") + ")\\b"
+        return try? NSRegularExpression(pattern: pattern, options: [])
+    }()
+
+    private static let numberPattern: NSRegularExpression? = {
+        try? NSRegularExpression(pattern: "\\b(0x[0-9A-Fa-f]+|\\d+\\.?\\d*)\\b", options: [])
+    }()
+
     static func applyLight(to s: NSMutableAttributedString) {
-        // Extremely light heuristics for JSON/YAML/Swift/Markdown
         let str = s.string as NSString
+        let fullString = s.string
+        let fullRange = NSRange(location: 0, length: str.length)
+
+        // Color palette (using system colors for auto Light/Dark adaptation)
+        let keywordColor = NSColor.systemPink
+        let stringColor = NSColor.systemRed
         let commentColor = NSColor.systemGreen
-        // JSON strings
-        var idx = 0
-        while idx < str.length {
-            let c = str.character(at: idx)
-            if c == 34 { // '"'
-                let start = idx
-                idx += 1; var escaping = false
-                while idx < str.length {
-                    let cc = str.character(at: idx)
-                    if cc == 92 { escaping.toggle() } // '\\'
-                    else if cc == 34 && !escaping { break }
-                    else { escaping = false }
-                    idx += 1
-                }
-                let end = min(idx+1, str.length)
-                s.addAttribute(.foregroundColor, value: NSColor.systemOrange, range: NSRange(location: start, length: end-start))
+        let numberColor = NSColor.systemPurple
+
+        // 1. Strings (all quote types in one pass)
+        highlightStrings(in: s, str: str, color: stringColor)
+
+        // 2. Comments (both // and # in one pass)
+        highlightComments(in: s, fullString: fullString, color: commentColor)
+
+        // 3. Keywords (single regex with all keywords combined)
+        keywordPattern?.enumerateMatches(in: fullString, range: fullRange) { match, _, _ in
+            if let range = match?.range {
+                s.addAttribute(.foregroundColor, value: keywordColor, range: range)
             }
-            idx += 1
         }
-        // Single-line comments (Swift/C/JS)
-        let scanner = Scanner(string: s.string)
-        scanner.charactersToBeSkipped = nil
-        while !scanner.isAtEnd {
-            _ = scanner.scanUpToString("//")
-            if scanner.scanString("//") != nil {
-                let start = scanner.currentIndex
-                _ = scanner.scanUpToCharacters(from: .newlines)
-                let end = scanner.currentIndex
-                s.addAttribute(.foregroundColor, value: commentColor, range: NSRange(start..<end, in: s.string))
+
+        // 4. Numbers (single regex)
+        numberPattern?.enumerateMatches(in: fullString, range: fullRange) { match, _, _ in
+            if let range = match?.range {
+                s.addAttribute(.foregroundColor, value: numberColor, range: range)
+            }
+        }
+    }
+
+    // Highlight strings (all quote types: ", ', `)
+    private static func highlightStrings(in s: NSMutableAttributedString, str: NSString, color: NSColor) {
+        let quotes: [UInt16] = [34, 39, 96] // ", ', `
+
+        for quote in quotes {
+            var idx = 0
+            while idx < str.length {
+                let c = str.character(at: idx)
+                if c == quote {
+                    let start = idx
+                    idx += 1
+                    var escaping = false
+                    while idx < str.length {
+                        let cc = str.character(at: idx)
+                        if cc == 92 { escaping.toggle() } // '\\'
+                        else if cc == quote && !escaping { break }
+                        else { escaping = false }
+                        idx += 1
+                    }
+                    let end = min(idx + 1, str.length)
+                    s.addAttribute(.foregroundColor, value: color, range: NSRange(location: start, length: end - start))
+                }
+                idx += 1
+            }
+        }
+    }
+
+    // Highlight comments (//, #, ; for different file formats)
+    private static func highlightComments(in s: NSMutableAttributedString, fullString: String, color: NSColor) {
+        // Support multiple comment styles:
+        // // - C-style (JS, Swift, Rust, Go, etc.)
+        // #  - Shell-style (Python, Ruby, YAML, TOML, ENV)
+        // ;  - INI-style (INI files)
+        let commentStarts = ["//", "#", ";"]
+
+        for commentStart in commentStarts {
+            let scanner = Scanner(string: fullString)
+            scanner.charactersToBeSkipped = nil
+            while !scanner.isAtEnd {
+                _ = scanner.scanUpToString(commentStart)
+                if scanner.scanString(commentStart) != nil {
+                    let start = scanner.currentIndex
+                    _ = scanner.scanUpToCharacters(from: .newlines)
+                    let end = scanner.currentIndex
+                    s.addAttribute(.foregroundColor, value: color, range: NSRange(start..<end, in: fullString))
+                }
             }
         }
     }
@@ -248,8 +376,13 @@ final class LineNumberLayoutManager: NSLayoutManager {
     var showsLineNumbers: Bool = true
     weak var textView: NSTextView?
     private let numberColor = NSColor.secondaryLabelColor
+    private let deletionNumberColor = NSColor.systemRed
     // UTF-16 offsets of "\n" in the current textStorage string
     var newlineOffsets: [Int] = []
+    // Diff mode line-number mapping (visual line index → side line numbers)
+    var diffMode: Bool = false
+    var diffRightLineNumbers: [Int?] = []
+    var diffLeftLineNumbers: [Int?] = []
 
     func lineNumberFor(charIndex idx: Int) -> Int {
         if newlineOffsets.isEmpty { return 1 }
@@ -298,11 +431,25 @@ final class LineNumberLayoutManager: NSLayoutManager {
             var lineGlyphRange = NSRange(location: 0, length: 0)
             let lineRect = self.lineFragmentUsedRect(forGlyphAt: glyphIndex, effectiveRange: &lineGlyphRange, withoutAdditionalLayout: true)
             let y = origin.y + lineRect.minY
+            // Determine number + color for this visual line
+            let idx = lineNumber - 1
+            let rightVal = (diffMode && idx < diffRightLineNumbers.count) ? diffRightLineNumbers[idx] : nil
+            let leftVal = (diffMode && idx < diffLeftLineNumbers.count) ? diffLeftLineNumbers[idx] : nil
+            let isDeletion = diffMode && leftVal != nil && rightVal == nil
+            let drawColor = isDeletion ? deletionNumberColor : numberColor
             let attrs: [NSAttributedString.Key: Any] = [
                 .font: textView.font ?? NSFont.monospacedSystemFont(ofSize: 11, weight: .regular),
-                .foregroundColor: numberColor
+                .foregroundColor: drawColor
             ]
-            let num = "\(lineNumber)" as NSString
+            let numString: String = {
+                if diffMode {
+                    if isDeletion, let l = leftVal { return String(l) }
+                    if let r = rightVal { return String(r) }
+                    return ""
+                }
+                return String(lineNumber)
+            }()
+            let num = numString as NSString
             let size = num.size(withAttributes: attrs)
             let padding = textView.textContainer?.lineFragmentPadding ?? 0
             let gap: CGFloat = 3 // spacing between numbers and text start
@@ -312,4 +459,39 @@ final class LineNumberLayoutManager: NSLayoutManager {
             glyphIndex = lineGlyphRange.upperBound
         }
     }
+}
+
+// MARK: - Helpers for diff parsing
+private func DiffStyler_lineStarts(with prefix: String, in str: NSString, at range: NSRange) -> Bool {
+    if str.length >= range.location + prefix.count {
+        return str.substring(with: NSRange(location: range.location, length: prefix.count)) == prefix
+    }
+    return false
+}
+
+private func parseRightStart(fromHunkHeader header: String) -> Int? {
+    // Example: @@ -10,7 +12,9 @@ or @@ -10 +12 @@
+    // Extract the +<num> portion
+    guard let plusRange = header.range(of: "+") else { return nil }
+    var digits = ""
+    var idx = plusRange.upperBound
+    while idx < header.endIndex {
+        let ch = header[idx]
+        if ch.isNumber { digits.append(ch) } else { break }
+        idx = header.index(after: idx)
+    }
+    return Int(digits)
+}
+
+private func parseLeftStart(fromHunkHeader header: String) -> Int? {
+    // Extract the -<num> portion from a hunk header
+    guard let dashRange = header.range(of: "-") else { return nil }
+    var digits = ""
+    var idx = header.index(after: dashRange.lowerBound)
+    while idx < header.endIndex {
+        let ch = header[idx]
+        if ch.isNumber { digits.append(ch) } else { break }
+        idx = header.index(after: idx)
+    }
+    return Int(digits)
 }

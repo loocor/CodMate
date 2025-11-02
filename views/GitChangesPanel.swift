@@ -8,6 +8,7 @@ struct GitChangesPanel: View {
     let workingDirectory: URL
     var presentation: Presentation = .embedded
     let preferences: SessionPreferencesStore
+    @Binding var savedState: ReviewPanelState
     @StateObject private var vm = GitChangesViewModel()
     // Layout state
     @State private var leftColumnWidth: CGFloat = 0   // 0 = init to 1/4 of container
@@ -36,10 +37,11 @@ struct GitChangesPanel: View {
     @State private var hoverUnstagedHeader: Bool = false
     @State private var pendingDiscardPaths: [String] = []
     @State private var showDiscardAlert: Bool = false
+    @State private var showCommitConfirm: Bool = false
     // Use an optional Int for segmented momentary actions: 0=collapse, 1=expand
-    // @State private var treeToggleIndex: Int? = nil // 已移除，改用直接按钮
+    // @State private var treeToggleIndex: Int? = nil
     // Layout constraints
-    private let leftMin: CGFloat = 240
+    private let leftMin: CGFloat = 280
     private let leftMax: CGFloat = 520
     private let commitMinHeight: CGFloat = 140
     // Indent guide metrics (horizontal):
@@ -57,85 +59,114 @@ struct GitChangesPanel: View {
     private let showLineNumbers: Bool = true
 
     var body: some View {
-        let content = VStack(alignment: .leading, spacing: 8) {
+        contentWithPresentation
+            .alert("Discard changes?", isPresented: $showDiscardAlert) {
+                Button("Discard", role: .destructive) {
+                    let paths = pendingDiscardPaths
+                    pendingDiscardPaths = []
+                    Task { await vm.discard(paths: paths) }
+                }
+                Button("Cancel", role: .cancel) {
+                    pendingDiscardPaths = []
+                }
+            } message: {
+                let count = pendingDiscardPaths.count
+                Text("This will permanently discard changes for \(count) file\(count == 1 ? "" : "s").")
+            }
+            .confirmationDialog(
+                "Commit changes?",
+                isPresented: $showCommitConfirm,
+                titleVisibility: .visible
+            ) {
+                Button("Commit", role: .destructive) { Task { await vm.commit() } }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                let msg = vm.commitMessage.trimmingCharacters(in: .whitespacesAndNewlines)
+                if msg.isEmpty {
+                    Text("This will create a commit for staged changes.")
+                } else {
+                    Text("Commit message:\n\n\(msg)")
+                }
+            }
+            .task(id: workingDirectory) {
+                vm.attach(to: workingDirectory)
+            }
+            .modifier(LifecycleModifier(
+                expandedDirs: $expandedDirs,
+                savedState: $savedState,
+                vm: vm,
+                treeQuery: treeQuery,
+                onRebuildNodes: rebuildNodes,
+                onRebuildDisplayed: rebuildDisplayed,
+                onEnsureExpandAll: ensureExpandAllIfNeeded
+            ))
+    }
+
+    private var contentWithPresentation: some View {
+        Group {
+            switch presentation {
+            case .embedded:
+                baseContent
+                    .padding(8)
+                    .background(.thinMaterial)
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            case .full:
+                baseContent
+            }
+        }
+    }
+
+    // Extracted heavy content to reduce body type-checking complexity
+    private var baseContent: some View {
+        VStack(alignment: .leading, spacing: 8) {
             header
             VSplitView {
                 GeometryReader { geo in
-                    // Top split: left file tree and right diff/preview, with draggable divider
-                    HStack(spacing: 0) {
-                        let leftW = effectiveLeftWidth(total: geo.size.width)
-                        let gutterW: CGFloat = 17 // divider 1pt + 8pt padding each side
-                        let rightW = max(geo.size.width - gutterW - leftW, 240)
-                        leftPane
-                            .frame(width: leftW)
-                            .frame(minWidth: leftMin, maxWidth: leftMax)
-                        // Visible divider with padding; whole gutter is draggable
-                        HStack(spacing: 0) {
-                            Color.clear.frame(width: 8)
-                            Divider().frame(width: 1)
-                            Color.clear.frame(width: 8)
-                        }
-                            .frame(width: gutterW)
-                            .frame(maxHeight: .infinity)
-                            .contentShape(Rectangle())
-                            .gesture(DragGesture(minimumDistance: 1).onChanged { value in
-                                let newW = clampLeftWidth(leftColumnWidth + value.translation.width, total: geo.size.width)
-                                leftColumnWidth = newW
-                            })
-                            .onHover { inside in
-                                #if canImport(AppKit)
-                                if inside { NSCursor.resizeLeftRight.set() } else { NSCursor.arrow.set() }
-                                #endif
+                    splitContent(totalWidth: geo.size.width)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .onAppear {
+                            if leftColumnWidth == 0 {
+                                leftColumnWidth = clampLeftWidth(geo.size.width * 0.25, total: geo.size.width)
                             }
-                        detailView
-                            .frame(width: rightW)
-                            .frame(maxHeight: .infinity)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .onAppear {
-                        if leftColumnWidth == 0 {
-                            leftColumnWidth = clampLeftWidth(geo.size.width * 0.25, total: geo.size.width)
                         }
-                    }
                 }
 
                 // (Commit box moved to left pane top)
             }
         }
-        Group {
-            switch presentation {
-            case .embedded:
-                content
-                    .padding(8)
-                    .background(.thinMaterial)
-                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-            case .full:
-                content
+    }
+
+    private func splitContent(totalWidth: CGFloat) -> some View {
+        // Top split: left file tree and right diff/preview, with draggable divider
+        let leftW = effectiveLeftWidth(total: totalWidth)
+        let gutterW: CGFloat = 17 // divider 1pt + 8pt padding each side
+        let rightW = max(totalWidth - gutterW - leftW, 240)
+        return HStack(spacing: 0) {
+            leftPane
+                .frame(width: leftW)
+                .frame(minWidth: leftMin, maxWidth: leftMax)
+            // Visible divider with padding; whole gutter is draggable
+            HStack(spacing: 0) {
+                Color.clear.frame(width: 8)
+                Divider().frame(width: 1)
+                Color.clear.frame(width: 8)
             }
-        }
-        .alert("Discard changes?", isPresented: $showDiscardAlert) {
-            Button("Discard", role: .destructive) {
-                let paths = pendingDiscardPaths
-                pendingDiscardPaths = []
-                Task { await vm.discard(paths: paths) }
+            .frame(width: gutterW)
+            .frame(maxHeight: .infinity)
+            .contentShape(Rectangle())
+            .gesture(DragGesture(minimumDistance: 1).onChanged { value in
+                let newW = clampLeftWidth(leftColumnWidth + value.translation.width, total: totalWidth)
+                leftColumnWidth = newW
+            })
+            .onHover { inside in
+                #if canImport(AppKit)
+                if inside { NSCursor.resizeLeftRight.set() } else { NSCursor.arrow.set() }
+                #endif
             }
-            Button("Cancel", role: .cancel) {
-                pendingDiscardPaths = []
-            }
-        } message: {
-            let count = pendingDiscardPaths.count
-            Text("This will permanently discard changes for \(count) file\(count == 1 ? "" : "s").")
+            detailView
+                .frame(width: rightW)
+                .frame(maxHeight: .infinity)
         }
-        .task(id: workingDirectory) {
-            vm.attach(to: workingDirectory)
-        }
-        .onAppear { rebuildNodes(); rebuildDisplayed(); ensureExpandAllIfNeeded() }
-        .onAppear {
-            // 初次展开所有目录（仅一次，不覆盖用户后续操作）
-            ensureExpandAllIfNeeded()
-        }
-        .onChange(of: vm.changes) { _, _ in rebuildNodes(); ensureExpandAllIfNeeded() }
-        .onChange(of: treeQuery) { _, _ in rebuildDisplayed() }
     }
 
     private func ensureExpandAllIfNeeded() {
@@ -150,7 +181,7 @@ struct GitChangesPanel: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
-                Label("Changes", systemImage: "list.bullet.rectangle")
+                Label("Changes", systemImage: "arrow.triangle.branch")
                     .font(.headline)
                 if let root = vm.repoRoot?.path {
                     Text(root)
@@ -167,6 +198,15 @@ struct GitChangesPanel: View {
                 .frame(width: 116)
                 .controlSize(.small)
                 .labelsHidden()
+
+                // Hidden keyboard shortcut to trigger commit confirmation via ⌘⏎
+                Button("") {
+                    let msg = vm.commitMessage.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !msg.isEmpty { showCommitConfirm = true }
+                }
+                .keyboardShortcut(.return, modifiers: .command)
+                .frame(width: 0, height: 0)
+                .opacity(0)
 
                 Button {
                     Task { await vm.refreshStatus() }
@@ -274,7 +314,7 @@ struct GitChangesPanel: View {
     // MARK: - Left pane (toolbar + tree)
     private var leftPane: some View {
         VStack(spacing: 6) {
-            // Toolbar - Search fills, buttons右对齐
+            // Toolbar - Search fills
             GeometryReader { _ in
                 let spacing: CGFloat = 8
                 HStack(spacing: spacing) {
@@ -302,7 +342,7 @@ struct GitChangesPanel: View {
                                 .foregroundStyle(.secondary)
                         }
                         .buttonStyle(.plain)
-                        .frame(width: 28, height: 28) // 正方形，与搜索框高度一致
+                        .frame(width: 28, height: 28)
                         .background(
                             RoundedRectangle(cornerRadius: 4)
                                 .fill(Color.clear)
@@ -310,7 +350,6 @@ struct GitChangesPanel: View {
                         .contentShape(Rectangle())
                         .onHover { hovering in
                             if hovering {
-                                // 悬停时的视觉反馈可以通过系统默认处理
                             }
                         }
 
@@ -326,7 +365,7 @@ struct GitChangesPanel: View {
                                 .foregroundStyle(.secondary)
                         }
                         .buttonStyle(.plain)
-                        .frame(width: 28, height: 28) // 正方形，与搜索框高度一致
+                        .frame(width: 28, height: 28)
                         .background(
                             RoundedRectangle(cornerRadius: 4)
                                 .fill(Color.clear)
@@ -334,7 +373,6 @@ struct GitChangesPanel: View {
                         .contentShape(Rectangle())
                         .onHover { hovering in
                             if hovering {
-                                // 悬停时的视觉反馈可以通过系统默认处理
                             }
                         }
                     }
@@ -361,7 +399,7 @@ struct GitChangesPanel: View {
                         commitInlineHeight = measureCommitHeight(vm.commitMessage, width: w)
                     }
                     if vm.commitMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        Text("Commit message…")
+                        Text("Press Command+Return to commit")
                             .foregroundStyle(.tertiary)
                             .padding(.top, 6)
                             .padding(.leading, 10)
@@ -411,7 +449,8 @@ struct GitChangesPanel: View {
                         }
                         .buttonStyle(.plain)
                         .frame(width: chevronWidth)
-                        Text("Changes (\(vm.changes.filter { $0.staged == nil && $0.worktree != nil }.count))")
+                        // Show all files with worktree changes, even if they also have staged changes (MM)
+                        Text("Changes (\(vm.changes.filter { $0.worktree != nil }.count))")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                         Spacer(minLength: 0)
@@ -475,7 +514,8 @@ struct GitChangesPanel: View {
 
     private func rebuildNodes() {
         let staged = vm.changes.filter { $0.staged != nil }
-        let unstaged = vm.changes.filter { $0.staged == nil && $0.worktree != nil }
+        // Include MM files in the Unstaged view as well, to mirror Cursor/VS Code behavior
+        let unstaged = vm.changes.filter { $0.worktree != nil }
         cachedNodesStaged = makeTree(from: staged)
         cachedNodesUnstaged = makeTree(from: unstaged)
         rebuildDisplayed()
@@ -524,17 +564,16 @@ struct GitChangesPanel: View {
                     .overlay(alignment: .trailing) {
                         if let dir = node.dirPath {
                             let allPaths = filePaths(under: dir)
-                            let stagedSet: Set<String> = Set(vm.changes.compactMap { ($0.staged != nil) ? $0.path : nil })
-                            let allStaged = !allPaths.isEmpty && allPaths.allSatisfy { stagedSet.contains($0) }
                             HStack(spacing: hoverButtonSpacing) {
                                 Button(action: {
                                     Task {
                                         let paths = filePaths(under: dir)
                                         guard !paths.isEmpty else { return }
-                                        await vm.applyFolderStaging(for: dir, paths: paths)
+                                        if scope == .staged { await vm.unstage(paths: paths) }
+                                        else { await vm.stage(paths: paths) }
                                     }
                                 }) {
-                                    Image(systemName: allStaged ? "minus.circle" : "plus.circle")
+                                    Image(systemName: scope == .staged ? "minus.circle" : "plus.circle")
                                 }
                                 .buttonStyle(.plain)
                                 .onHover { inside in
@@ -566,10 +605,10 @@ struct GitChangesPanel: View {
                 .contextMenu {
                     if let dir = node.dirPath {
                         let allPaths = filePaths(under: dir)
-                        let stagedSet: Set<String> = Set(vm.changes.compactMap { ($0.staged != nil) ? $0.path : nil })
-                        let allStaged = !allPaths.isEmpty && allPaths.allSatisfy { stagedSet.contains($0) }
-                        Button(allStaged ? "Unstage Folder" : "Stage Folder") {
-                            Task { await vm.applyFolderStaging(for: dir, paths: allPaths) }
+                        if scope == .staged {
+                            Button("Unstage Folder") { Task { await vm.unstage(paths: allPaths) } }
+                        } else {
+                            Button("Stage Folder") { Task { await vm.stage(paths: allPaths) } }
                         }
                         Divider()
                         Button("Discard Folder Changes…", role: .destructive) {
@@ -612,15 +651,12 @@ struct GitChangesPanel: View {
                             .font(.system(size: 13))
                             .lineLimit(1)
                         Spacer(minLength: 0)
-                        // 标签不在主 HStack 中绘制，改到 overlay，避免重复与位移
                     }
-                    // 右侧保留标签宽度；hover 时再额外预留按钮空间
                     .padding(.trailing, (hoverFilePath == path)
                         ? (statusBadgeWidth + trailingPad + quickActionWidth*3 + hoverButtonSpacing*2)
                         : (statusBadgeWidth + trailingPad))
                     .overlay(alignment: .trailing) {
-                        HStack(spacing: hoverButtonSpacing) {
-                            // 按钮只在行 hover 时显示；每个按钮自身 hover 才变色
+                            HStack(spacing: hoverButtonSpacing) {
                             if hoverFilePath == path {
                                 Button { vm.openFile(path, using: preferences.defaultFileEditor) } label: {
                                     Image(systemName: "square.and.pencil")
@@ -645,8 +681,13 @@ struct GitChangesPanel: View {
                                 }
                                 .frame(width: quickActionWidth, height: quickActionHeight)
 
-                                Button(action: { Task { await vm.toggleStage(for: [path]) } }) {
-                                    Image(systemName: staged ? "minus.circle" : "plus.circle")
+                                Button(action: {
+                                    Task {
+                                        if scope == .staged { await vm.unstage(paths: [path]) }
+                                        else { await vm.stage(paths: [path]) }
+                                    }
+                                }) {
+                                    Image(systemName: scope == .staged ? "minus.circle" : "plus.circle")
                                         .foregroundStyle((hoverStagePath == path) ? Color.accentColor : Color.secondary)
                                 }
                                 .buttonStyle(.plain)
@@ -656,7 +697,6 @@ struct GitChangesPanel: View {
                                 .frame(width: quickActionWidth, height: quickActionHeight)
                             }
 
-                            // 标签始终靠右
                             if let change = vm.changes.first(where: { $0.path == path }) {
                                 statusBadge(for: change)
                                     .frame(height: quickActionHeight)
@@ -679,8 +719,10 @@ struct GitChangesPanel: View {
                     if inside { hoverFilePath = path } else if hoverFilePath == path { hoverFilePath = nil }
                 }
                 .contextMenu {
-                    Button(staged ? "Unstage" : "Stage") {
-                        Task { await vm.toggleStage(for: [path]) }
+                    if scope == .staged {
+                        Button("Unstage") { Task { await vm.unstage(paths: [path]) } }
+                    } else {
+                        Button("Stage") { Task { await vm.stage(paths: [path]) } }
                     }
                     Divider()
                     Button("Open in VS Code") { vm.openFile(path, using: .vscode) }
@@ -813,14 +855,14 @@ struct GitChangesPanel: View {
                         })
                     HStack {
                         Spacer()
-                        Button("Commit") { Task { await vm.commit() } }
+                        Button("Commit") { showCommitConfirm = true }
                             .disabled(vm.commitMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     }
                 }
             } else {
                 HStack(spacing: 6) {
-                    TextField("Message", text: $vm.commitMessage)
-                    Button("Commit") { Task { await vm.commit() } }
+                    TextField("Press Command+Return to commit", text: $vm.commitMessage)
+                    Button("Commit") { showCommitConfirm = true }
                         .disabled(vm.commitMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
@@ -842,6 +884,60 @@ struct GitChangesPanel: View {
                 }
             }
         )
+    }
+}
+
+// MARK: - Lifecycle Modifier
+private struct LifecycleModifier: ViewModifier {
+    @Binding var expandedDirs: Set<String>
+    @Binding var savedState: ReviewPanelState
+    let vm: GitChangesViewModel
+    let treeQuery: String
+    let onRebuildNodes: () -> Void
+    let onRebuildDisplayed: () -> Void
+    let onEnsureExpandAll: () -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .onAppear {
+                // Restore previously saved review panel state for this session
+                expandedDirs = savedState.expandedDirs
+                vm.selectedPath = savedState.selectedPath
+                if let stagedSide = savedState.selectedSideStaged {
+                    vm.selectedSide = stagedSide ? .staged : .unstaged
+                }
+                vm.showPreviewInsteadOfDiff = savedState.showPreview
+                vm.commitMessage = savedState.commitMessage
+
+                onRebuildNodes()
+                onRebuildDisplayed()
+                onEnsureExpandAll()
+            }
+            .onAppear {
+                onEnsureExpandAll()
+            }
+            .onChange(of: vm.changes) { _, _ in
+                onRebuildNodes()
+                onEnsureExpandAll()
+            }
+            .onChange(of: treeQuery) { _, _ in
+                onRebuildDisplayed()
+            }
+            .onChange(of: expandedDirs) { _, newVal in
+                savedState.expandedDirs = newVal
+            }
+            .onChange(of: vm.selectedPath) { _, newVal in
+                savedState.selectedPath = newVal
+            }
+            .onChange(of: vm.selectedSide) { _, newVal in
+                savedState.selectedSideStaged = (newVal == .staged)
+            }
+            .onChange(of: vm.showPreviewInsteadOfDiff) { _, newVal in
+                savedState.showPreview = newVal
+            }
+            .onChange(of: vm.commitMessage) { _, newVal in
+                savedState.commitMessage = newVal
+            }
     }
 }
 
