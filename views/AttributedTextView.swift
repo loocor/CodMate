@@ -28,6 +28,7 @@ struct AttributedTextView: NSViewRepresentable {
 
         let layoutMgr = LineNumberLayoutManager()
         layoutMgr.showsLineNumbers = showLineNumbers
+        layoutMgr.wrapEnabled = wrap
         context.coordinator.textStorage.addLayoutManager(layoutMgr)
         let container = NSTextContainer(size: .zero)
         container.widthTracksTextView = wrap
@@ -57,6 +58,9 @@ struct AttributedTextView: NSViewRepresentable {
             container.containerSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         } else {
             tv.isHorizontallyResizable = false
+            // Seed a sensible initial width when wrapping, otherwise container width may be 0
+            let initialW = max(1, scroll.contentSize.width)
+            container.containerSize = NSSize(width: initialW, height: CGFloat.greatestFiniteMagnitude)
         }
 
         scroll.documentView = tv
@@ -81,13 +85,29 @@ struct AttributedTextView: NSViewRepresentable {
             if wrap {
                 tv.isHorizontallyResizable = false
                 // Ensure container follows current view width to lay out lines
-                let w = max(1, tv.bounds.width)
+                let w = max(1, tv.enclosingScrollView?.contentSize.width ?? tv.bounds.width)
                 container.containerSize = NSSize(width: w, height: CGFloat.greatestFiniteMagnitude)
             } else {
                 tv.isHorizontallyResizable = true
                 container.containerSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
             }
             context.coordinator.lastWrap = wrap
+            // Propagate to layout manager
+            if let lm = tv.layoutManager as? LineNumberLayoutManager { lm.wrapEnabled = wrap }
+            // Ensure layout refresh after wrap mode change
+            tv.layoutManager?.ensureLayout(for: container)
+            tv.needsDisplay = true
+        }
+        // While staying in the same wrap mode, keep the container width in sync with the visible width
+        if wrap {
+            let currentW = tv.enclosingScrollView?.contentSize.width ?? tv.bounds.width
+            let cw = container.containerSize.width
+            if abs(currentW - cw) > 0.5 {
+                container.containerSize = NSSize(width: max(1, currentW), height: CGFloat.greatestFiniteMagnitude)
+                // Keep layout in sync with container width changes
+                tv.layoutManager?.ensureLayout(for: container)
+                tv.needsDisplay = true
+            }
         }
 
         // Update font if changed
@@ -99,6 +119,7 @@ struct AttributedTextView: NSViewRepresentable {
         // Update line number rendering via custom layout manager and inner padding
         if let lm = tv.layoutManager as? LineNumberLayoutManager {
             lm.showsLineNumbers = showLineNumbers
+            lm.wrapEnabled = wrap
         }
         let gutterWidth2: CGFloat = showLineNumbers ? 44 : 6
         tv.textContainerInset = NSSize(width: 8, height: 8)
@@ -377,6 +398,7 @@ final class LineNumberLayoutManager: NSLayoutManager {
     weak var textView: NSTextView?
     private let numberColor = NSColor.secondaryLabelColor
     private let deletionNumberColor = NSColor.systemRed
+    var wrapEnabled: Bool = false
     // UTF-16 offsets of "\n" in the current textStorage string
     var newlineOffsets: [Int] = []
     // Diff mode line-number mapping (visual line index → side line numbers)
@@ -410,7 +432,6 @@ final class LineNumberLayoutManager: NSLayoutManager {
             )
             (textView.backgroundColor).setFill()
             NSBezierPath(rect: gutterRect).fill()
-            // No separator line (to reduce draw cost and match Xcode style)
         }
 
         guard showsLineNumbers else { return }
@@ -420,44 +441,62 @@ final class LineNumberLayoutManager: NSLayoutManager {
                                    width: visibleRect.width,
                                    height: visibleRect.height)
         let glyphRange = self.glyphRange(forBoundingRect: containerRect, in: container)
-        var lineNumber = 1
-        if glyphRange.location > 0 {
-            let preChars = self.characterRange(forGlyphRange: NSRange(location: 0, length: glyphRange.location), actualGlyphRange: nil)
-            lineNumber = lineNumberFor(charIndex: preChars.upperBound)
-        }
-
-        var glyphIndex = glyphRange.location
-        while glyphIndex < glyphRange.upperBound {
-            var lineGlyphRange = NSRange(location: 0, length: 0)
-            let lineRect = self.lineFragmentUsedRect(forGlyphAt: glyphIndex, effectiveRange: &lineGlyphRange, withoutAdditionalLayout: true)
-            let y = origin.y + lineRect.minY
-            // Determine number + color for this visual line
-            let idx = lineNumber - 1
-            let rightVal = (diffMode && idx < diffRightLineNumbers.count) ? diffRightLineNumbers[idx] : nil
-            let leftVal = (diffMode && idx < diffLeftLineNumbers.count) ? diffLeftLineNumbers[idx] : nil
-            let isDeletion = diffMode && leftVal != nil && rightVal == nil
-            let drawColor = isDeletion ? deletionNumberColor : numberColor
+        var lastDrawnLogicalLine: Int? = nil
+        self.enumerateLineFragments(forGlyphRange: glyphRange) { _, usedRect, _, lineGlyphRange, _ in
+            let y = origin.y + usedRect.minY
+            // Determine logical line index for this visual fragment
+            let charRange = self.characterRange(forGlyphRange: lineGlyphRange, actualGlyphRange: nil)
+            let logicalLine = self.lineNumberFor(charIndex: charRange.location)
+            let idx = logicalLine - 1
+            let rightVal = (self.diffMode && idx >= 0 && idx < self.diffRightLineNumbers.count) ? self.diffRightLineNumbers[idx] : nil
+            let leftVal = (self.diffMode && idx >= 0 && idx < self.diffLeftLineNumbers.count) ? self.diffLeftLineNumbers[idx] : nil
+            let isDeletion = self.diffMode && leftVal != nil && rightVal == nil
+            let drawColor = isDeletion ? self.deletionNumberColor : self.numberColor
             let attrs: [NSAttributedString.Key: Any] = [
                 .font: textView.font ?? NSFont.monospacedSystemFont(ofSize: 11, weight: .regular),
                 .foregroundColor: drawColor
             ]
+            let shouldDrawThisFragment: Bool = {
+                if self.wrapEnabled {
+                    // In wrap mode, draw the number for every visual fragment to avoid gaps
+                    return true
+                } else {
+                    // In non-wrap mode, draw once per visible logical line
+                    return lastDrawnLogicalLine != logicalLine
+                }
+            }()
             let numString: String = {
-                if diffMode {
+                if !shouldDrawThisFragment { return "" }
+                if self.diffMode {
                     if isDeletion, let l = leftVal { return String(l) }
                     if let r = rightVal { return String(r) }
                     return ""
                 }
-                return String(lineNumber)
+                return String(logicalLine)
             }()
+            guard !numString.isEmpty else { return }
             let num = numString as NSString
             let size = num.size(withAttributes: attrs)
             let padding = textView.textContainer?.lineFragmentPadding ?? 0
             let gap: CGFloat = 3 // spacing between numbers and text start
             let x = origin.x + padding - gap - size.width
             num.draw(at: NSPoint(x: x, y: y), withAttributes: attrs)
-            lineNumber += 1
-            glyphIndex = lineGlyphRange.upperBound
+            lastDrawnLogicalLine = logicalLine
         }
+    }
+
+    private func isAtLineStart(charIndex: Int) -> Bool {
+        if charIndex == 0 { return true }
+        // Binary search for (charIndex - 1) in newlineOffsets
+        var lo = 0, hi = newlineOffsets.count
+        let target = charIndex - 1
+        while lo < hi {
+            let mid = (lo + hi) >> 1
+            let v = newlineOffsets[mid]
+            if v == target { return true }
+            if v < target { lo = mid + 1 } else { hi = mid }
+        }
+        return false
     }
 }
 

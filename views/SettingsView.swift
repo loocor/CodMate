@@ -125,6 +125,8 @@ struct SettingsView: View {
             ProvidersSettingsView()
         case .codex:
             codexSettings
+        case .gitReview:
+            gitReviewSettings
         case .claudeCode:
             claudeCodeSettings
         case .dialectics:
@@ -308,6 +310,12 @@ struct SettingsView: View {
     private var claudeCodeSettings: some View {
         settingsScroll {
             ClaudeCodeSettingsView(vm: claudeVM, preferences: preferences)
+        }
+    }
+
+    private var gitReviewSettings: some View {
+        settingsScroll {
+            GitReviewSettingsView(preferences: preferences)
         }
     }
 

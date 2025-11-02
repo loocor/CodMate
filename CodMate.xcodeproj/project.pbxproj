@@ -127,7 +127,7 @@
 			attributes = {
 				BuildIndependentTargetsInParallel = YES;
 				LastSwiftUpdateCheck = 1530;
-				LastUpgradeCheck = 2610;
+				LastUpgradeCheck = 2600;
 			};
 			buildConfigurationList = 1A0000062A00000100000001 /* Build configuration list for PBXProject "codmate" */;
 			compatibilityVersion = "Xcode 15.0";
@@ -204,6 +204,7 @@
 				CODE_SIGNING_REQUIRED = NO;
 				CURRENT_PROJECT_VERSION = 1;
 				DEAD_CODE_STRIPPING = YES;
+				DEVELOPMENT_TEAM = AN5X2K46ER;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
@@ -252,6 +253,7 @@
 				CODE_SIGNING_REQUIRED = NO;
 				CURRENT_PROJECT_VERSION = 1;
 				DEAD_CODE_STRIPPING = YES;
+				DEVELOPMENT_TEAM = AN5X2K46ER;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GCC_NO_COMMON_BLOCKS = YES;
@@ -282,7 +284,6 @@
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				DEAD_CODE_STRIPPING = YES;
-				DEVELOPMENT_TEAM = AN5X2K46ER;
 				INFOPLIST_FILE = CodMate/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = CodMate;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
@@ -315,7 +316,6 @@
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				DEAD_CODE_STRIPPING = YES;
-				DEVELOPMENT_TEAM = AN5X2K46ER;
 				INFOPLIST_FILE = CodMate/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = CodMate;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";

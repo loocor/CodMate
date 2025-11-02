@@ -13,8 +13,9 @@ struct GitChangesPanel: View {
     // Layout state
     @State private var leftColumnWidth: CGFloat = 0   // 0 = init to 1/4 of container
     @State private var commitEditorHeight: CGFloat = 28
-    // Tree state
-    @State private var expandedDirs: Set<String> = []
+    // Tree state (keep staged/unstaged expansions independent)
+    @State private var expandedDirsStaged: Set<String> = []
+    @State private var expandedDirsUnstaged: Set<String> = []
     @State private var treeQuery: String = ""
     // Cached trees for performance
     @State private var cachedNodes: [FileNode] = [] // legacy (all)
@@ -54,9 +55,13 @@ struct GitChangesPanel: View {
     private let trailingPad: CGFloat = 8
     private let hoverButtonSpacing: CGFloat = 8
     private let statusBadgeWidth: CGFloat = 18
-    // Viewer options (defaults: line numbers ON, wrap OFF)
-    private let wrapText: Bool = false
-    private let showLineNumbers: Bool = true
+    // Viewer options (from Settings › Git Review). Defaults: line numbers ON, wrap OFF
+    private var wrapText: Bool { preferences.gitWrapText }
+    private var showLineNumbers: Bool { preferences.gitShowLineNumbers }
+    // Wand button metrics
+    private let wandButtonSize: CGFloat = 24
+    private var wandReservedTrailing: CGFloat { wandButtonSize } // equal-width indent to avoid overlap
+    @State private var hoverWand: Bool = false
 
     var body: some View {
         contentWithPresentation
@@ -92,7 +97,8 @@ struct GitChangesPanel: View {
                 vm.attach(to: workingDirectory)
             }
             .modifier(LifecycleModifier(
-                expandedDirs: $expandedDirs,
+                expandedDirsStaged: $expandedDirsStaged,
+                expandedDirsUnstaged: $expandedDirsUnstaged,
                 savedState: $savedState,
                 vm: vm,
                 treeQuery: treeQuery,
@@ -139,7 +145,7 @@ struct GitChangesPanel: View {
     private func splitContent(totalWidth: CGFloat) -> some View {
         // Top split: left file tree and right diff/preview, with draggable divider
         let leftW = effectiveLeftWidth(total: totalWidth)
-        let gutterW: CGFloat = 17 // divider 1pt + 8pt padding each side
+        let gutterW: CGFloat = 33 // divider 1pt + 8pt padding each side
         let rightW = max(totalWidth - gutterW - leftW, 240)
         return HStack(spacing: 0) {
             leftPane
@@ -170,11 +176,11 @@ struct GitChangesPanel: View {
     }
 
     private func ensureExpandAllIfNeeded() {
-        if expandedDirs.isEmpty {
-            var keys: [String] = []
-            keys += allDirectoryKeys(nodes: cachedNodesStaged)
-            keys += allDirectoryKeys(nodes: cachedNodesUnstaged)
-            expandedDirs = Set(keys)
+        if expandedDirsStaged.isEmpty {
+            expandedDirsStaged = Set(allDirectoryKeys(nodes: cachedNodesStaged))
+        }
+        if expandedDirsUnstaged.isEmpty {
+            expandedDirsUnstaged = Set(allDirectoryKeys(nodes: cachedNodesUnstaged))
         }
     }
 
@@ -198,6 +204,8 @@ struct GitChangesPanel: View {
                 .frame(width: 116)
                 .controlSize(.small)
                 .labelsHidden()
+
+                // (wand button moved into commit message box overlay)
 
                 // Hidden keyboard shortcut to trigger commit confirmation via ⌘⏎
                 Button("") {
@@ -335,7 +343,8 @@ struct GitChangesPanel: View {
                     HStack(spacing: 0) {
                         // Collapse All button
                         Button {
-                            expandedDirs.removeAll()
+                            expandedDirsStaged.removeAll()
+                            expandedDirsUnstaged.removeAll()
                         } label: {
                             Image(systemName: "arrow.up.right.and.arrow.down.left")
                                 .font(.system(size: 12))
@@ -355,10 +364,8 @@ struct GitChangesPanel: View {
 
                         // Expand All button
                         Button {
-                            var keys: [String] = []
-                            keys += allDirectoryKeys(nodes: cachedNodesStaged)
-                            keys += allDirectoryKeys(nodes: cachedNodesUnstaged)
-                            expandedDirs = Set(keys)
+                            expandedDirsStaged = Set(allDirectoryKeys(nodes: cachedNodesStaged))
+                            expandedDirsUnstaged = Set(allDirectoryKeys(nodes: cachedNodesUnstaged))
                         } label: {
                             Image(systemName: "arrow.down.left.and.arrow.up.right")
                                 .font(.system(size: 12))
@@ -389,13 +396,17 @@ struct GitChangesPanel: View {
                         .textEditorStyle(.plain)
                         .frame(minHeight: 20)
                         .frame(height: min(200, max(20, commitInlineHeight)))
-                        .padding(6)
+                        .padding(.leading, 6)
+                        .padding(.top, 6)
+                        .padding(.bottom, 6)
+                        .padding(.trailing, wandReservedTrailing)
                         .overlay(
                             RoundedRectangle(cornerRadius: 6)
                                 .stroke(Color.secondary.opacity(0.25))
                         )
                     .onChange(of: vm.commitMessage) { _, _ in
-                        let w = max(10, gr.size.width - 12)
+                        // account for trailing reserve space
+                        let w = max(10, gr.size.width - 12 - wandReservedTrailing)
                         commitInlineHeight = measureCommitHeight(vm.commitMessage, width: w)
                     }
                     if vm.commitMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -405,6 +416,30 @@ struct GitChangesPanel: View {
                             .padding(.leading, 10)
                             .allowsHitTesting(false)
                     }
+
+                    // Wand button at top-right of the commit message box
+                    HStack { Spacer() }
+                        .overlay(alignment: .topTrailing) {
+                            Button {
+                                vm.generateCommitMessage(providerId: preferences.commitProviderId, modelId: preferences.commitModelId)
+                            } label: {
+                                Image(systemName: "sparkles")
+                                    .resizable()
+                                    .scaledToFit()
+                                    .frame(width: 12, height: 12)
+                                    .foregroundStyle(hoverWand ? Color.accentColor : Color.secondary)
+                            }
+                            .buttonStyle(.plain)
+                            .frame(width: wandButtonSize, height: wandButtonSize)
+                            .contentShape(Rectangle())
+                            .padding(.top, 4) // keep top-anchored; don't move when TextEditor grows
+                            .padding(.trailing, 4)
+                            .onHover { hoverWand = $0 }
+                            .opacity((vm.isGenerating && vm.generatingRepoPath == vm.repoRoot?.path) ? 0.4 : 1.0)
+                            .animation((vm.isGenerating && vm.generatingRepoPath == vm.repoRoot?.path) ? .easeInOut(duration: 0.8).repeatForever(autoreverses: true) : .default, value: vm.isGenerating)
+                            .disabled(vm.isGenerating && vm.generatingRepoPath == vm.repoRoot?.path)
+                            .help("AI generate commit message from staged changes")
+                        }
                 }
             }
             .frame(height: min(200, max(20, commitInlineHeight)) + 12)
@@ -436,6 +471,12 @@ struct GitChangesPanel: View {
                             .fill(hoverStagedHeader ? Color.secondary.opacity(0.06) : Color.clear)
                     )
                     .frame(height: 22)
+                    .contextMenu {
+                        Button("Unstage All") {
+                            let paths = allPaths(in: .staged)
+                            Task { await vm.unstage(paths: paths) }
+                        }
+                    }
                     if !stagedCollapsed {
                         treeRows(nodes: displayedStaged, depth: 1, scope: .staged)
                     }
@@ -463,9 +504,26 @@ struct GitChangesPanel: View {
                             .fill(hoverUnstagedHeader ? Color.secondary.opacity(0.06) : Color.clear)
                     )
                     .frame(height: 22)
+                    .contextMenu {
+                        Button("Stage All") {
+                            let paths = allPaths(in: .unstaged)
+                            Task { await vm.stage(paths: paths) }
+                        }
+                    }
                     if !unstagedCollapsed {
                         treeRows(nodes: displayedUnstaged, depth: 1, scope: .unstaged)
                     }
+                }
+            }
+            // Provide a generic context menu on empty area as well
+            .contextMenu {
+                Button("Stage All") {
+                    let paths = allPaths(in: .unstaged)
+                    Task { await vm.stage(paths: paths) }
+                }
+                Button("Unstage All") {
+                    let paths = allPaths(in: .staged)
+                    Task { await vm.unstage(paths: paths) }
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -512,6 +570,16 @@ struct GitChangesPanel: View {
         return vm.changes.map { $0.path }.filter { $0.hasPrefix(prefix) }
     }
 
+    // All file paths belonging to a specific scope
+    private func allPaths(in scope: TreeScope) -> [String] {
+        switch scope {
+        case .staged:
+            return vm.changes.compactMap { ($0.staged != nil) ? $0.path : nil }
+        case .unstaged:
+            return vm.changes.compactMap { ($0.worktree != nil) ? $0.path : nil }
+        }
+    }
+
     private func rebuildNodes() {
         let staged = vm.changes.filter { $0.staged != nil }
         // Include MM files in the Unstaged view as well, to mirror Cursor/VS Code behavior
@@ -531,7 +599,13 @@ struct GitChangesPanel: View {
         ForEach(nodes) { node in
             if node.isDirectory {
                 // Directory row with VS Code-style layout
-                let isExpanded = expandedDirs.contains(node.dirPath ?? "")
+                let key = node.dirPath ?? ""
+                let isExpanded: Bool = {
+                    switch scope {
+                    case .staged: return expandedDirsStaged.contains(key)
+                    case .unstaged: return expandedDirsUnstaged.contains(key)
+                    }
+                }()
                 HStack(spacing: 0) {
                     // Indentation guides (vertical lines)
                     ZStack(alignment: .leading) {
@@ -563,7 +637,6 @@ struct GitChangesPanel: View {
                     .padding(.trailing, (hoverDirKey == (node.dirPath ?? "")) ? (quickActionWidth + trailingPad) : trailingPad)
                     .overlay(alignment: .trailing) {
                         if let dir = node.dirPath {
-                            let allPaths = filePaths(under: dir)
                             HStack(spacing: hoverButtonSpacing) {
                                 Button(action: {
                                     Task {
@@ -593,8 +666,13 @@ struct GitChangesPanel: View {
                         .fill((hoverDirKey == (node.dirPath ?? "")) ? Color.secondary.opacity(0.06) : Color.clear)
                 )
                 .onTapGesture {
-                    if let key = node.dirPath {
-                        if expandedDirs.contains(key) { expandedDirs.remove(key) } else { expandedDirs.insert(key) }
+                    if let k = node.dirPath {
+                        switch scope {
+                        case .staged:
+                            if expandedDirsStaged.contains(k) { expandedDirsStaged.remove(k) } else { expandedDirsStaged.insert(k) }
+                        case .unstaged:
+                            if expandedDirsUnstaged.contains(k) { expandedDirsUnstaged.remove(k) } else { expandedDirsUnstaged.insert(k) }
+                        }
                     }
                 }
                 .onHover { inside in
@@ -625,7 +703,6 @@ struct GitChangesPanel: View {
             } else {
                 // File row
                 let path = node.fullPath ?? node.name
-                let staged = vm.changes.first(where: { $0.path == path })?.staged != nil
                 let isSelected = (vm.selectedPath == path) && ((scope == .staged && vm.selectedSide == .staged) || (scope == .unstaged && vm.selectedSide == .unstaged))
                 HStack(spacing: 0) {
                     // Indentation guides (vertical lines)
@@ -889,7 +966,8 @@ struct GitChangesPanel: View {
 
 // MARK: - Lifecycle Modifier
 private struct LifecycleModifier: ViewModifier {
-    @Binding var expandedDirs: Set<String>
+    @Binding var expandedDirsStaged: Set<String>
+    @Binding var expandedDirsUnstaged: Set<String>
     @Binding var savedState: ReviewPanelState
     let vm: GitChangesViewModel
     let treeQuery: String
@@ -901,7 +979,13 @@ private struct LifecycleModifier: ViewModifier {
         content
             .onAppear {
                 // Restore previously saved review panel state for this session
-                expandedDirs = savedState.expandedDirs
+                if !savedState.expandedDirsStaged.isEmpty || !savedState.expandedDirsUnstaged.isEmpty {
+                    expandedDirsStaged = savedState.expandedDirsStaged
+                    expandedDirsUnstaged = savedState.expandedDirsUnstaged
+                } else if !savedState.expandedDirs.isEmpty { // legacy fallback
+                    expandedDirsStaged = savedState.expandedDirs
+                    expandedDirsUnstaged = savedState.expandedDirs
+                }
                 vm.selectedPath = savedState.selectedPath
                 if let stagedSide = savedState.selectedSideStaged {
                     vm.selectedSide = stagedSide ? .staged : .unstaged
@@ -923,9 +1007,8 @@ private struct LifecycleModifier: ViewModifier {
             .onChange(of: treeQuery) { _, _ in
                 onRebuildDisplayed()
             }
-            .onChange(of: expandedDirs) { _, newVal in
-                savedState.expandedDirs = newVal
-            }
+            .onChange(of: expandedDirsStaged) { _, newVal in savedState.expandedDirsStaged = newVal }
+            .onChange(of: expandedDirsUnstaged) { _, newVal in savedState.expandedDirsUnstaged = newVal }
             .onChange(of: vm.selectedPath) { _, newVal in
                 savedState.selectedPath = newVal
             }

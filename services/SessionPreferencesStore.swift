@@ -48,6 +48,12 @@ final class SessionPreferencesStore: ObservableObject {
         static let claudeAllowUnsandboxedCommands = "claude.allowUnsandboxedCommands"
         // Default editor for quick file opens
         static let defaultFileEditor = "codmate.editor.default"
+        // Git Review
+        static let gitShowLineNumbers = "git.review.showLineNumbers"
+        static let gitWrapText = "git.review.wrapText"
+        static let commitPromptTemplate = "git.review.commitPromptTemplate"
+        static let commitProviderId = "git.review.commitProviderId" // provider id or nil for auto
+        static let commitModelId = "git.review.commitModelId" // optional model id tied to provider
     }
 
     init(
@@ -108,6 +114,13 @@ final class SessionPreferencesStore: ObservableObject {
         // Default editor for quick open (files)
         let editorRaw = defaults.string(forKey: Keys.defaultFileEditor) ?? EditorApp.vscode.rawValue
         self.defaultFileEditor = EditorApp(rawValue: editorRaw) ?? .vscode
+
+        // Git Review defaults
+        self.gitShowLineNumbers = defaults.object(forKey: Keys.gitShowLineNumbers) as? Bool ?? true
+        self.gitWrapText = defaults.object(forKey: Keys.gitWrapText) as? Bool ?? false
+        self.commitPromptTemplate = defaults.string(forKey: Keys.commitPromptTemplate) ?? ""
+        self.commitProviderId = defaults.string(forKey: Keys.commitProviderId)
+        self.commitModelId = defaults.string(forKey: Keys.commitModelId)
 
         // CLI policy defaults (with legacy value coercion)
         if let s = defaults.string(forKey: Keys.resumeSandboxMode), let val = SessionPreferencesStore.coerceSandboxMode(s) {
@@ -287,4 +300,11 @@ final class SessionPreferencesStore: ObservableObject {
 
     // MARK: - Editor Preferences
     @Published var defaultFileEditor: EditorApp { didSet { defaults.set(defaultFileEditor.rawValue, forKey: Keys.defaultFileEditor) } }
+
+    // MARK: - Git Review
+    @Published var gitShowLineNumbers: Bool { didSet { defaults.set(gitShowLineNumbers, forKey: Keys.gitShowLineNumbers) } }
+    @Published var gitWrapText: Bool { didSet { defaults.set(gitWrapText, forKey: Keys.gitWrapText) } }
+    @Published var commitPromptTemplate: String { didSet { defaults.set(commitPromptTemplate, forKey: Keys.commitPromptTemplate) } }
+    @Published var commitProviderId: String? { didSet { defaults.set(commitProviderId, forKey: Keys.commitProviderId) } }
+    @Published var commitModelId: String? { didSet { defaults.set(commitModelId, forKey: Keys.commitModelId) } }
 }

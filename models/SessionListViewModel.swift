@@ -366,7 +366,8 @@ final class SessionListViewModel: ObservableObject {
         var sessions = allSessions
         apply(notes: notes, to: &sessions)
         allSessions = sessions
-        applyFilters()
+        // Avoid publishing during view updates
+        Task { @MainActor in self.applyFilters() }
     }
 
     func updateProjectsRoot(to newURL: URL) async {
@@ -380,7 +381,7 @@ final class SessionListViewModel: ObservableObject {
         self.projectsStore = ProjectsStore(paths: p)
         await loadProjects()
         recomputeProjectCounts()
-        applyFilters()
+        Task { @MainActor in self.applyFilters() }
     }
 
     // Removed: executable path updates – CLI resolution uses PATH
@@ -398,7 +399,10 @@ final class SessionListViewModel: ObservableObject {
             currentKey == key
         {
             let counts = countsForLoadedMonth(dimension: dimension)
-            monthCountsCache[key] = counts
+            // Defer cache update to avoid publishing changes during view updates
+            Task { @MainActor in
+                self.monthCountsCache[key] = counts
+            }
             // In Created mode, the currently loaded dataset may only contain a
             // single day (scope = .day). Schedule a background full-month scan
             // to replace the approximation so other days populate correctly.
@@ -460,8 +464,8 @@ final class SessionListViewModel: ObservableObject {
         selectedDay = normalized
         if let d = normalized { selectedDays = [d] } else { selectedDays.removeAll() }
         suppressFilterNotifications = false
-        // Update UI immediately using existing dataset; then load correct scope.
-        applyFilters()
+        // Update UI using next-runloop to avoid publishing during view updates
+        Task { @MainActor in self.applyFilters() }
         // After coordinated update of selectedDay/selectedDays, trigger a refresh once.
         // Use force=true to ensure scope reload (created uses .day; updated uses .all).
         scheduleFilterRefresh(force: true)
@@ -485,8 +489,8 @@ final class SessionListViewModel: ObservableObject {
             selectedDay = nil
         }
         suppressFilterNotifications = false
-        // Update UI immediately using existing dataset; then load correct scope.
-        applyFilters()
+        // Update UI using next-runloop to avoid publishing during view updates
+        Task { @MainActor in self.applyFilters() }
         scheduleFilterRefresh(force: true)
     }
 

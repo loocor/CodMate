@@ -1,8 +1,10 @@
 import AppKit
+import OSLog
 import Foundation
 
 @MainActor
 final class GitChangesViewModel: ObservableObject {
+    private static let log = Logger(subsystem: "ai.codmate.app", category: "AICommit")
     @Published private(set) var repoRoot: URL? = nil
     @Published private(set) var changes: [GitService.Change] = []
     @Published var selectedPath: String? = nil
@@ -13,12 +15,15 @@ final class GitChangesViewModel: ObservableObject {
     @Published var isLoading = false
     @Published var errorMessage: String? = nil
     @Published var commitMessage: String = ""
+    @Published var isGenerating: Bool = false
+    @Published private(set) var generatingRepoPath: String? = nil
 
     private let service = GitService()
     private var monitorWorktree: DirectoryMonitor?
     private var monitorIndex: DirectoryMonitor?
     private var refreshTask: Task<Void, Never>? = nil
     private var repo: GitService.Repo? = nil
+    private var generatingTask: Task<Void, Never>? = nil
 
     func attach(to directory: URL) {
         Task { [weak self] in
@@ -231,5 +236,110 @@ final class GitChangesViewModel: ObservableObject {
             let path = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
             return (path?.isEmpty == false) ? path : nil
         } catch { return nil }
+    }
+
+    // MARK: - Commit message generation (minimal pass)
+    func generateCommitMessage(providerId: String? = nil, modelId: String? = nil, maxBytes: Int = 128 * 1024) {
+        // Debounce: if already generating for the same repo, ignore
+        if isGenerating, let current = repoRoot?.path, generatingRepoPath == current {
+            print("[AICommit] Debounced: generation already in progress for repo=\(current)")
+            Self.log.info("Debounced: generation already in progress for repo=\(current, privacy: .public)")
+            return
+        }
+        generatingTask = Task { [weak self] in
+            guard let self else { return }
+            guard let repo = self.repo else {
+                await MainActor.run { self.errorMessage = "Not a Git repository" }
+                return
+            }
+            let repoPath = repo.root.path
+            await MainActor.run {
+                self.isGenerating = true
+                self.generatingRepoPath = repoPath
+            }
+            defer { Task { @MainActor in
+                self.isGenerating = false
+                self.generatingRepoPath = nil
+            } }
+            // Fetch staged diff (index vs HEAD)
+            let full = await self.service.stagedUnifiedDiff(in: repo)
+            if full.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                await MainActor.run { self.errorMessage = "No staged changes to summarize" }
+                print("[AICommit] No staged changes; generation skipped")
+                Self.log.info("No staged changes; generation skipped")
+                return
+            }
+            // Truncate by bytes for safety
+            let truncated = Self.prefixBytes(of: full, maxBytes: maxBytes)
+            let prompt = Self.commitPrompt(diff: truncated)
+            let llm = LLMHTTPService()
+            print("[AICommit] Start generation providerId=\(providerId ?? "(auto)") bytes=\(truncated.utf8.count)")
+            Self.log.info("Start generation providerId=\(providerId ?? "(auto)", privacy: .public) bytes=\(truncated.utf8.count)")
+            do {
+                let res = try await llm.generateText(prompt: prompt, options: .init(preferred: .auto, model: modelId, timeout: 25, providerId: providerId))
+                let cleaned = Self.cleanCommitMessage(from: res.text)
+                await MainActor.run {
+                    if self.repoRoot?.path == repoPath {
+                        self.commitMessage = cleaned
+                    } else {
+                        // Repo changed during generation; drop the result
+                        print("[AICommit] Repo switched during generation; result discarded for repo=\(repoPath)")
+                    }
+                }
+                let preview = cleaned.prefix(120)
+                print("[AICommit] Success provider=\(res.providerId) elapsedMs=\(res.elapsedMs) msg=\(preview)")
+                Self.log.info("Success provider=\(res.providerId, privacy: .public) elapsedMs=\(res.elapsedMs) msg=\(String(preview), privacy: .public)")
+            } catch {
+                print("[AICommit] Error: \(error.localizedDescription)")
+                Self.log.error("Generation error: \(error.localizedDescription, privacy: .public)")
+                await MainActor.run { self.errorMessage = "AI generation failed" }
+            }
+        }
+    }
+
+    private static func prefixBytes(of s: String, maxBytes: Int) -> String {
+        guard maxBytes > 0 else { return "" }
+        let data = s.data(using: .utf8) ?? Data()
+        if data.count <= maxBytes { return s }
+        let slice = data.prefix(maxBytes)
+        return String(data: slice, encoding: .utf8) ?? String(s.prefix(maxBytes / 2))
+    }
+
+    private static func commitPrompt(diff: String) -> String {
+        // Allow user override via Settings › Git Review template stored in preferences.
+        // The template acts as a preamble; we always append the diff after it.
+        let key = "git.review.commitPromptTemplate"
+        if let tpl = UserDefaults.standard.string(forKey: key), !tpl.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return tpl + "\n\nDiff:\n" + diff
+        }
+        var body: [String] = []
+        body.append("You are a helpful assistant that writes Conventional Commits in imperative mood.")
+        body.append("Task: produce a high‑quality commit message with:")
+        body.append("1) A concise subject line (type: scope? subject)")
+        body.append("2) A brief body (2–4 lines or bullets) explaining motivation and key changes")
+        body.append("Constraints: subject <= 80 chars; wrap body lines <= 72 chars; no trailing period in subject.")
+        body.append("")
+        body.append("Consider the staged diff below (may be truncated):")
+        body.append("Diff:")
+        body.append(diff)
+        return body.joined(separator: "\n")
+    }
+
+    private static func cleanCommitMessage(from raw: String) -> String {
+        var s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Remove surrounding code fences if any
+        if s.hasPrefix("```") {
+            if let range = s.range(of: "```", options: [], range: s.index(s.startIndex, offsetBy: 3)..<s.endIndex) {
+                s = String(s[range.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+                if let end = s.range(of: "```") { s = String(s[..<end.lowerBound]) }
+            }
+        }
+        // Strip surrounding quotes if the whole text is quoted
+        if (s.hasPrefix("\"") && s.hasSuffix("\"")) || (s.hasPrefix("'") && s.hasSuffix("'")) {
+            s = String(s.dropFirst().dropLast())
+        }
+        // Collapse spaces
+        while s.contains("  ") { s = s.replacingOccurrences(of: "  ", with: " ") }
+        return s
     }
 }

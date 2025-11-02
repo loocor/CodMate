@@ -6,13 +6,14 @@ enum SettingCategory: String, CaseIterable, Identifiable {
   case command
   case providers
   case codex
+  case gitReview
   case claudeCode
   case dialectics
   case mcpServer
   case about
 
   // Customize displayed order and allow hiding categories without breaking enums elsewhere.
-  static var allCases: [SettingCategory] { [.general, .terminal, .providers, .mcpServer, .codex, .claudeCode, .dialectics, .about] }
+  static var allCases: [SettingCategory] { [.general, .terminal, .providers, .gitReview, .mcpServer, .codex, .claudeCode, .dialectics, .about] }
 
   var id: String { rawValue }
 
@@ -23,6 +24,7 @@ enum SettingCategory: String, CaseIterable, Identifiable {
     case .command: return "Command"
     case .providers: return "Providers"
     case .codex: return "Codex"
+    case .gitReview: return "Git Review"
     case .claudeCode: return "Claude Code"
     case .dialectics: return "Dialectics"
     case .mcpServer: return "MCP Server"
@@ -38,6 +40,7 @@ enum SettingCategory: String, CaseIterable, Identifiable {
     case .providers: return "server.rack"
     case .codex: return "sparkles"
     case .dialectics: return "doc.text.magnifyingglass"
+    case .gitReview: return "square.and.pencil"
     case .claudeCode: return "chevron.left.slash.chevron.right"
     case .mcpServer: return "server.rack"
     case .about: return "info.circle"
@@ -51,6 +54,7 @@ enum SettingCategory: String, CaseIterable, Identifiable {
     case .command: return "Command execution policies"
     case .providers: return "Global providers and bindings"
     case .codex: return "Codex CLI configuration"
+    case .gitReview: return "Git changes viewer and commit generation"
     case .claudeCode: return "Claude Code configuration"
     case .dialectics: return "Deep diagnostics & reports"
     case .mcpServer: return "Manage Codex MCP integrations"

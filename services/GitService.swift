@@ -118,6 +118,15 @@ actor GitService {
         return ""
     }
 
+    // Unified diff for all staged changes (index vs HEAD). Large outputs are returned as-is;
+    // callers should truncate if needed before sending to external systems.
+    func stagedUnifiedDiff(in repo: Repo) async -> String {
+        if let out = try? await runGit(["diff", "--cached"], cwd: repo.root) {
+            return out.stdout
+        }
+        return ""
+    }
+
     // Read file content from the worktree for preview
     func readFile(in repo: Repo, path: String, maxBytes: Int = 1_000_000) async -> String {
         let url = repo.root.appendingPathComponent(path)
