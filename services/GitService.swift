@@ -27,11 +27,23 @@ actor GitService {
         return Repo(root: URL(fileURLWithPath: raw, isDirectory: true))
     }
 
-    // Aggregate staged/unstaged/untracked status cheaply without v2 porcelain parsing.
+    // Aggregate staged/unstaged/untracked status. Prefer name-status to preserve kind when cheap.
     func status(in repo: Repo) async -> [Change] {
-        // Collect names in each bucket
-        let stagedNames = (try? await runGit(["diff", "--name-only", "--cached", "-z"], cwd: repo.root))?.stdout.split(separator: "\0").map { String($0) } ?? []
-        let unstagedNames = (try? await runGit(["diff", "--name-only", "-z"], cwd: repo.root))?.stdout.split(separator: "\0").map { String($0) } ?? []
+        // Parse name-status for both staged and unstaged; fall back to name-only semantics if parsing fails
+        let stagedMap: [String: Change.Kind]
+        if let out = try? await runGit(["diff", "--name-status", "--cached", "-z"], cwd: repo.root) {
+            stagedMap = Self.parseNameStatusZ(out.stdout)
+        } else {
+            stagedMap = [:]
+        }
+        
+        let unstagedMap: [String: Change.Kind]
+        if let out = try? await runGit(["diff", "--name-status", "-z"], cwd: repo.root) {
+            unstagedMap = Self.parseNameStatusZ(out.stdout)
+        } else {
+            unstagedMap = [:]
+        }
+        
         let untrackedNames = (try? await runGit(["ls-files", "--others", "--exclude-standard", "-z"], cwd: repo.root))?.stdout.split(separator: "\0").map { String($0) } ?? []
 
         var map: [String: Change] = [:]
@@ -41,17 +53,19 @@ actor GitService {
             map[path] = c
             return c
         }
-        for name in stagedNames where !name.isEmpty {
+        // staged
+        for (name, kind) in stagedMap where !name.isEmpty {
             var c = ensure(name)
-            // We cannot easily disambiguate added/modified/deleted here without extra calls; assume modified unless file missing.
-            if c.staged == nil { c.staged = .modified }
+            c.staged = kind
             map[name] = c
         }
-        for name in unstagedNames where !name.isEmpty {
+        // unstaged
+        for (name, kind) in unstagedMap where !name.isEmpty {
             var c = ensure(name)
-            if c.worktree == nil { c.worktree = .modified }
+            c.worktree = kind
             map[name] = c
         }
+        // untracked
         for name in untrackedNames where !name.isEmpty {
             var c = ensure(name)
             c.worktree = .untracked
@@ -59,6 +73,40 @@ actor GitService {
         }
 
         return Array(map.values).sorted { $0.path.localizedStandardCompare($1.path) == .orderedAscending }
+    }
+
+    // Minimal parser for `git diff --name-status -z` output.
+    // Handles: M/A/D/T/U and R/C (renames, copies) by attributing to the new path as modified.
+    private static func parseNameStatusZ(_ stdout: String) -> [String: Change.Kind] {
+        var result: [String: Change.Kind] = [:]
+        let tokens = stdout.split(separator: "\0").map(String.init)
+        var i = 0
+        while i < tokens.count {
+            let status = tokens[i]
+            guard i + 1 < tokens.count else { break }
+            let path1 = tokens[i + 1]
+            var pathOut = path1
+            var kind: Change.Kind = .modified
+            // Normalize leading letter
+            let code = status.first.map(String.init) ?? "M"
+            switch code {
+            case "A": kind = .added
+            case "D": kind = .deleted
+            case "M", "T", "U": kind = .modified
+            case "R", "C":
+                // Renames/Copies provide an extra path; choose the new path when present
+                if i + 2 < tokens.count {
+                    pathOut = tokens[i + 2]
+                    i += 1 // consume the extra path as well below
+                }
+                kind = .modified
+            default:
+                kind = .modified
+            }
+            result[pathOut] = kind
+            i += 2
+        }
+        return result
     }
 
     // Unified diff for the file; staged toggles --cached
@@ -83,7 +131,8 @@ actor GitService {
     // Stage/unstage operations
     func stage(in repo: Repo, paths: [String]) async {
         guard !paths.isEmpty else { return }
-        _ = try? await runGit(["add"] + paths, cwd: repo.root)
+        // Use -A to ensure deletions are staged as well
+        _ = try? await runGit(["add", "-A", "--"] + paths, cwd: repo.root)
     }
 
     func unstage(in repo: Repo, paths: [String]) async {
@@ -95,6 +144,20 @@ actor GitService {
         let msg = message.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !msg.isEmpty else { return -1 }
         let out = try? await runGit(["commit", "-m", msg], cwd: repo.root)
+        return out?.exitCode ?? -1
+    }
+
+    // Discard tracked changes (both index and worktree) for specific paths
+    func discardTracked(in repo: Repo, paths: [String]) async -> Int32 {
+        guard !paths.isEmpty else { return 0 }
+        let out = try? await runGit(["restore", "--staged", "--worktree", "--"] + paths, cwd: repo.root)
+        return out?.exitCode ?? -1
+    }
+
+    // Remove untracked files for specific paths
+    func cleanUntracked(in repo: Repo, paths: [String]) async -> Int32 {
+        guard !paths.isEmpty else { return 0 }
+        let out = try? await runGit(["clean", "-f", "-d", "--"] + paths, cwd: repo.root)
         return out?.exitCode ?? -1
     }
 
@@ -122,4 +185,3 @@ actor GitService {
         return ProcOut(stdout: stdout, stderr: stderr, exitCode: proc.terminationStatus)
     }
 }
-

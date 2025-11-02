@@ -31,11 +31,22 @@ struct CodMateApp: App {
                 Button("Settings…") { presentSettings(for: .general) }
                     .keyboardShortcut(",", modifiers: [.command])
             }
-            CommandMenu("CodMate") {
+            // Integrate actions into the system View menu
+            CommandGroup(after: .sidebar) {
                 Button("Refresh Sessions") {
                     Task { await listViewModel.refreshSessions(force: true) }
                 }
                 .keyboardShortcut("r", modifiers: [.command])
+
+                Button("Toggle Sidebar") {
+                    NotificationCenter.default.post(name: .codMateToggleSidebar, object: nil)
+                }
+                .keyboardShortcut("1", modifiers: [.command])
+
+                Button("Toggle Session List") {
+                    NotificationCenter.default.post(name: .codMateToggleList, object: nil)
+                }
+                .keyboardShortcut("2", modifiers: [.command])
             }
         }
     }

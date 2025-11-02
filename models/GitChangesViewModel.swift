@@ -146,4 +146,63 @@ final class GitChangesViewModel: ObservableObject {
             errorMessage = "Commit failed (exit code \(code))"
         }
     }
+
+    // MARK: - Discard
+    func discard(paths: [String]) async {
+        guard let repo = self.repo else { return }
+        let pathSet = Set(paths)
+        let map: [String: GitService.Change] = Dictionary(uniqueKeysWithValues: changes.map { ($0.path, $0) })
+        let untracked = pathSet.filter { (map[$0]?.worktree == .untracked) }
+        let tracked = pathSet.subtracting(untracked)
+        if !tracked.isEmpty {
+            _ = await service.discardTracked(in: repo, paths: Array(tracked))
+        }
+        if !untracked.isEmpty {
+            _ = await service.cleanUntracked(in: repo, paths: Array(untracked))
+        }
+        await refreshStatus()
+    }
+
+    // MARK: - Open in external editor (file)
+    func openFile(_ path: String, using editor: EditorApp) {
+        guard let root = repoRoot else { return }
+        let filePath = root.appendingPathComponent(path).path
+        // Try CLI command first
+        if let exe = Self.findExecutableInPath(editor.cliCommand) {
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: exe)
+            p.arguments = [filePath]
+            p.standardOutput = Pipe(); p.standardError = Pipe()
+            do {
+                try p.run(); return
+            } catch {
+                // fall through
+            }
+        }
+        // Fallback: open via bundle id
+        if let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: editor.bundleIdentifier) {
+            let config = NSWorkspace.OpenConfiguration(); config.activates = true
+            NSWorkspace.shared.open([URL(fileURLWithPath: filePath)], withApplicationAt: appURL, configuration: config) { _, err in
+                if let err {
+                    Task { @MainActor in self.errorMessage = "Failed to open \(editor.title): \(err.localizedDescription)" }
+                }
+            }
+            return
+        }
+        errorMessage = "\(editor.title) is not installed. Please install it or try a different editor."
+    }
+
+    private static func findExecutableInPath(_ name: String) -> String? {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/which")
+        process.arguments = [name]
+        let pipe = Pipe(); process.standardOutput = pipe; process.standardError = Pipe()
+        do {
+            try process.run(); process.waitUntilExit()
+            guard process.terminationStatus == 0 else { return nil }
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            let path = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            return (path?.isEmpty == false) ? path : nil
+        } catch { return nil }
+    }
 }

@@ -7,6 +7,7 @@ struct GitChangesPanel: View {
     enum Presentation { case embedded, full }
     let workingDirectory: URL
     var presentation: Presentation = .embedded
+    let preferences: SessionPreferencesStore
     @StateObject private var vm = GitChangesViewModel()
     // Layout state
     @State private var leftColumnWidth: CGFloat = 0   // 0 = init to 1/4 of container
@@ -29,6 +30,9 @@ struct GitChangesPanel: View {
     @State private var hoverDirKey: String? = nil
     @State private var hoverStagedHeader: Bool = false
     @State private var hoverUnstagedHeader: Bool = false
+    @State private var pendingDiscardPaths: [String] = []
+    @State private var showDiscardAlert: Bool = false
+    @State private var showGlobalMenu: Bool = false
     // Use an optional Int for segmented momentary actions: 0=collapse, 1=expand
     // @State private var treeToggleIndex: Int? = nil // 已移除，改用直接按钮
     // Layout constraints
@@ -41,6 +45,9 @@ struct GitChangesPanel: View {
     private let indentStep: CGFloat = 16
     private let chevronWidth: CGFloat = 16
     private let quickActionWidth: CGFloat = 18
+    // Viewer options (defaults: line numbers ON, wrap OFF)
+    private let wrapText: Bool = false
+    private let showLineNumbers: Bool = true
 
     var body: some View {
         let content = VStack(alignment: .leading, spacing: 8) {
@@ -99,6 +106,19 @@ struct GitChangesPanel: View {
                 content
             }
         }
+        .alert("Discard changes?", isPresented: $showDiscardAlert) {
+            Button("Discard", role: .destructive) {
+                let paths = pendingDiscardPaths
+                pendingDiscardPaths = []
+                Task { await vm.discard(paths: paths) }
+            }
+            Button("Cancel", role: .cancel) {
+                pendingDiscardPaths = []
+            }
+        } message: {
+            let count = pendingDiscardPaths.count
+            Text("This will permanently discard changes for \(count) file\(count == 1 ? "" : "s").")
+        }
         .task(id: workingDirectory) {
             vm.attach(to: workingDirectory)
         }
@@ -108,32 +128,50 @@ struct GitChangesPanel: View {
     }
 
     private var header: some View {
-        HStack(spacing: 8) {
-            Label("Changes", systemImage: "list.bullet.rectangle")
-                .font(.headline)
-            if let root = vm.repoRoot?.path {
-                Text(root)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .padding(.leading, 8)
-            }
-            Spacer()
-            Picker("", selection: $vm.showPreviewInsteadOfDiff) {
-                Text("Diff").tag(false)
-                Text("Preview").tag(true)
-            }
-            .pickerStyle(.segmented)
-            .frame(width: 116)
-            .controlSize(.small)
-            .labelsHidden()
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Label("Changes", systemImage: "list.bullet.rectangle")
+                    .font(.headline)
+                if let root = vm.repoRoot?.path {
+                    Text(root)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(.leading, 8)
+                }
+                Spacer()
+                Picker("", selection: $vm.showPreviewInsteadOfDiff) {
+                    Text("Diff").tag(false)
+                    Text("Preview").tag(true)
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 116)
+                .controlSize(.small)
+                .labelsHidden()
 
-            Button {
-                Task { await vm.refreshStatus() }
-            } label: {
-                Image(systemName: vm.isLoading ? "hourglass" : "arrow.clockwise")
+                Button {
+                    Task { await vm.refreshStatus() }
+                } label: {
+                    Image(systemName: vm.isLoading ? "hourglass" : "arrow.clockwise")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
             }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
+            if let err = vm.errorMessage, !err.isEmpty {
+                HStack(spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                    Text(err)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                }
+                .padding(.vertical, 4)
+                .padding(.horizontal, 8)
+                .background(
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(Color.orange.opacity(0.08))
+                )
+            }
         }
     }
 
@@ -154,7 +192,7 @@ struct GitChangesPanel: View {
         let font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
         let s = text.isEmpty ? " " : text
         let rect = (s as NSString).boundingRect(
-            with: NSSize(width: width, height: .greatestFiniteMagnitude),
+            with: NSSize(width: width, height: CGFloat.greatestFiniteMagnitude),
             options: [.usesLineFragmentOrigin, .usesFontLeading],
             attributes: [.font: font]
         )
@@ -298,32 +336,44 @@ struct GitChangesPanel: View {
                         .fill(Color.clear)
                         .frame(width: spacing, height: 1)
 
-                    // Three-dot menu - fixed width
+                    // Three-dot menu - custom popover (hide arrow)
                     HStack {
-                        Menu {
-                            Button("Stage All") {
-                                Task {
-                                    let paths = vm.changes.filter { $0.staged == nil }.map { $0.path }
-                                    await vm.toggleStage(for: paths)
-                                }
-                            }
-                            Button("Unstage All") {
-                                Task {
-                                    let paths = vm.changes.filter { $0.staged != nil }.map { $0.path }
-                                    await vm.toggleStage(for: paths)
-                                }
-                            }
-                            Divider()
-                            Button("Discard All Changes...") {
-                                // TODO: Implement with confirmation dialog
-                            }
+                        Button {
+                            showGlobalMenu.toggle()
                         } label: {
                             Image(systemName: "ellipsis")
                                 .foregroundStyle(.secondary)
                                 .font(.system(size: 13))
                         }
-                        .menuStyle(.borderlessButton)
-                        .fixedSize()
+                        .buttonStyle(.plain)
+                        .popover(isPresented: $showGlobalMenu) {
+                            PopMenuList(
+                                items: [
+                                    .init(title: "Stage All") {
+                                        showGlobalMenu = false
+                                        Task {
+                                            let paths = vm.changes.filter { $0.staged == nil }.map { $0.path }
+                                            await vm.toggleStage(for: paths)
+                                        }
+                                    },
+                                    .init(title: "Unstage All") {
+                                        showGlobalMenu = false
+                                        Task {
+                                            let paths = vm.changes.filter { $0.staged != nil }.map { $0.path }
+                                            await vm.toggleStage(for: paths)
+                                        }
+                                    }
+                                ],
+                                tail: [
+                                    .init(title: "Discard All Changes…", role: .destructive) {
+                                        pendingDiscardPaths = vm.changes.map { $0.path }
+                                        showGlobalMenu = false
+                                        showDiscardAlert = true
+                                    }
+                                ]
+                            )
+                            .frame(width: 220)
+                        }
                     }
                     .frame(width: menuWidth, alignment: .leading)
                 }
@@ -550,6 +600,11 @@ struct GitChangesPanel: View {
                         Button("Unstage Folder") {
                             Task { await vm.toggleStage(for: filePaths(under: dir)) }
                         }
+                        Divider()
+                        Button("Discard Folder Changes…", role: .destructive) {
+                            pendingDiscardPaths = filePaths(under: dir)
+                            showDiscardAlert = true
+                        }
                     }
                 }
 
@@ -582,6 +637,25 @@ struct GitChangesPanel: View {
                             .font(.system(size: 13))
                             .lineLimit(1)
                         Spacer(minLength: 0)
+                        // Hover quick action: Open with default editor (single click)
+                        Button { vm.openFile(path, using: preferences.defaultFileEditor) } label: {
+                            Image(systemName: "square.and.pencil")
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.secondary)
+                        .opacity((hoverFilePath == path) ? 1 : 0)
+                        .frame(width: quickActionWidth)
+                        // Hover quick action: Discard file (VSCode-style revert icon)
+                        Button(action: {
+                            pendingDiscardPaths = [path]
+                            showDiscardAlert = true
+                        }) {
+                            Image(systemName: "arrow.uturn.backward.circle")
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.secondary)
+                        .opacity((hoverFilePath == path) ? 1 : 0)
+                        .frame(width: quickActionWidth)
                         // Hover quick action: Stage/Unstage
                         Button(action: { Task { await vm.toggleStage(for: [path]) } }) {
                             Image(systemName: staged ? "minus.circle" : "plus.circle")
@@ -614,6 +688,16 @@ struct GitChangesPanel: View {
                 .contextMenu {
                     Button(staged ? "Unstage" : "Stage") {
                         Task { await vm.toggleStage(for: [path]) }
+                    }
+                    Divider()
+                    Button("Open in VS Code") { vm.openFile(path, using: .vscode) }
+                    Button("Open in Cursor") { vm.openFile(path, using: .cursor) }
+                    Button("Open in Zed") { vm.openFile(path, using: .zed) }
+                    Button("Open with Default App") { NSWorkspace.shared.open(URL(fileURLWithPath: vm.repoRoot?.appendingPathComponent(path).path ?? path)) }
+                    Divider()
+                    Button("Discard Changes…", role: .destructive) {
+                        pendingDiscardPaths = [path]
+                        showDiscardAlert = true
                     }
                 }
             }
@@ -668,23 +752,23 @@ struct GitChangesPanel: View {
 
     private var detailView: some View {
         VStack(alignment: .leading, spacing: 6) {
-            ScrollView {
-                Text(vm.diffText.isEmpty
-                        ? (vm.selectedPath == nil ? "Select a file to view diff/preview." : (vm.showPreviewInsteadOfDiff ? "(Empty preview)" : "(No diff)"))
-                        : vm.diffText
-                )
-                .textSelection(.enabled)
-                .font(.system(.body, design: .monospaced))
-                .frame(maxWidth: .infinity, alignment: .topLeading)
-                .padding(8)
-                .background(
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(Color(nsColor: .textBackgroundColor))
-                        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.secondary.opacity(0.15)))
-                )
-            }
+            AttributedTextView(
+                text: vm.diffText.isEmpty
+                    ? (vm.selectedPath == nil ? "Select a file to view diff/preview." : (vm.showPreviewInsteadOfDiff ? "(Empty preview)" : "(No diff)"))
+                    : vm.diffText,
+                isDiff: !vm.showPreviewInsteadOfDiff,
+                wrap: wrapText,
+                showLineNumbers: showLineNumbers,
+                fontSize: 12
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(Color(nsColor: .textBackgroundColor))
+                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.secondary.opacity(0.15)))
+            )
         }
-        .id("detail:\(vm.selectedPath ?? "-")|\(vm.selectedSide == .staged ? "s" : "u")|\(vm.showPreviewInsteadOfDiff ? "p" : "d")")
+        .id("detail:\(vm.selectedPath ?? "-")|\(vm.selectedSide == .staged ? "s" : "u")|\(vm.showPreviewInsteadOfDiff ? "p" : "d")|wrap:\(wrapText ? 1 : 0)|ln:\(showLineNumbers ? 1 : 0)")
         .task(id: vm.selectedPath) { await vm.refreshDetail() }
         .task(id: vm.selectedSide) { await vm.refreshDetail() }
         .task(id: vm.showPreviewInsteadOfDiff) { await vm.refreshDetail() }
@@ -750,5 +834,52 @@ struct GitChangesPanel: View {
                 }
             }
         )
+    }
+}
+
+// Lightweight menu list for popovers, mimicking macOS menu rows (no arrow)
+private struct PopMenuItem: Identifiable {
+    enum Role { case normal, destructive }
+    let id = UUID()
+    var title: String
+    var role: Role = .normal
+    var action: () -> Void
+}
+
+private struct PopMenuList: View {
+    var items: [PopMenuItem]
+    var tail: [PopMenuItem] = [] // optional trailing group separated by a divider
+    @State private var hovered: UUID? = nil
+
+    var body: some View {
+        VStack(spacing: 0) {
+            groupView(items)
+            if !tail.isEmpty {
+                Divider().padding(.vertical, 4)
+                groupView(tail)
+            }
+        }
+        .padding(6)
+    }
+
+    @ViewBuilder
+    private func groupView(_ group: [PopMenuItem]) -> some View {
+        ForEach(group) { item in
+            Button(action: item.action) {
+                HStack(spacing: 8) {
+                    Text(item.title)
+                        .foregroundStyle(item.role == .destructive ? Color.red : Color.primary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .padding(.horizontal, 8)
+                .frame(height: 24)
+                .background(
+                    RoundedRectangle(cornerRadius: 5)
+                        .fill(hovered == item.id ? Color.accentColor.opacity(0.12) : Color.clear)
+                )
+            }
+            .buttonStyle(.plain)
+            .onHover { inside in hovered = inside ? item.id : (hovered == item.id ? nil : hovered) }
+        }
     }
 }

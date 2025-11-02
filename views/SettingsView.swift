@@ -186,6 +186,29 @@ struct SettingsView: View {
                 }
 
                 VStack(alignment: .leading, spacing: 10) {
+                    Text("Editor").font(.headline).fontWeight(.semibold)
+                    settingsCard {
+                        Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 12) {
+                            GridRow {
+                                VStack(alignment: .leading, spacing: 0) {
+                                    Label("Default Editor", systemImage: "pencil.and.outline")
+                                        .font(.subheadline).fontWeight(.medium)
+                                    Text("Used for quick open actions in Review and elsewhere")
+                                        .font(.caption).foregroundStyle(.secondary)
+                                }
+                                Picker("", selection: $preferences.defaultFileEditor) {
+                                    ForEach(EditorApp.allCases) { app in
+                                        Text(app.title).tag(app)
+                                    }
+                                }
+                                .labelsHidden()
+                                .frame(maxWidth: .infinity, alignment: .trailing)
+                            }
+                        }
+                    }
+                }
+
+                VStack(alignment: .leading, spacing: 10) {
                     Text("Timeline & Markdown").font(.headline).fontWeight(.semibold)
                     settingsCard {
                         visibilitySection(

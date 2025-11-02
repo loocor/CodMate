@@ -17,6 +17,9 @@ struct ContentView: View {
     // Track which sessions are running in embedded terminal
     @State private var runningSessionIDs = Set<SessionSummary.ID>()
     @State private var isDetailMaximized = false
+    @State private var isListHidden = false
+    @SceneStorage("cm.sidebarHidden") private var storeSidebarHidden: Bool = false
+    @SceneStorage("cm.listHidden") private var storeListHidden: Bool = false
     @State private var showNewWithContext = false
     // When starting embedded sessions, record the initial command lines per-session
     @State private var embeddedInitialCommands: [SessionSummary.ID: String] = [:]
@@ -54,23 +57,35 @@ struct ContentView: View {
     @State private var pendingDelete: SourcedPrompt? = nil
     // Build highlighted text where matches of `query` are tinted; non-matches use the provided base color
     private func highlightedText(_ text: String, query: String, base: Color = .primary) -> Text {
-        guard !query.isEmpty else { return Text(text).foregroundStyle(base) }
+        guard !query.isEmpty else { 
+            let baseText = Text(text).foregroundStyle(base)
+            return baseText
+        }
+        
         var result = Text("")
         var searchStart = text.startIndex
         let end = text.endIndex
+        
         while searchStart < end, let r = text.range(of: query, options: [.caseInsensitive, .diacriticInsensitive], range: searchStart..<end) {
             if r.lowerBound > searchStart {
                 let prefix = String(text[searchStart..<r.lowerBound])
-                result = result + Text(prefix).foregroundStyle(base)
+                let prefixText = Text(prefix).foregroundStyle(base)
+                result = result + prefixText
             }
+            
             let match = String(text[r])
-            result = result + Text(match).foregroundStyle(.tint)
+            let matchText = Text(match).foregroundStyle(.tint)
+            result = result + matchText
+            
             searchStart = r.upperBound
         }
+        
         if searchStart < end {
             let tail = String(text[searchStart..<end])
-            result = result + Text(tail).foregroundStyle(base)
+            let tailText = Text(tail).foregroundStyle(base)
+            result = result + tailText
         }
+        
         return result
     }
     private func builtinPrompts() -> [PresetPromptsStore.Prompt] {
@@ -83,7 +98,6 @@ struct ContentView: View {
         ]
     }
     @State private var showReviewMode = false
-    @State private var reviewAutoMaximized = false
     // Track pending rekey for embedded New so we can move the PTY to the real new session id
     struct PendingEmbeddedRekey {
         let anchorId: String
@@ -120,8 +134,14 @@ struct ContentView: View {
 
     private func navigationSplitView(geometry: GeometryProxy) -> some View {
         let sidebarMaxWidth = geometry.size.width * 0.25
+        
+        // Persist column visibility and list hidden across app focus changes
+        // Use SceneStorage to remember the last-toggle states
+        // Keys live with the main window scene and survive view re-creation
+        _ = storeSidebarHidden // access to retain storage in scope
+        _ = storeListHidden
 
-        return NavigationSplitView(columnVisibility: $columnVisibility) {
+        let baseView = NavigationSplitView(columnVisibility: $columnVisibility) {
             sidebarContent(sidebarMaxWidth: sidebarMaxWidth)
         } content: {
             listContent
@@ -129,94 +149,125 @@ struct ContentView: View {
             detailColumn
         }
         .navigationSplitViewStyle(.balanced)
-        .task {
-            await viewModel.refreshSessions(force: true)
-        }
-        .onChange(of: viewModel.sections) { _, _ in
-            normalizeSelection()
-            reconcilePendingEmbeddedRekeys()
-        }
-        .onChange(of: selection) { _, newSel in
-            // Enforce: the middle list should always have one selected item
-            normalizeSelection()
-            // Track primary selection id (last explicitly added id)
-            let added = newSel.subtracting(lastSelectionSnapshot)
-            if let justAdded = added.first { selectionPrimaryId = justAdded }
-            // If primary got removed, choose a stable fallback
-            if let primary = selectionPrimaryId, !newSel.contains(primary) {
-                selectionPrimaryId = newSel.first
+        .onAppear { applyVisibilityFromStorage(animated: false) }
+        
+        let viewWithTasks = applyTaskAndChangeModifiers(to: baseView)
+        let viewWithNotifications = applyNotificationModifiers(to: viewWithTasks)
+        let finalView = applyDialogsAndAlerts(to: viewWithNotifications)
+        
+        return finalView
+    }
+    
+    private func applyTaskAndChangeModifiers<V: View>(to view: V) -> some View {
+        view
+            .task {
+                await viewModel.refreshSessions(force: true)
             }
-            lastSelectionSnapshot = newSel
-        }
-        .onChange(of: viewModel.errorMessage) { _, message in
-            guard let message else { return }
-            alertState = AlertState(title: "Operation Failed", message: message)
-            viewModel.errorMessage = nil
-        }
-        .onChange(of: viewModel.pendingEmbeddedProjectNew) { _, project in
-            guard let project else { return }
-            // Start an embedded terminal for project-level New
-            startEmbeddedNewForProject(project)
-            // Clear one-shot request
-            viewModel.pendingEmbeddedProjectNew = nil
-        }
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                refreshToolbarContent
+            .onChange(of: viewModel.sections) { _, _ in
+                normalizeSelection()
+                reconcilePendingEmbeddedRekeys()
             }
-        }
-        // Fallback event bus: react to embedded New for project even if binding changes are coalesced
-        .onReceive(NotificationCenter.default.publisher(for: .codMateStartEmbeddedNewProject)) { note in
-            if let pid = note.userInfo?["projectId"] as? String,
-               let project = viewModel.projects.first(where: { $0.id == pid }) {
+            .onChange(of: selection) { _, newSel in
+                // Enforce: the middle list should always have one selected item
+                normalizeSelection()
+                // Track primary selection id (last explicitly added id)
+                let added = newSel.subtracting(lastSelectionSnapshot)
+                if let justAdded = added.first { selectionPrimaryId = justAdded }
+                // If primary got removed, choose a stable fallback
+                if let primary = selectionPrimaryId, !newSel.contains(primary) {
+                    selectionPrimaryId = newSel.first
+                }
+                lastSelectionSnapshot = newSel
+            }
+            .onChange(of: viewModel.errorMessage) { _, message in
+                guard let message else { return }
+                alertState = AlertState(title: "Operation Failed", message: message)
+                viewModel.errorMessage = nil
+            }
+            .onChange(of: viewModel.pendingEmbeddedProjectNew) { _, project in
+                guard let project else { return }
+                // Start an embedded terminal for project-level New
                 startEmbeddedNewForProject(project)
+                // Clear one-shot request
+                viewModel.pendingEmbeddedProjectNew = nil
             }
-        }
-        // Confirm stopping a running embedded session (place before any .alert modifiers)
-        .confirmationDialog(
-            "Stop running session?",
-            isPresented: Binding<Bool>(
-                get: { confirmStopState != nil },
-                set: { if !$0 { confirmStopState = nil } }
-            ),
-            titleVisibility: .visible
-        ) {
-            Button("Stop", role: .destructive) {
-                if let st = confirmStopState {
-                    stopEmbedded(forID: st.sessionId)
-                    confirmStopState = nil
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    refreshToolbarContent
                 }
             }
-            Button("Cancel", role: .cancel) { confirmStopState = nil }
-        } message: {
-            Text("The embedded terminal appears to be running. Stopping now will terminate the current Codex/Claude task.")
-        }
-        .alert(item: $alertState) { state in
-            Alert(
-                title: Text(state.title),
-                message: Text(state.message),
-                dismissButton: .default(Text("OK"))
-            )
-        }
-        .alert(
-            "Delete selected sessions?", isPresented: $deleteConfirmationPresented,
-            presenting: Array(selection)
-        ) { ids in
-            Button("Cancel", role: .cancel) {}
-            Button("Move to Trash", role: .destructive) {
-                deleteSelections(ids: ids)
+    }
+    
+    private func applyNotificationModifiers<V: View>(to view: V) -> some View {
+        view
+            // Fallback event bus: react to embedded New for project even if binding changes are coalesced
+            .onReceive(NotificationCenter.default.publisher(for: .codMateStartEmbeddedNewProject)) { note in
+                if let pid = note.userInfo?["projectId"] as? String,
+                   let project = viewModel.projects.first(where: { $0.id == pid }) {
+                    startEmbeddedNewForProject(project)
+                }
             }
-        } message: { _ in
-            Text("Session files will be moved to Trash and can be restored in Finder.")
-        }
-        .fileImporter(
-            isPresented: $selectingSessionsRoot,
-            allowedContentTypes: [.folder],
-            allowsMultipleSelection: false
-        ) { result in
-            handleFolderSelection(result: result, update: viewModel.updateSessionsRoot)
-        }
-        // Removed CLI chooser; rely entirely on PATH for CLI resolution
+            // Toggle sidebar visibility via global shortcut (Cmd+1)
+            .onReceive(NotificationCenter.default.publisher(for: .codMateToggleSidebar)) { _ in
+                toggleSidebarVisibility()
+            }
+            // Toggle middle list visibility via global shortcut (Cmd+2)
+            .onReceive(NotificationCenter.default.publisher(for: .codMateToggleList)) { _ in
+                toggleListVisibility()
+            }
+            // On app active, re-apply stored visibility to avoid drift
+            .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+                applyVisibilityFromStorage(animated: true)
+            }
+    }
+    
+    private func applyDialogsAndAlerts<V: View>(to view: V) -> some View {
+        view
+            // Confirm stopping a running embedded session (place before any .alert modifiers)
+            .confirmationDialog(
+                "Stop running session?",
+                isPresented: Binding<Bool>(
+                    get: { confirmStopState != nil },
+                    set: { if !$0 { confirmStopState = nil } }
+                ),
+                titleVisibility: .visible
+            ) {
+                Button("Stop", role: .destructive) {
+                    if let st = confirmStopState {
+                        stopEmbedded(forID: st.sessionId)
+                        confirmStopState = nil
+                    }
+                }
+                Button("Cancel", role: .cancel) { confirmStopState = nil }
+            } message: {
+                Text("The embedded terminal appears to be running. Stopping now will terminate the current Codex/Claude task.")
+            }
+            .alert(item: $alertState) { state in
+                Alert(
+                    title: Text(state.title),
+                    message: Text(state.message),
+                    dismissButton: .default(Text("OK"))
+                )
+            }
+            .alert(
+                "Delete selected sessions?", isPresented: $deleteConfirmationPresented,
+                presenting: Array(selection)
+            ) { ids in
+                Button("Cancel", role: .cancel) {}
+                Button("Move to Trash", role: .destructive) {
+                    deleteSelections(ids: ids)
+                }
+            } message: { _ in
+                Text("Session files will be moved to Trash and can be restored in Finder.")
+            }
+            .fileImporter(
+                isPresented: $selectingSessionsRoot,
+                allowedContentTypes: [.folder],
+                allowsMultipleSelection: false
+            ) { result in
+                handleFolderSelection(result: result, update: viewModel.updateSessionsRoot)
+            }
+            // Removed CLI chooser; rely entirely on PATH for CLI resolution
     }
 
     private func sidebarContent(sidebarMaxWidth: CGFloat) -> some View {
@@ -225,8 +276,7 @@ struct ContentView: View {
             isLoading: viewModel.isLoading
         )
         .environmentObject(viewModel)
-        .navigationSplitViewColumnWidth(
-            min: 260, ideal: 260, max: 260)
+        .navigationSplitViewColumnWidth(min: 260, ideal: 260, max: 260)
     }
 
     private var listContent: some View {
@@ -248,7 +298,14 @@ struct ContentView: View {
             onPrimarySelect: { s in selectionPrimaryId = s.id }
         )
         .environmentObject(viewModel)
-        .navigationSplitViewColumnWidth(min: 360, ideal: 420, max: 480)
+        .navigationSplitViewColumnWidth(
+            min: isListHidden ? 0 : 360,
+            ideal: isListHidden ? 0 : 420,
+            max: isListHidden ? 0 : 480
+        )
+        .frame(minWidth: isListHidden ? 0 : 360)
+        .opacity(isListHidden ? 0 : 1)
+        .allowsHitTesting(!isListHidden)
         .sheet(item: $viewModel.editingSession, onDismiss: { viewModel.cancelEdits() }) { _ in
             EditSessionMetaView(viewModel: viewModel)
         }
@@ -326,7 +383,8 @@ struct ContentView: View {
                 // Full review mode: occupy the whole detail area
                 GitChangesPanel(
                     workingDirectory: URL(fileURLWithPath: ws, isDirectory: true),
-                    presentation: .full
+                    presentation: .full,
+                    preferences: viewModel.preferences
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .padding(16)
@@ -567,15 +625,9 @@ struct ContentView: View {
                 .disabled(focusedSummary == nil)
                 .help("Reveal in Finder")
 
-                // Toggle Review Mode (full-area Changes) + auto maximize detail
+                // Toggle Review Mode (full-area Changes)
                 Button {
-                    let newValue = !showReviewMode
-                    showReviewMode = newValue
-                    if newValue {
-                        if !isDetailMaximized { toggleDetailMaximized(); reviewAutoMaximized = true }
-                    } else {
-                        if reviewAutoMaximized { toggleDetailMaximized(); reviewAutoMaximized = false }
-                    }
+                    showReviewMode.toggle()
                 } label: { Image(systemName: "list.bullet.rectangle") }
                 .disabled(focusedSummary == nil)
                 .help("Toggle Review Mode")
@@ -1244,6 +1296,53 @@ struct ContentView: View {
             columnVisibility = shouldHide ? .detailOnly : .all
             isDetailMaximized = shouldHide
         }
+    }
+
+    private func toggleSidebarVisibility() {
+        withAnimation(.easeInOut(duration: 0.15)) {
+            switch columnVisibility {
+            case .all:
+                columnVisibility = .doubleColumn // hide sidebar via system behavior
+                storeSidebarHidden = true
+            case .doubleColumn:
+                columnVisibility = .all         // show sidebar
+                storeSidebarHidden = false
+            case .detailOnly:
+                columnVisibility = .doubleColumn
+                storeSidebarHidden = true
+            default:
+                columnVisibility = .doubleColumn
+                storeSidebarHidden = true
+            }
+        }
+    }
+
+    private func toggleListVisibility() {
+        withAnimation(.easeInOut(duration: 0.15)) {
+            isListHidden.toggle()
+            storeListHidden = isListHidden
+        }
+    }
+
+    private func applyVisibilityFromStorage(animated: Bool) {
+        let action = {
+            // Apply list visibility
+            isListHidden = storeListHidden
+            // Apply sidebar visibility when not maximized
+            switch columnVisibility {
+            case .detailOnly:
+                break // keep maximized state
+            case .all, .doubleColumn:
+                if storeSidebarHidden {
+                    if columnVisibility == .all { columnVisibility = .doubleColumn }
+                } else {
+                    if columnVisibility == .doubleColumn { columnVisibility = .all }
+                }
+            default:
+                break
+            }
+        }
+        if animated { withAnimation(.easeInOut(duration: 0.12)) { action() } } else { action() }
     }
 
     @ViewBuilder

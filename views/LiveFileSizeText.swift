@@ -24,7 +24,7 @@ struct LiveFileSizeText: View {
     private func start() {
         // Event-driven: refresh on writes/renames/deletes/extend
         monitor?.cancel()
-        monitor = DirectoryMonitor(url: url) { [weak _monitor = monitor] in
+        monitor = DirectoryMonitor(url: url) {
             // UI updates must happen on main thread
             Task { @MainActor in refresh() }
         }

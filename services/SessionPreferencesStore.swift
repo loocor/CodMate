@@ -46,6 +46,8 @@ final class SessionPreferencesStore: ObservableObject {
         static let claudeSkipPermissions = "claude.skipPermissions"
         static let claudeAllowSkipPermissions = "claude.allowSkipPermissions"
         static let claudeAllowUnsandboxedCommands = "claude.allowUnsandboxedCommands"
+        // Default editor for quick file opens
+        static let defaultFileEditor = "codmate.editor.default"
     }
 
     init(
@@ -102,6 +104,10 @@ final class SessionPreferencesStore: ObservableObject {
             defaults.object(forKey: Keys.resumeCopyClipboard) as? Bool ?? true
         let appRaw = defaults.string(forKey: Keys.resumeExternalApp) ?? TerminalApp.terminal.rawValue
         self.defaultResumeExternalApp = TerminalApp(rawValue: appRaw) ?? .terminal
+
+        // Default editor for quick open (files)
+        let editorRaw = defaults.string(forKey: Keys.defaultFileEditor) ?? EditorApp.vscode.rawValue
+        self.defaultFileEditor = EditorApp(rawValue: editorRaw) ?? .vscode
 
         // CLI policy defaults (with legacy value coercion)
         if let s = defaults.string(forKey: Keys.resumeSandboxMode), let val = SessionPreferencesStore.coerceSandboxMode(s) {
@@ -278,4 +284,7 @@ final class SessionPreferencesStore: ObservableObject {
     @Published var claudeSkipPermissions: Bool { didSet { defaults.set(claudeSkipPermissions, forKey: Keys.claudeSkipPermissions) } }
     @Published var claudeAllowSkipPermissions: Bool { didSet { defaults.set(claudeAllowSkipPermissions, forKey: Keys.claudeAllowSkipPermissions) } }
     @Published var claudeAllowUnsandboxedCommands: Bool { didSet { defaults.set(claudeAllowUnsandboxedCommands, forKey: Keys.claudeAllowUnsandboxedCommands) } }
+
+    // MARK: - Editor Preferences
+    @Published var defaultFileEditor: EditorApp { didSet { defaults.set(defaultFileEditor.rawValue, forKey: Keys.defaultFileEditor) } }
 }
