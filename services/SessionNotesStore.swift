@@ -27,7 +27,7 @@ actor SessionNotesStore {
 
         // Legacy single-file JSON in Application Support (existing path in project)
         let legacyDir = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-            .appendingPathComponent("io.umate.codex", isDirectory: true)
+            .appendingPathComponent("ai.umate.codmate", isDirectory: true)
         self.legacyURL = legacyDir.appendingPathComponent("session-notes.json")
 
         // First migrate from legacy ~/.codex/notes directory if present

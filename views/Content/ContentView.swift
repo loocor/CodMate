@@ -1,0 +1,876 @@
+import AppKit
+import SwiftUI
+import UniformTypeIdentifiers
+
+struct ContentView: View {
+    @ObservedObject var viewModel: SessionListViewModel
+    @StateObject var permissionsManager = SandboxPermissionsManager.shared
+    @Environment(\.colorScheme) var colorScheme
+    @Environment(\.openWindow) var openWindow
+
+    @State var columnVisibility: NavigationSplitViewVisibility = .all
+    @State var selection = Set<SessionSummary.ID>()
+    @State var selectionPrimaryId: SessionSummary.ID? = nil
+    @State var lastSelectionSnapshot = Set<SessionSummary.ID>()
+    @State var isPerformingAction = false
+    @State var deleteConfirmationPresented = false
+    @State var alertState: AlertState?
+    @State var selectingSessionsRoot = false
+    // Track which sessions are running in embedded terminal
+    @State var runningSessionIDs = Set<SessionSummary.ID>()
+    @State var isDetailMaximized = false
+    @State var isListHidden = false
+    @SceneStorage("cm.sidebarHidden") var storeSidebarHidden: Bool = false
+    @SceneStorage("cm.listHidden") var storeListHidden: Bool = false
+    @State var showNewWithContext = false
+    // When starting embedded sessions, record the initial command lines per-session
+    @State var embeddedInitialCommands: [SessionSummary.ID: String] = [:]
+    // Soft-return flag: when true, stopping embedded terminal should not change
+    // sidebar/list expand/collapse; keep overall layout stable.
+    @State var softReturnPending: Bool = false
+    // Confirm stopping a running embedded terminal
+    struct ConfirmStopState: Identifiable { let id = UUID(); let sessionId: String }
+    @State var confirmStopState: ConfirmStopState? = nil
+    // Prompt picker state for embedded terminal quick-insert
+    @State var showPromptPicker = false
+    @State var promptQuery = ""
+    // Debounced query to keep filtering cheap on main thread
+    @State var throttledPromptQuery = ""
+    @State var promptDebounceTask: Task<Void, Never>? = nil
+    struct SourcedPrompt: Identifiable, Hashable {
+        let id = UUID()
+        enum Source: Hashable { case project, user, builtin }
+        var prompt: PresetPromptsStore.Prompt
+        var source: Source
+        var label: String { prompt.label }
+        var command: String { prompt.command }
+
+        // Custom Hashable implementation to hash based on content, not UUID
+        func hash(into hasher: inout Hasher) {
+            hasher.combine(prompt)
+            hasher.combine(source)
+        }
+
+        static func == (lhs: SourcedPrompt, rhs: SourcedPrompt) -> Bool {
+            lhs.prompt == rhs.prompt && lhs.source == rhs.source
+        }
+    }
+    @State var loadedPrompts: [SourcedPrompt] = []
+    @State var hoveredPromptKey: String? = nil
+    func promptKey(_ p: SourcedPrompt) -> String { p.command }
+    func canDelete(_ p: SourcedPrompt) -> Bool { true }
+    @State var pendingDelete: SourcedPrompt? = nil
+    // Build highlighted text where matches of `query` are tinted; non-matches use the provided base color
+    func highlightedText(_ text: String, query: String, base: Color = .primary) -> Text {
+        guard !query.isEmpty else {
+            let baseText = Text(text).foregroundStyle(base)
+            return baseText
+        }
+
+        var result = Text("")
+        var searchStart = text.startIndex
+        let end = text.endIndex
+
+        while searchStart < end, let r = text.range(of: query, options: [.caseInsensitive, .diacriticInsensitive], range: searchStart..<end) {
+            if r.lowerBound > searchStart {
+                let prefix = String(text[searchStart..<r.lowerBound])
+                let prefixText = Text(prefix).foregroundStyle(base)
+                result = result + prefixText
+            }
+
+            let match = String(text[r])
+            let matchText = Text(match).foregroundStyle(.tint)
+            result = result + matchText
+
+            searchStart = r.upperBound
+        }
+
+        if searchStart < end {
+            let tail = String(text[searchStart..<end])
+            let tailText = Text(tail).foregroundStyle(base)
+            result = result + tailText
+        }
+
+        return result
+    }
+    func builtinPrompts() -> [PresetPromptsStore.Prompt] {
+        [
+            .init(label: "git status", command: "git status"),
+            .init(label: "git pull --rebase --autostash", command: "git pull --rebase --autostash"),
+            .init(label: "rg -n TODO", command: "rg -n TODO"),
+            .init(label: "swift build", command: "swift build"),
+            .init(label: "swift test", command: "swift test"),
+        ]
+    }
+    enum DetailTab: Hashable { case timeline, review, terminal }
+    @State var selectedDetailTab: DetailTab = .timeline
+    // Track pending rekey for embedded New so we can move the PTY to the real new session id
+    struct PendingEmbeddedRekey {
+        let anchorId: String
+        let expectedCwd: String
+        let t0: Date
+        let selectOnSuccess: Bool
+    }
+    @State private var pendingEmbeddedRekeys: [PendingEmbeddedRekey] = []
+    // Provide a simple font chooser that prefers CJK-capable monospace
+    func makeTerminalFont(size: CGFloat) -> NSFont {
+        #if canImport(SwiftTerm)
+            let candidates = [
+                "Sarasa Mono SC", "Sarasa Term SC",
+                "LXGW WenKai Mono",
+                "Noto Sans Mono CJK SC", "NotoSansMonoCJKsc-Regular",
+                "JetBrains Mono", "JetBrainsMono-Regular", "JetBrains Mono NL",
+                "JetBrainsMonoNL Nerd Font Mono", "JetBrainsMono Nerd Font Mono",
+                "SF Mono", "Menlo",
+            ]
+            for name in candidates { if let f = NSFont(name: name, size: size) { return f } }
+        #endif
+        return NSFont.monospacedSystemFont(ofSize: size, weight: .regular)
+    }
+
+    init(viewModel: SessionListViewModel) {
+        self.viewModel = viewModel
+    }
+
+    var body: some View {
+        GeometryReader { geometry in
+            navigationSplitView(geometry: geometry)
+        }
+    }
+
+    // navigationSplitView moved to Content/ContentView+Modifiers.swift
+
+    // applyTaskAndChangeModifiers moved to Content/ContentView+Modifiers.swift
+
+    // applyNotificationModifiers moved to Content/ContentView+Modifiers.swift
+
+    // applyDialogsAndAlerts moved to Content/ContentView+Modifiers.swift
+
+    // sidebarContent moved to Content/ContentView+Sidebar.swift
+
+    // listContent moved to Content/ContentView+Sidebar.swift
+
+    // refreshToolbarContent moved to Content/ContentView+Sidebar.swift
+
+    // detailColumn moved to Content/ContentView+Detail.swift
+
+    // mainDetailContent moved to ContentView+MainDetail.swift
+
+    // detailActionBar moved to ContentView+DetailActionBar.swift
+
+    // focusedSummary and summaryLookup moved to ContentView+Helpers.swift
+
+    func normalizeSelection() {
+        let orderedIDs = viewModel.sections.flatMap { $0.sessions.map(\.id) }
+        let validIDs = Set(orderedIDs)
+        let original = selection
+        selection.formIntersection(validIDs)
+        if selection.isEmpty, let first = orderedIDs.first {
+            selection.insert(first)
+        }
+        // Avoid unnecessary churn if nothing changed
+        if selection == original { return }
+    }
+
+    func resumeFromList(_ session: SessionSummary) {
+        selection = [session.id]
+        selectionPrimaryId = session.id
+        if viewModel.preferences.defaultResumeUseEmbeddedTerminal {
+            startEmbedded(for: session)
+        } else {
+            openPreferredExternal(for: session)
+        }
+    }
+
+    func handleDeleteRequest(_ session: SessionSummary) {
+        selection = [session.id]
+        presentDeleteConfirmation()
+    }
+
+    // exportMarkdownForSession moved to ContentView+Helpers.swift
+
+    func presentDeleteConfirmation() {
+        guard !selection.isEmpty else { return }
+        deleteConfirmationPresented = true
+    }
+
+    func deleteSelections(ids: [SessionSummary.ID]) {
+        let summaries = ids.compactMap { summaryLookup[$0] }
+        guard !summaries.isEmpty else { return }
+
+        deleteConfirmationPresented = false
+        isPerformingAction = true
+
+        Task {
+            await viewModel.delete(summaries: summaries)
+            await MainActor.run {
+                // Best-effort: stop any embedded terminals for deleted sessions
+                #if canImport(SwiftTerm) && !APPSTORE
+                    for s in summaries { TerminalSessionManager.shared.stop(key: s.id) }
+                #endif
+                isPerformingAction = false
+                selection.subtract(ids)
+                normalizeSelection()
+            }
+        }
+    }
+
+    func startEmbedded(for session: SessionSummary) {
+        #if APPSTORE
+            openPreferredExternal(for: session)
+            return
+        #else
+        // Ensure cwd authorization under App Sandbox (both shell and CLI modes)
+        let cwd = workingDirectory(for: session)
+        let dirURL = URL(fileURLWithPath: cwd, isDirectory: true)
+        if !AuthorizationHub.shared.canAccessNow(directory: dirURL) {
+            let toolLabel = session.source == .codex ? "codex" : "claude"
+            let granted = AuthorizationHub.shared.ensureDirectoryAccessOrPromptSync(
+                directory: dirURL,
+                purpose: .cliConsoleCwd,
+                message: "Authorize this folder for CLI console to run \(toolLabel)"
+            )
+            guard granted || AuthorizationHub.shared.canAccessNow(directory: dirURL) else {
+                // Do not start embedded; remain in timeline
+                return
+            }
+        }
+        // Build the default resume commands for this session so TerminalHostView can inject them
+        embeddedInitialCommands[session.id] = viewModel.buildResumeCommands(session: session)
+        runningSessionIDs.insert(session.id)
+        // Switch detail surface to Terminal when embedded starts
+        selectedDetailTab = .terminal
+        // User已接手：清除待跟进高亮
+        viewModel.clearAwaitingFollowup(session.id)
+        // Nudge Codex to redraw cleanly once it starts, by sending "/" then backspace
+        #if canImport(SwiftTerm) && !APPSTORE
+            TerminalSessionManager.shared.scheduleSlashNudge(forKey: session.id, delay: 1.0)
+        #endif
+        #endif
+    }
+
+    func stopEmbedded(forID id: SessionSummary.ID) {
+        // Tear down the embedded terminal view and terminate its child process
+        #if canImport(SwiftTerm) && !APPSTORE
+            TerminalSessionManager.shared.stop(key: id)
+        #endif
+        runningSessionIDs.remove(id)
+        embeddedInitialCommands.removeValue(forKey: id)
+        // 退出内置终端：清除待跟进高亮
+        viewModel.clearAwaitingFollowup(id)
+        if selectedDetailTab == .terminal { selectedDetailTab = .timeline }
+        // If this stop is triggered by Return to History, do not alter sidebar/list
+        // visibility to keep the view stable.
+        if softReturnPending {
+            softReturnPending = false
+            return
+        }
+        // Default behavior: if no embedded terminals left, restore default columns
+        if runningSessionIDs.isEmpty {
+            isDetailMaximized = false
+            columnVisibility = .all
+        }
+    }
+
+    private func isTerminalLikelyRunning(forID id: SessionSummary.ID) -> Bool {
+        // Multi-layer detection for more accurate running state:
+        // 1. Check if terminal manager reports a running process
+        #if canImport(SwiftTerm) && !APPSTORE
+        if TerminalSessionManager.shared.hasRunningProcess(key: id) {
+            return true
+        }
+        #endif
+
+        // 2. Check if this is a pending new session (anchor awaiting rekey)
+        if pendingEmbeddedRekeys.contains(where: { $0.anchorId == id }) {
+            return true
+        }
+
+        // 3. Check recent file activity heartbeat (session actively writing)
+        if viewModel.isActivelyUpdating(id) {
+            return true
+        }
+
+        return false
+    }
+
+    func requestStopEmbedded(forID id: SessionSummary.ID) {
+        // Always check current running state before showing confirmation
+        let isRunning = isTerminalLikelyRunning(forID: id)
+
+        if isRunning {
+            // Show confirmation dialog for running sessions
+            confirmStopState = ConfirmStopState(sessionId: id)
+        } else {
+            // Directly stop if not running
+            stopEmbedded(forID: id)
+        }
+    }
+
+    private func shellEscapeForCD(_ path: String) -> String {
+        // Minimal POSIX shell escaping suitable for `cd` arguments
+        return "'" + path.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
+
+    func workingDirectory(for session: SessionSummary) -> String {
+        if FileManager.default.fileExists(atPath: session.cwd) {
+            return session.cwd
+        }
+        return session.fileURL.deletingLastPathComponent().path
+    }
+
+    func ensureRepoAccessForReview() {
+        guard let focused = focusedSummary else { return }
+        // Non-sandboxed builds don't require bookmark authorization or forced refresh
+        if SecurityScopedBookmarks.shared.isSandboxed == false {
+            return
+        }
+        let dir = workingDirectory(for: focused)
+        let startURL = URL(fileURLWithPath: dir, isDirectory: true)
+
+        // Resolve repository root by walking up to the nearest folder that contains .git
+        func findRepoRootByFS(from start: URL) -> URL? {
+            let fm = FileManager.default
+            var cur = start.standardizedFileURL
+            var guardCounter = 0
+            while guardCounter < 200 { // safety guard
+                let gitDir = cur.appendingPathComponent(".git", isDirectory: true)
+                var isDir: ObjCBool = false
+                if fm.fileExists(atPath: gitDir.path, isDirectory: &isDir) {
+                    return cur
+                }
+                let parent = cur.deletingLastPathComponent()
+                if parent.path == cur.path { break }
+                cur = parent
+                guardCounter += 1
+            }
+            return nil
+        }
+
+        let repoRoot = findRepoRootByFS(from: startURL) ?? startURL
+
+        // If already authorized for this repo root, just ensure access is active and return silently
+        if SecurityScopedBookmarks.shared.hasDynamicBookmark(for: repoRoot) {
+            _ = SecurityScopedBookmarks.shared.startAccessDynamic(for: repoRoot)
+            return
+        }
+
+        // Use synchronous authorization to ensure we get the result before proceeding
+        let success = AuthorizationHub.shared.ensureDirectoryAccessOrPromptSync(
+            directory: repoRoot,
+            purpose: .gitReviewRepo,
+            message: "Authorize the repository folder (the one containing .git) for Git Review"
+        )
+
+        if success {
+            print("[ContentView] Git review authorization successful for: \(repoRoot.path)")
+            // Force a view refresh by toggling away and back to Review
+            Task { @MainActor in
+                let was = selectedDetailTab
+                selectedDetailTab = .timeline
+                try? await Task.sleep(nanoseconds: 100_000_000) // 0.1s
+                selectedDetailTab = was
+            }
+        } else {
+            print("[ContentView] Git review authorization failed or cancelled")
+        }
+    }
+
+    // MARK: - Embedded CLI console specs (DEV)
+    private func consoleEnv(for source: SessionSource) -> [String: String] {
+        var env: [String: String] = [:]
+        env["LANG"] = "zh_CN.UTF-8"
+        env["LC_ALL"] = "zh_CN.UTF-8"
+        env["LC_CTYPE"] = "zh_CN.UTF-8"
+        env["TERM"] = "xterm-256color"
+        if source == .codex { env["CODEX_DISABLE_COLOR_QUERY"] = "1" }
+        return env
+    }
+
+    func consoleSpecForResume(_ session: SessionSummary) -> TerminalHostView.ConsoleSpec? {
+        if SecurityScopedBookmarks.shared.isSandboxed {
+            return nil
+        }
+        let exe = (session.source == .codex) ? "codex" : "claude"
+        let args = viewModel.buildResumeCLIArgs(session: session)
+        let cwd = workingDirectory(for: session)
+        AuthorizationHub.shared.ensureDirectoryAccessOrPrompt(
+            directory: URL(fileURLWithPath: cwd, isDirectory: true),
+            purpose: .cliConsoleCwd,
+            message: "Authorize this folder for CLI console to run \(exe)"
+        )
+        return TerminalHostView.ConsoleSpec(executable: exe, args: args, cwd: cwd, env: consoleEnv(for: session.source))
+    }
+
+    func consoleSpecForAnchor(_ anchorId: String) -> TerminalHostView.ConsoleSpec? {
+        if SecurityScopedBookmarks.shared.isSandboxed { return nil }
+        // For the project-level New anchor, we do not know the final session. We start a plain codex with defaults.
+        // Minimal viable: start a login-less shell is not desired; instead start a no-op codex to present UI quickly.
+        // As a preview, run `codex` without args in the project directory if we can infer it.
+        if let pending = pendingEmbeddedRekeys.first(where: { $0.anchorId == anchorId }) {
+            let exe = "codex"
+            let args: [String] = []
+            AuthorizationHub.shared.ensureDirectoryAccessOrPrompt(
+                directory: URL(fileURLWithPath: pending.expectedCwd, isDirectory: true),
+                purpose: .cliConsoleCwd,
+                message: "Authorize this folder for CLI console to run \(exe)"
+            )
+            return TerminalHostView.ConsoleSpec(executable: exe, args: args, cwd: pending.expectedCwd, env: consoleEnv(for: .codex))
+        }
+        return nil
+    }
+
+    func startEmbeddedNew(for session: SessionSummary, using source: SessionSource? = nil) {
+        let target = source.map { session.overridingSource($0) } ?? session
+        #if APPSTORE
+            openPreferredExternalForNew(session: target)
+            return
+        #else
+        // Switch detail surface to Terminal tab when launching embedded new
+        selectedDetailTab = .terminal
+        // Build the 'new session' commands (respecting project profile when present)
+        let cwd =
+            FileManager.default.fileExists(atPath: target.cwd)
+            ? target.cwd : target.fileURL.deletingLastPathComponent().path
+        if viewModel.preferences.useEmbeddedCLIConsole {
+            let dirURL = URL(fileURLWithPath: cwd, isDirectory: true)
+            if !AuthorizationHub.shared.canAccessNow(directory: dirURL) {
+                let granted = AuthorizationHub.shared.ensureDirectoryAccessOrPromptSync(
+                    directory: dirURL,
+                    purpose: .cliConsoleCwd,
+                    message: "Authorize this folder for CLI console to run codex"
+                )
+                guard granted || AuthorizationHub.shared.canAccessNow(directory: dirURL) else {
+                    return
+                }
+            }
+        }
+        let cd = "cd " + shellEscapeForCD(cwd)
+        let injectedPATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:${PATH}"
+        var exportLines = [
+            "export LANG=zh_CN.UTF-8",
+            "export LC_ALL=zh_CN.UTF-8",
+            "export LC_CTYPE=zh_CN.UTF-8",
+            "export TERM=xterm-256color",
+        ]
+        if target.source == .codex {
+            exportLines.append("export CODEX_DISABLE_COLOR_QUERY=1")
+        }
+        let exports = exportLines.joined(separator: "; ")
+        let invocation = viewModel.buildNewSessionCLIInvocationRespectingProject(session: target)
+        let command = "PATH=\(injectedPATH) \(invocation)"
+        // Enter alternate screen and clear for a truly clean view (cursor home);
+        // avoids reflow artifacts and isolates scrollback while the new session runs.
+        let preclear = "printf '\\033[?1049h\\033[H\\033[2J'"
+
+        // Use virtual anchor id to avoid hijacking an existing session's running state
+        let anchorId = "new-anchor:detail:\(target.id):\(Int(Date().timeIntervalSince1970)))"
+        embeddedInitialCommands[anchorId] =
+            preclear + "\n" + cd + "\n" + exports + "\n" + command + "\n"
+        runningSessionIDs.insert(anchorId)
+        // Record pending rekey so that when the new session appears, we can move this PTY to the real id
+        pendingEmbeddedRekeys.append(
+            PendingEmbeddedRekey(
+                anchorId: anchorId, expectedCwd: canonicalizePath(cwd), t0: Date(), selectOnSuccess: true)
+        )
+        // Event-driven incremental refresh: set a hint so directory monitor triggers a targeted refresh
+        if target.source == .codex {
+            viewModel.setIncrementalHintForCodexToday()
+        } else {
+            viewModel.setIncrementalHintForClaudeProject(directory: cwd)
+        }
+        // Proactively trigger a targeted incremental refresh for immediate visibility
+        Task {
+            if target.source == .codex {
+                await viewModel.refreshIncrementalForNewCodexToday()
+                // Follow-up probes to catch late file creation (non-recursive FS monitor)
+                try? await Task.sleep(nanoseconds: 600_000_000)
+                await viewModel.refreshIncrementalForNewCodexToday()
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+                await viewModel.refreshIncrementalForNewCodexToday()
+            } else {
+                // Claude Code: more aggressive refresh schedule because CLI may delay writing content
+                await viewModel.refreshIncrementalForClaudeProject(directory: cwd)
+                // Follow-up probes to catch file creation and content fill
+                try? await Task.sleep(nanoseconds: 600_000_000)  // 0.6s
+                await viewModel.refreshIncrementalForClaudeProject(directory: cwd)
+                try? await Task.sleep(nanoseconds: 1_500_000_000) // 1.5s
+                await viewModel.refreshIncrementalForClaudeProject(directory: cwd)
+                try? await Task.sleep(nanoseconds: 3_000_000_000) // 3s
+                await viewModel.refreshIncrementalForClaudeProject(directory: cwd)
+                try? await Task.sleep(nanoseconds: 5_000_000_000) // 5s
+                await viewModel.refreshIncrementalForClaudeProject(directory: cwd)
+                try? await Task.sleep(nanoseconds: 10_000_000_000) // 10s
+                await viewModel.refreshIncrementalForClaudeProject(directory: cwd)
+            }
+        }
+        // Clear selection so fallbackRunningAnchorId() can display the virtual anchor terminal
+        selection.removeAll()
+        // Ensure terminal is visible
+        isDetailMaximized = true
+        columnVisibility = .detailOnly
+        #endif
+    }
+
+    func startEmbeddedNewForProject(_ project: Project) {
+        #if APPSTORE
+            viewModel.newSession(project: project)
+            return
+        #else
+        // Build 'new project' invocation and inject into embedded terminal
+        let dir: String = {
+            let d = (project.directory ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            return d.isEmpty ? NSHomeDirectory() : d
+        }()
+        if viewModel.preferences.useEmbeddedCLIConsole {
+            let dirURL = URL(fileURLWithPath: dir, isDirectory: true)
+            if !AuthorizationHub.shared.canAccessNow(directory: dirURL) {
+                let granted = AuthorizationHub.shared.ensureDirectoryAccessOrPromptSync(
+                    directory: dirURL,
+                    purpose: .cliConsoleCwd,
+                    message: "Authorize this folder for CLI console to run codex"
+                )
+                guard granted || AuthorizationHub.shared.canAccessNow(directory: dirURL) else {
+                    return
+                }
+            }
+        }
+        let cd = "cd " + shellEscapeForCD(dir)
+        let injectedPATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:${PATH}"
+        let exportLines = [
+            "export LANG=zh_CN.UTF-8",
+            "export LC_ALL=zh_CN.UTF-8",
+            "export LC_CTYPE=zh_CN.UTF-8",
+            "export TERM=xterm-256color",
+            "export CODEX_DISABLE_COLOR_QUERY=1",
+        ]
+        let exports = exportLines.joined(separator: "; ")
+        let invocation = viewModel.buildNewProjectCLIInvocation(project: project)
+        let command = "PATH=\(injectedPATH) \(invocation)"
+        let preclear = "printf '\\033[?1049h\\033[H\\033[2J'"
+
+        // Always use a virtual anchor for project-level New
+        let anchorId = "new-anchor:project:\(project.id):\(Int(Date().timeIntervalSince1970)))"
+        embeddedInitialCommands[anchorId] = preclear + "\n" + cd + "\n" + exports + "\n" + command + "\n"
+        runningSessionIDs.insert(anchorId)
+        // Pending rekey: when the new session lands under this cwd, move PTY to the real id
+        pendingEmbeddedRekeys.append(
+            PendingEmbeddedRekey(
+                anchorId: anchorId, expectedCwd: canonicalizePath(dir), t0: Date(), selectOnSuccess: true)
+        )
+        // Event-driven incremental refresh: scoped to today's Codex folder
+        viewModel.setIncrementalHintForCodexToday()
+        // Proactively refresh today's subset so the new item appears quickly
+        Task {
+            await viewModel.refreshIncrementalForNewCodexToday()
+            // Follow-up probes to catch late file creation
+            try? await Task.sleep(nanoseconds: 600_000_000)
+            await viewModel.refreshIncrementalForNewCodexToday()
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            await viewModel.refreshIncrementalForNewCodexToday()
+        }
+        // Clear selection so fallbackRunningAnchorId() can display the virtual anchor terminal
+        selection.removeAll()
+        // Maximize detail to show embedded terminal
+        isDetailMaximized = true
+        columnVisibility = .detailOnly
+        #endif
+    }
+
+    func openPreferredExternal(for session: SessionSummary) {
+        viewModel.copyResumeCommandsRespectingProject(session: session)
+        let app = viewModel.preferences.defaultResumeExternalApp
+        let dir = workingDirectory(for: session)
+        switch app {
+        case .iterm2:
+            let cmd = viewModel.buildResumeCLIInvocationRespectingProject(session: session)
+            viewModel.openPreferredTerminalViaScheme(app: .iterm2, directory: dir, command: cmd)
+        case .warp:
+            viewModel.openPreferredTerminalViaScheme(app: .warp, directory: dir)
+        case .terminal:
+            _ = viewModel.openAppleTerminal(at: dir)
+        case .none:
+            break
+        }
+        Task {
+            await SystemNotifier.shared.notify(
+                title: "CodMate", body: "Command copied. Paste it in the opened terminal.")
+        }
+    }
+
+    func openPreferredExternalForNew(session: SessionSummary) {
+        // Record pending intent for auto-assign before launching
+        viewModel.recordIntentForDetailNew(anchor: session)
+        let app = viewModel.preferences.defaultResumeExternalApp
+        let dir = workingDirectory(for: session)
+        // Event hint for targeted incremental refresh on FS change
+        if session.source == .codex {
+            viewModel.setIncrementalHintForCodexToday()
+        } else {
+            viewModel.setIncrementalHintForClaudeProject(directory: dir)
+        }
+        // Also proactively refresh the targeted subset for faster UI update
+        Task {
+            if session.source == .codex {
+                await viewModel.refreshIncrementalForNewCodexToday()
+                // Follow-up probes to catch late file creation
+                try? await Task.sleep(nanoseconds: 600_000_000)
+                await viewModel.refreshIncrementalForNewCodexToday()
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+                await viewModel.refreshIncrementalForNewCodexToday()
+            } else {
+                await viewModel.refreshIncrementalForClaudeProject(directory: dir)
+                // Follow-up probes to catch late file creation
+                try? await Task.sleep(nanoseconds: 600_000_000)
+                await viewModel.refreshIncrementalForClaudeProject(directory: dir)
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+                await viewModel.refreshIncrementalForClaudeProject(directory: dir)
+            }
+        }
+        switch app {
+        case .iterm2:
+            let cmd = viewModel.buildNewSessionCLIInvocationRespectingProject(session: session)
+            viewModel.openPreferredTerminalViaScheme(app: .iterm2, directory: dir, command: cmd)
+        case .warp:
+            // Warp scheme cannot run a command; open path only and rely on clipboard
+            viewModel.openPreferredTerminalViaScheme(app: .warp, directory: dir)
+        case .terminal:
+            #if APPSTORE
+            viewModel.copyNewSessionCommandsRespectingProject(session: session)
+            _ = viewModel.openAppleTerminal(at: dir)
+            #else
+            viewModel.openNewSessionRespectingProject(session: session)
+            #endif
+        case .none:
+            break
+        }
+        Task {
+            await SystemNotifier.shared.notify(
+                title: "CodMate", body: "Command copied. Paste it in the opened terminal.")
+        }
+    }
+
+    func startNewSession(for session: SessionSummary, using source: SessionSource? = nil) {
+        let target = source.map { session.overridingSource($0) } ?? session
+        viewModel.copyNewSessionCommandsRespectingProject(session: target)
+        openPreferredExternalForNew(session: target)
+    }
+
+    enum NewLaunchStyle {
+        case preferred
+        case terminal
+        case iterm
+        case warp
+        case embedded
+    }
+
+    func launchNewSession(
+        for session: SessionSummary, using source: SessionSource, style: NewLaunchStyle
+    ) {
+        let target = source == session.source ? session : session.overridingSource(source)
+        switch style {
+        case .preferred:
+            if viewModel.preferences.defaultResumeUseEmbeddedTerminal {
+                viewModel.recordIntentForDetailNew(anchor: target)
+                startEmbeddedNew(for: target)
+            } else {
+                startNewSession(for: target)
+            }
+        case .terminal:
+            viewModel.recordIntentForDetailNew(anchor: target)
+            #if APPSTORE
+            viewModel.copyNewSessionCommandsRespectingProject(session: target)
+            _ = viewModel.openAppleTerminal(at: workingDirectory(for: target))
+            Task {
+                await SystemNotifier.shared.notify(
+                    title: "CodMate",
+                    body: "Command copied. Paste it in the opened terminal.")
+            }
+            #else
+            viewModel.copyNewSessionCommandsRespectingProject(session: target)
+            _ = viewModel.openAppleTerminal(at: workingDirectory(for: target))
+            Task {
+                await SystemNotifier.shared.notify(
+                    title: "CodMate",
+                    body: "Command copied. Paste it in the opened terminal.")
+            }
+            #endif
+        case .iterm:
+            viewModel.recordIntentForDetailNew(anchor: target)
+            let cmd = viewModel.buildNewSessionCLIInvocationRespectingProject(session: target)
+            viewModel.openPreferredTerminalViaScheme(
+                app: .iterm2, directory: workingDirectory(for: target), command: cmd)
+        case .warp:
+            viewModel.recordIntentForDetailNew(anchor: target)
+            viewModel.copyNewSessionCommandsRespectingProject(session: target)
+            viewModel.openPreferredTerminalViaScheme(
+                app: .warp, directory: workingDirectory(for: target))
+            Task {
+                await SystemNotifier.shared.notify(
+                    title: "CodMate",
+                    body: "Command copied. Paste it in the opened terminal.")
+            }
+        case .embedded:
+            viewModel.recordIntentForDetailNew(anchor: target)
+            startEmbeddedNew(for: target)
+        }
+    }
+
+    // moved to ContentView+Helpers.swift
+
+    private func toggleDetailMaximized() {
+        withAnimation(.easeInOut(duration: 0.18)) {
+            let shouldHide = columnVisibility != .detailOnly
+            columnVisibility = shouldHide ? .detailOnly : .all
+            isDetailMaximized = shouldHide
+        }
+    }
+
+    func toggleSidebarVisibility() {
+        withAnimation(.easeInOut(duration: 0.15)) {
+            switch columnVisibility {
+            case .all:
+                columnVisibility = .doubleColumn // hide sidebar via system behavior
+                storeSidebarHidden = true
+            case .doubleColumn:
+                columnVisibility = .all         // show sidebar
+                storeSidebarHidden = false
+            case .detailOnly:
+                columnVisibility = .doubleColumn
+                storeSidebarHidden = true
+            default:
+                columnVisibility = .doubleColumn
+                storeSidebarHidden = true
+            }
+        }
+    }
+
+    func toggleListVisibility() {
+        // Revert to non-animated toggle to keep detail anchored and stable
+        isListHidden.toggle()
+        storeListHidden = isListHidden
+    }
+
+    func applyVisibilityFromStorage(animated: Bool) {
+        let action = {
+            // Apply list visibility
+            isListHidden = storeListHidden
+            // Apply sidebar visibility when not maximized
+            switch columnVisibility {
+            case .detailOnly:
+                break // keep maximized state
+            case .all, .doubleColumn:
+                if storeSidebarHidden {
+                    if columnVisibility == .all { columnVisibility = .doubleColumn }
+                } else {
+                    if columnVisibility == .doubleColumn { columnVisibility = .all }
+                }
+            default:
+                break
+            }
+        }
+        if animated { withAnimation(.easeInOut(duration: 0.12)) { action() } } else { action() }
+    }
+
+    @ViewBuilder
+    func maximizeToggleButton() -> some View {
+        let isBothHidden = storeSidebarHidden && isListHidden
+        Button {
+            withAnimation(.easeInOut(duration: 0.15)) {
+                toggleSidebarVisibility()
+                toggleListVisibility()
+            }
+        } label: {
+            Image(systemName: isBothHidden
+                ? "arrow.up.right.and.arrow.down.left"
+                : "arrow.down.left.and.arrow.up.right")
+                .imageScale(.medium)
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.regular)
+        .frame(height: 28)
+        .accessibilityLabel(isBothHidden ? "Restore lists" : "Maximize detail")
+    }
+
+    func handleFolderSelection(
+        result: Result<[URL], Error>,
+        update: @escaping (URL) async -> Void
+    ) {
+        switch result {
+        case .success(let urls):
+            selectingSessionsRoot = false
+            guard let url = urls.first else { return }
+            Task { await update(url) }
+        case .failure(let error):
+            selectingSessionsRoot = false
+            alertState = AlertState(
+                title: "Failed to choose directory", message: error.localizedDescription)
+        }
+    }
+
+    // Removed: executable chooser handler
+
+    var placeholder: some View {
+        ContentUnavailableView(
+            "Select a session", systemImage: "rectangle.and.text.magnifyingglass",
+            description: Text("Pick a session from the middle list to view details.")
+        )
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+// MARK: - Embedded PTY rekey helpers
+extension ContentView {
+    // canonicalizePath moved to ContentView+Helpers.swift
+
+    func reconcilePendingEmbeddedRekeys() {
+        guard !pendingEmbeddedRekeys.isEmpty else { return }
+        let all = viewModel.sections.flatMap(\.sessions)
+        let now = Date()
+        var remaining: [PendingEmbeddedRekey] = []
+        for pending in pendingEmbeddedRekeys {
+            // Window to match nearby creations
+            let windowStart = pending.t0.addingTimeInterval(-2)
+            let windowEnd = pending.t0.addingTimeInterval(120)
+            let candidates = all.filter { s in
+                guard s.id != pending.anchorId else { return false }
+                let canon = canonicalizePath(s.cwd)
+                guard canon == pending.expectedCwd else { return false }
+                return s.startedAt >= windowStart && s.startedAt <= windowEnd
+            }
+            if let winner = candidates.min(by: {
+                abs($0.startedAt.timeIntervalSince(pending.t0))
+                    < abs($1.startedAt.timeIntervalSince(pending.t0))
+            }) {
+                #if canImport(SwiftTerm) && !APPSTORE
+                    TerminalSessionManager.shared.rekey(from: pending.anchorId, to: winner.id)
+                #endif
+                if runningSessionIDs.contains(pending.anchorId) {
+                    runningSessionIDs.remove(pending.anchorId)
+                    runningSessionIDs.insert(winner.id)
+                }
+                if pending.selectOnSuccess || selection.contains(pending.anchorId) {
+                    selection = [winner.id]
+                }
+            } else {
+                if now.timeIntervalSince(pending.t0) < 180 {
+                    remaining.append(pending)
+                } else {
+                    // Timeout: stop the anchor terminal to avoid lingering shells
+                    #if canImport(SwiftTerm) && !APPSTORE
+                        TerminalSessionManager.shared.stop(key: pending.anchorId)
+                    #endif
+                    runningSessionIDs.remove(pending.anchorId)
+                    embeddedInitialCommands.removeValue(forKey: pending.anchorId)
+                }
+            }
+        }
+        pendingEmbeddedRekeys = remaining
+    }
+}
+
+struct AlertState: Identifiable {
+    let id = UUID()
+    let title: String
+    let message: String
+}

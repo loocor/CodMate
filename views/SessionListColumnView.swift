@@ -128,14 +128,14 @@ struct SessionListColumnView: View {
                                                 }
                                             }
                                         } label: {
-                                            Label("Assign to Project…", systemImage: "folder.badge.plus")
+                                            Label("Assign to Project…", systemImage: "rectangle.stack.badge.plus")
                                         }
                                     }
                                     Button { onReveal(session) } label: {
-                                        Label("Reveal in Finder", systemImage: "folder")
+                                        Label("Reveal in Finder", systemImage: "finder")
                                     }
                                     Button { onExportMarkdown(session) } label: {
-                                        Label("Export Markdown", systemImage: "square.and.arrow.down")
+                                        Label("Export Markdown", systemImage: "square.and.arrow.up")
                                     }
                                     Divider()
                                     Button(role: .destructive) { onDeleteRequest(session) } label: {
@@ -188,16 +188,13 @@ struct SessionListColumnView: View {
             )
             .frame(maxWidth: .infinity)
 
-            // Hide segmented control when column width is too small to avoid squashed layout
-            if containerWidth >= 340 {
-                EqualWidthSegmentedControl(
-                    items: Array(SessionSortOrder.allCases),
-                    selection: $sortOrder,
-                    title: { $0.title }
-                )
-                .frame(maxWidth: .infinity)
-                .transition(.opacity.combined(with: .move(edge: .leading)))
-            }
+            EqualWidthSegmentedControl(
+                items: Array(SessionSortOrder.allCases),
+                selection: $sortOrder,
+                title: { $0.title }
+            )
+            .frame(maxWidth: .infinity)
+            .transition(.opacity.combined(with: .move(edge: .leading)))
         }
         .frame(maxWidth: .infinity)
     }

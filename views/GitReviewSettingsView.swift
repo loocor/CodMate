@@ -20,7 +20,8 @@ struct GitReviewSettingsView: View {
                 Spacer()
             }
 
-            SettingsTabContent {
+            // Match horizontal padding with other settings (no extra inner padding)
+            VStack(alignment: .leading, spacing: 0) {
                 // Options grid
                 Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 14) {
                     GridRow {
@@ -50,7 +51,6 @@ struct GitReviewSettingsView: View {
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                         HStack(spacing: 8) {
-                            Spacer()
                             Picker("", selection: Binding(
                                 get: { providerId ?? "(auto)" },
                                 set: { newVal in
@@ -68,7 +68,6 @@ struct GitReviewSettingsView: View {
                                     Text((p.name?.isEmpty == false ? p.name! : p.id)).tag(p.id)
                                 }
                             }
-                            .frame(width: 100, alignment: .trailing)
                             .labelsHidden()
                             Picker("", selection: Binding(
                                 get: { modelId ?? "(default)" },
@@ -80,7 +79,6 @@ struct GitReviewSettingsView: View {
                                 Text("(default)").tag("(default)")
                                 ForEach(modelList, id: \.self) { mid in Text(mid).tag(mid) }
                             }
-                            .frame(width: 200, alignment: .trailing)
                             .labelsHidden()
                         }
                         .frame(maxWidth: .infinity, alignment: .trailing)
@@ -103,12 +101,18 @@ struct GitReviewSettingsView: View {
                             }
                     }
                 }
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+                Spacer(minLength: 0)
             }
+
+            // Repository authorization has moved to on-demand prompts in Review.
+            // The settings page no longer manages a global list to reduce clutter.
         }
         .onAppear {
             draftTemplate = preferences.commitPromptTemplate
             providerId = preferences.commitProviderId
             Task {
+                // Only show user-added providers to avoid confusion
                 let list = await ProvidersRegistryService().listProviders()
                 providersList = list
                 modelList = modelsForCurrentProvider()
@@ -128,3 +132,5 @@ struct GitReviewSettingsView: View {
         return ids
     }
 }
+
+// Authorized repositories list has been removed from Settings.

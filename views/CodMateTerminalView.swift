@@ -242,5 +242,15 @@ import Foundation
         }
 
         // No-op for now: path injection fallback removed in favor of Ctrl+V simulation.
+
+        override func processTerminated(_ source: LocalProcess, exitCode: Int32?) {
+            super.processTerminated(source, exitCode: exitCode)
+            let id = sessionID ?? ""
+            NotificationCenter.default.post(
+                name: .codMateTerminalExited,
+                object: nil,
+                userInfo: ["sessionID": id, "exitCode": exitCode as Any]
+            )
+        }
     }
 #endif

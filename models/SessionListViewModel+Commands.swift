@@ -88,6 +88,15 @@ extension SessionListViewModel {
         )
     }
 
+    // MARK: - Embedded CLI Console helpers (dev)
+    func buildResumeCLIArgs(session: SessionSummary) -> [String] {
+        actions.buildResumeArguments(session: session, options: preferences.resumeOptions)
+    }
+
+    func buildNewSessionCLIArgs(session: SessionSummary) -> [String] {
+        actions.buildNewSessionArguments(session: session, options: preferences.resumeOptions)
+    }
+
     func buildResumeCLIInvocationRespectingProject(session: SessionSummary) -> String {
         if session.source == .codex,
             let pid = projectIdForSession(session.id),

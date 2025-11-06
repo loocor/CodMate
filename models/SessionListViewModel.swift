@@ -1,5 +1,8 @@
 import AppKit
 import Foundation
+#if canImport(Darwin)
+import Darwin
+#endif
 
 @MainActor
 final class SessionListViewModel: ObservableObject {
@@ -195,6 +198,9 @@ final class SessionListViewModel: ObservableObject {
             }
         }
 
+        // Ensure we have access to the sessions directory in sandbox mode
+        await ensureSessionsAccess()
+
         do {
             let scope = currentScope()
             async let codexTask = indexer.refreshSessions(
@@ -348,6 +354,8 @@ final class SessionListViewModel: ObservableObject {
 
     func updateSessionsRoot(to newURL: URL) async {
         guard newURL != preferences.sessionsRoot else { return }
+        // Save security-scoped bookmark if sandboxed
+        SecurityScopedBookmarks.shared.save(url: newURL, for: .sessionsRoot)
         preferences.sessionsRoot = newURL
         await notesStore.updateRoot(to: preferences.notesRoot)
         await indexer.invalidateAll()
@@ -358,6 +366,7 @@ final class SessionListViewModel: ObservableObject {
 
     func updateNotesRoot(to newURL: URL) async {
         guard newURL != preferences.notesRoot else { return }
+        SecurityScopedBookmarks.shared.save(url: newURL, for: .notesRoot)
         preferences.notesRoot = newURL
         await notesStore.updateRoot(to: newURL)
         // Reload notes snapshot and re-apply to current sessions
@@ -372,6 +381,7 @@ final class SessionListViewModel: ObservableObject {
 
     func updateProjectsRoot(to newURL: URL) async {
         guard newURL != preferences.projectsRoot else { return }
+        SecurityScopedBookmarks.shared.save(url: newURL, for: .projectsRoot)
         preferences.projectsRoot = newURL
         let p = ProjectsStore.Paths(
             root: newURL,
@@ -1106,7 +1116,39 @@ extension SessionListViewModel {
         await MainActor.run { self.globalSessionCount = total }
     }
 
-
+    // MARK: - Sandbox Permission Helpers
+    
+    /// Ensure we have access to sessions directories in sandbox mode
+    private func ensureSessionsAccess() async {
+        guard SecurityScopedBookmarks.shared.isSandboxed else { return }
+        
+        // Check if sessions root path is under a known required directory
+        let sessionsPath = preferences.sessionsRoot.path
+        let realHome = getRealUserHome()
+        let normalizedPath = sessionsPath.replacingOccurrences(of: "~", with: realHome)
+        
+        // Try to start access for Codex directory if sessions root is under ~/.codex
+        if normalizedPath.hasPrefix(realHome + "/.codex") {
+            SandboxPermissionsManager.shared.startAccessingIfAuthorized(directory: .codexSessions)
+        }
+        
+        // Try to start access for Claude directory if needed
+        SandboxPermissionsManager.shared.startAccessingIfAuthorized(directory: .claudeSessions)
+        
+        // Try to start access for CodMate directory if needed
+        SandboxPermissionsManager.shared.startAccessingIfAuthorized(directory: .codmateData)
+    }
+    
+    /// Get the real user home directory (not sandbox container)
+    private func getRealUserHome() -> String {
+        if let homeDir = getpwuid(getuid())?.pointee.pw_dir {
+            return String(cString: homeDir)
+        }
+        if let home = ProcessInfo.processInfo.environment["HOME"] {
+            return home
+        }
+        return NSHomeDirectory()
+    }
 
     func timeline(for summary: SessionSummary) async -> [ConversationTurn] {
         if summary.source == .claude {

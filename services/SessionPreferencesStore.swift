@@ -1,5 +1,10 @@
 import Foundation
 
+import Foundation
+#if canImport(Darwin)
+import Darwin
+#endif
+
 @MainActor
 final class SessionPreferencesStore: ObservableObject {
     @Published var sessionsRoot: URL {
@@ -54,6 +59,8 @@ final class SessionPreferencesStore: ObservableObject {
         static let commitPromptTemplate = "git.review.commitPromptTemplate"
         static let commitProviderId = "git.review.commitProviderId" // provider id or nil for auto
         static let commitModelId = "git.review.commitModelId" // optional model id tied to provider
+        // Terminal mode (DEV): use CLI console instead of shell
+        static let terminalUseCLIConsole = "terminal.useCliConsole"
     }
 
     init(
@@ -61,7 +68,8 @@ final class SessionPreferencesStore: ObservableObject {
         fileManager: FileManager = .default
     ) {
         self.defaults = defaults
-        let homeURL = fileManager.homeDirectoryForCurrentUser
+        // Get the real user home directory (not sandbox container)
+        let homeURL = SessionPreferencesStore.getRealUserHomeURL()
 
         // Resolve sessions root without touching self (still used internally; no longer user-configurable)
         let resolvedSessionsRoot: URL = {
@@ -103,9 +111,21 @@ final class SessionPreferencesStore: ObservableObject {
         self.sessionsRoot = resolvedSessionsRoot
         self.notesRoot = resolvedNotesRoot
         self.projectsRoot = resolvedProjectsRoot
-        // Resume defaults
-        self.defaultResumeUseEmbeddedTerminal =
-            defaults.object(forKey: Keys.resumeUseEmbedded) as? Bool ?? true
+        // Resume defaults (defer assigning to self until value is finalized)
+        #if APPSTORE
+            if defaults.object(forKey: Keys.resumeUseEmbedded) as? Bool == true {
+                defaults.set(false, forKey: Keys.resumeUseEmbedded)
+            }
+            var resumeEmbedded = false
+        #else
+            var resumeEmbedded = defaults.object(forKey: Keys.resumeUseEmbedded) as? Bool ?? true
+        #endif
+        // Runtime sandbox: force disable embedded terminal
+        if AppSandbox.isEnabled, resumeEmbedded {
+            resumeEmbedded = false
+            defaults.set(false, forKey: Keys.resumeUseEmbedded)
+        }
+        self.defaultResumeUseEmbeddedTerminal = resumeEmbedded
         self.defaultResumeCopyToClipboard =
             defaults.object(forKey: Keys.resumeCopyClipboard) as? Bool ?? true
         let appRaw = defaults.string(forKey: Keys.resumeExternalApp) ?? TerminalApp.terminal.rawValue
@@ -121,6 +141,22 @@ final class SessionPreferencesStore: ObservableObject {
         self.commitPromptTemplate = defaults.string(forKey: Keys.commitPromptTemplate) ?? ""
         self.commitProviderId = defaults.string(forKey: Keys.commitProviderId)
         self.commitModelId = defaults.string(forKey: Keys.commitModelId)
+
+        // Terminal mode (DEV) – compute locally first
+        #if APPSTORE
+            if defaults.object(forKey: Keys.terminalUseCLIConsole) as? Bool == true {
+                defaults.set(false, forKey: Keys.terminalUseCLIConsole)
+            }
+            var cliConsole = false
+        #else
+            var cliConsole = defaults.object(forKey: Keys.terminalUseCLIConsole) as? Bool ?? true
+        #endif
+        // Runtime sandbox: force disable CLI console
+        if AppSandbox.isEnabled, cliConsole {
+            cliConsole = false
+            defaults.set(false, forKey: Keys.terminalUseCLIConsole)
+        }
+        self.useEmbeddedCLIConsole = cliConsole
 
         // CLI policy defaults (with legacy value coercion)
         if let s = defaults.string(forKey: Keys.resumeSandboxMode), let val = SessionPreferencesStore.coerceSandboxMode(s) {
@@ -187,7 +223,8 @@ final class SessionPreferencesStore: ObservableObject {
     }
 
     static func defaultNotesRoot(for sessionsRoot: URL) -> URL {
-        let home = FileManager.default.homeDirectoryForCurrentUser
+        // Use real home directory, not sandbox container
+        let home = getRealUserHomeURL()
         return home.appendingPathComponent(".codmate", isDirectory: true)
             .appendingPathComponent("notes", isDirectory: true)
     }
@@ -196,6 +233,20 @@ final class SessionPreferencesStore: ObservableObject {
         homeDirectory
             .appendingPathComponent(".codmate", isDirectory: true)
             .appendingPathComponent("projects", isDirectory: true)
+    }
+    
+    /// Get the real user home directory (not sandbox container)
+    nonisolated static func getRealUserHomeURL() -> URL {
+        #if canImport(Darwin)
+        if let homeDir = getpwuid(getuid())?.pointee.pw_dir {
+            let path = String(cString: homeDir)
+            return URL(fileURLWithPath: path, isDirectory: true)
+        }
+        #endif
+        if let home = ProcessInfo.processInfo.environment["HOME"] {
+            return URL(fileURLWithPath: home, isDirectory: true)
+        }
+        return FileManager.default.homeDirectoryForCurrentUser
     }
 
     // Removed: default executable URLs – resolution uses PATH
@@ -224,7 +275,21 @@ final class SessionPreferencesStore: ObservableObject {
 
     // MARK: - Resume Preferences
     @Published var defaultResumeUseEmbeddedTerminal: Bool {
-        didSet { defaults.set(defaultResumeUseEmbeddedTerminal, forKey: Keys.resumeUseEmbedded) }
+        didSet {
+            #if APPSTORE
+                if defaultResumeUseEmbeddedTerminal {
+                    defaultResumeUseEmbeddedTerminal = false
+                    defaults.set(false, forKey: Keys.resumeUseEmbedded)
+                    return
+                }
+            #endif
+            if AppSandbox.isEnabled, defaultResumeUseEmbeddedTerminal {
+                defaultResumeUseEmbeddedTerminal = false
+                defaults.set(false, forKey: Keys.resumeUseEmbedded)
+                return
+            }
+            defaults.set(defaultResumeUseEmbeddedTerminal, forKey: Keys.resumeUseEmbedded)
+        }
     }
     @Published var defaultResumeCopyToClipboard: Bool {
         didSet { defaults.set(defaultResumeCopyToClipboard, forKey: Keys.resumeCopyClipboard) }
@@ -307,4 +372,23 @@ final class SessionPreferencesStore: ObservableObject {
     @Published var commitPromptTemplate: String { didSet { defaults.set(commitPromptTemplate, forKey: Keys.commitPromptTemplate) } }
     @Published var commitProviderId: String? { didSet { defaults.set(commitProviderId, forKey: Keys.commitProviderId) } }
     @Published var commitModelId: String? { didSet { defaults.set(commitModelId, forKey: Keys.commitModelId) } }
+
+    // MARK: - Terminal (DEV)
+    @Published var useEmbeddedCLIConsole: Bool {
+        didSet {
+            #if APPSTORE
+                if useEmbeddedCLIConsole {
+                    useEmbeddedCLIConsole = false
+                    defaults.set(false, forKey: Keys.terminalUseCLIConsole)
+                    return
+                }
+            #endif
+            if AppSandbox.isEnabled, useEmbeddedCLIConsole {
+                useEmbeddedCLIConsole = false
+                defaults.set(false, forKey: Keys.terminalUseCLIConsole)
+                return
+            }
+            defaults.set(useEmbeddedCLIConsole, forKey: Keys.terminalUseCLIConsole)
+        }
+    }
 }

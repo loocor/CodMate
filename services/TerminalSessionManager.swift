@@ -16,8 +16,17 @@ import Darwin
 
         private init() {}
 
-        func view(for terminalKey: String, initialCommands: String, font: NSFont)
-            -> LocalProcessTerminalView
+        struct ConsoleSpec {
+            var executable: String         // e.g. "codex" or "claude" (resolved via /usr/bin/env)
+            var args: [String]            // e.g. ["resume", "<id>"]
+            var cwd: String               // working directory
+            var env: [String: String]     // environment overlay
+        }
+
+        func view(for terminalKey: String,
+                  initialCommands: String,
+                  font: NSFont,
+                  consoleSpec: ConsoleSpec? = nil) -> LocalProcessTerminalView
         {
             if let v = views[terminalKey] {
                 // If the cached terminal's process died, drop it and recreate to avoid a dead view
@@ -39,8 +48,56 @@ import Darwin
             let term: LocalProcessTerminalView = CodMateTerminalView(frame: .zero)
             term.font = font
             term.translatesAutoresizingMaskIntoConstraints = false
-            // Start login shell
-            term.startProcess(executable: "/bin/zsh", args: ["-l"])
+            // Always start a login shell under PTY with a sanitized environment suitable for App Sandbox.
+            // Then inject commands (resume/new) via keystrokes, so the terminal stays open even if a tool is missing.
+            let prefixPATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+            var env = ProcessInfo.processInfo.environment
+            if let old = env["PATH"], !old.isEmpty { env["PATH"] = prefixPATH + ":" + old } else { env["PATH"] = prefixPATH }
+            env["LANG"] = env["LANG"] ?? "zh_CN.UTF-8"
+            env["LC_ALL"] = env["LC_ALL"] ?? "zh_CN.UTF-8"
+            env["LC_CTYPE"] = env["LC_CTYPE"] ?? "zh_CN.UTF-8"
+            env["TERM"] = env["TERM"] ?? "xterm-256color"
+            env["SHELL"] = "/bin/zsh"
+            // Direct zsh to read rc files from our container to avoid accessing user dotfiles outside sandbox
+            let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+            let zdotdir = appSupport.appendingPathComponent("CodMate/ZDOTDIR", isDirectory: true)
+            try? FileManager.default.createDirectory(at: zdotdir, withIntermediateDirectories: true)
+            // Bootstrap minimal zsh startup files if absent to ensure PATH is correct for Homebrew CLIs
+            let zshenvURL = zdotdir.appendingPathComponent(".zshenv", isDirectory: false)
+            if !FileManager.default.fileExists(atPath: zshenvURL.path) {
+                let content = """
+                # CodMate App Store sandbox bootstrap
+                # Ensure Homebrew and system paths are available to embedded zsh
+                export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
+                export LANG="${LANG:-zh_CN.UTF-8}"
+                export LC_ALL="${LC_ALL:-zh_CN.UTF-8}"
+                export LC_CTYPE="${LC_CTYPE:-zh_CN.UTF-8}"
+                export TERM="${TERM:-xterm-256color}"
+                """
+                try? content.write(to: zshenvURL, atomically: true, encoding: .utf8)
+            }
+            let zshrcURL = zdotdir.appendingPathComponent(".zshrc", isDirectory: false)
+            if !FileManager.default.fileExists(atPath: zshrcURL.path) {
+                let rc = """
+                # CodMate embedded terminal minimal rc
+                # Keep this file minimal to avoid sandbox access to user dotfiles/plugins.
+                # Guarantee Homebrew bins appear before system default.
+                setopt NO_MONITOR
+                case ":$PATH:" in
+                  *:/opt/homebrew/bin:*) ;;
+                  *) export PATH="/opt/homebrew/bin:$PATH" ;;
+                esac
+                case ":$PATH:" in
+                  *:/usr/local/bin:*) ;;
+                  *) export PATH="/usr/local/bin:$PATH" ;;
+                esac
+                """
+                try? rc.write(to: zshrcURL, atomically: true, encoding: .utf8)
+            }
+            env["ZDOTDIR"] = zdotdir.path
+            let envArray = env.map { "\($0.key)=\($0.value)" }
+            // Use LocalProcessTerminalView API to ensure PTY/window sizing hooks are set up correctly
+            term.startProcess(executable: "/bin/zsh", args: ["-l"], environment: envArray, execName: nil)
             if let ctv = term as? CodMateTerminalView { ctv.sessionID = terminalKey }
             views[terminalKey] = term
             lastUsedAt[terminalKey] = Date()

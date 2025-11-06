@@ -54,6 +54,11 @@ final class MCPServersViewModel: ObservableObject {
     }
 
     func loadServers() async {
+        if SecurityScopedBookmarks.shared.isSandboxed {
+            let home = SessionPreferencesStore.getRealUserHomeURL()
+            let codmate = home.appendingPathComponent(".codmate", isDirectory: true)
+            AuthorizationHub.shared.ensureDirectoryAccessOrPrompt(directory: codmate, purpose: .generalAccess, message: "Authorize ~/.codmate to read MCP servers")
+        }
         let list = await store.list()
         self.servers = list
 
@@ -163,8 +168,8 @@ final class MCPServersViewModel: ObservableObject {
         let args: [String] = formArgsUseJSON
             ? (Self.parseJSONStringArray(formArgsJSONText) ?? [])
             : formArgs
-                .split(separator: "\n")
-                .map { String($0).trimmingCharacters(in: .whitespaces) }
+                .split(whereSeparator: { $0.isWhitespace })
+                .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
                 .filter { !$0.isEmpty }
         let env: [String: String]? = formEnvUseJSON
             ? Self.parseJSONStringDict(formEnvJSONText)
@@ -211,6 +216,14 @@ final class MCPServersViewModel: ObservableObject {
         guard formCanSave() else { return false }
         let item = buildServerFromForm()
         do {
+            if SecurityScopedBookmarks.shared.isSandboxed {
+                let home = SessionPreferencesStore.getRealUserHomeURL()
+                let codmate = home.appendingPathComponent(".codmate", isDirectory: true)
+                let codex = home.appendingPathComponent(".codex", isDirectory: true)
+                _ = AuthorizationHub.shared.ensureDirectoryAccessOrPromptSync(directory: codmate, purpose: .generalAccess, message: "Authorize ~/.codmate to save MCP servers")
+                _ = AuthorizationHub.shared.ensureDirectoryAccessOrPromptSync(directory: codex, purpose: .generalAccess, message: "Authorize ~/.codex to update Codex config")
+                _ = AuthorizationHub.shared.ensureDirectoryAccessOrPromptSync(directory: home, purpose: .generalAccess, message: "Authorize your Home folder to update Claude config")
+            }
             if isEditingExisting, let original = originalName, original != item.name {
                 // Rename: remove old record first to avoid duplicate entries
                 try await store.delete(name: original)
@@ -338,6 +351,14 @@ final class MCPServersViewModel: ObservableObject {
                 )
                 incoming.append(srv)
             }
+            if SecurityScopedBookmarks.shared.isSandboxed {
+                let home = SessionPreferencesStore.getRealUserHomeURL()
+                let codmate = home.appendingPathComponent(".codmate", isDirectory: true)
+                let codex = home.appendingPathComponent(".codex", isDirectory: true)
+                _ = AuthorizationHub.shared.ensureDirectoryAccessOrPromptSync(directory: codmate, purpose: .generalAccess, message: "Authorize ~/.codmate to save MCP servers")
+                _ = AuthorizationHub.shared.ensureDirectoryAccessOrPromptSync(directory: codex, purpose: .generalAccess, message: "Authorize ~/.codex to update Codex config")
+                _ = AuthorizationHub.shared.ensureDirectoryAccessOrPromptSync(directory: home, purpose: .generalAccess, message: "Authorize your Home folder to update Claude config")
+            }
             try await store.upsertMany(incoming)
             await loadServers()
             // Apply enabled servers into Codex config.toml
@@ -353,6 +374,14 @@ final class MCPServersViewModel: ObservableObject {
 
     func setServerEnabled(_ server: MCPServer, _ enabled: Bool) async {
         do {
+            if SecurityScopedBookmarks.shared.isSandboxed {
+                let home = SessionPreferencesStore.getRealUserHomeURL()
+                let codmate = home.appendingPathComponent(".codmate", isDirectory: true)
+                let codex = home.appendingPathComponent(".codex", isDirectory: true)
+                _ = AuthorizationHub.shared.ensureDirectoryAccessOrPromptSync(directory: codmate, purpose: .generalAccess)
+                _ = AuthorizationHub.shared.ensureDirectoryAccessOrPromptSync(directory: codex, purpose: .generalAccess)
+                _ = AuthorizationHub.shared.ensureDirectoryAccessOrPromptSync(directory: home, purpose: .generalAccess)
+            }
             try await store.setEnabled(name: server.name, enabled: enabled)
             await loadServers()
             await applyEnabledServersToCodex()
@@ -363,6 +392,14 @@ final class MCPServersViewModel: ObservableObject {
 
     func setCapabilityEnabled(_ server: MCPServer, _ cap: MCPCapability, _ enabled: Bool) async {
         do {
+            if SecurityScopedBookmarks.shared.isSandboxed {
+                let home = SessionPreferencesStore.getRealUserHomeURL()
+                let codmate = home.appendingPathComponent(".codmate", isDirectory: true)
+                let codex = home.appendingPathComponent(".codex", isDirectory: true)
+                _ = AuthorizationHub.shared.ensureDirectoryAccessOrPromptSync(directory: codmate, purpose: .generalAccess)
+                _ = AuthorizationHub.shared.ensureDirectoryAccessOrPromptSync(directory: codex, purpose: .generalAccess)
+                _ = AuthorizationHub.shared.ensureDirectoryAccessOrPromptSync(directory: home, purpose: .generalAccess)
+            }
             try await store.setCapabilityEnabled(name: server.name, capability: cap.name, enabled: enabled)
             await loadServers()
             await applyEnabledServersToCodex()
@@ -383,7 +420,7 @@ private func applyEnabledServersToCodex() async {
         let list = await store.list()
         let codex = CodexConfigService()
         try? await codex.applyMCPServers(list)
-        // Export to Claude Code config (~/.claude.json)
+        // Export to Claude Code user settings (~/.claude/settings.json)
         try? await store.exportEnabledForClaudeConfig()
     }
 }

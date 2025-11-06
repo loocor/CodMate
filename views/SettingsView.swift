@@ -232,6 +232,60 @@ struct SettingsView: View {
                         )
                     }
                 }
+
+                #if APPSTORE
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("App Store Version").font(.headline).fontWeight(.semibold)
+                    settingsCard {
+                        VStack(alignment: .leading, spacing: 12) {
+                            HStack(alignment: .top, spacing: 12) {
+                                Image(systemName: "info.circle.fill")
+                                    .font(.title2)
+                                    .foregroundStyle(.blue)
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Text("About This Version")
+                                        .font(.subheadline)
+                                        .fontWeight(.semibold)
+                                    Text("You're using the Mac App Store version of CodMate, which includes enhanced security through App Sandbox.")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                            }
+
+                            Divider()
+
+                            VStack(alignment: .leading, spacing: 8) {
+                                Label("Embedded Terminal Behavior", systemImage: "terminal")
+                                    .font(.subheadline)
+                                    .fontWeight(.medium)
+                                Text("The embedded terminal provides a basic shell environment for navigation and system commands. Third-party CLI tools (codex, claude) cannot be executed directly from the embedded terminal due to macOS security restrictions.")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+
+                                Text("To run CLI sessions, use the \"Copy Command\" or \"Open in Terminal.app\" buttons to execute commands in the external Terminal app.")
+                                    .font(.caption)
+                                    .foregroundColor(.blue)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+
+                            Divider()
+
+                            VStack(alignment: .leading, spacing: 8) {
+                                Label("Git Review Functionality", systemImage: "square.and.pencil")
+                                    .font(.subheadline)
+                                    .fontWeight(.medium)
+                                Text("Git Review works fully in the App Store version using the system git tool (/usr/bin/git). You may be prompted to authorize repository folders for the first time.")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                        .padding(4)
+                    }
+                }
+                #endif
             }
             .padding(.bottom, 16)
         }
@@ -340,13 +394,8 @@ struct SettingsView: View {
                 }
 
                 VStack(alignment: .leading, spacing: 10) {
-                    Text("Resume Defaults")
-                        .font(.headline)
-                        .fontWeight(.semibold)
-
-                    settingsCard {
-                        // Two-column grid for aligned controls
-                        Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 18) {
+                    // Two-column grid for aligned controls (no card)
+                    Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 18) {
                             // Row: Embedded terminal toggle
                             GridRow {
                                 VStack(alignment: .leading, spacing: 0) {
@@ -361,6 +410,26 @@ struct SettingsView: View {
                                     .controlSize(.small)
                                     .frame(maxWidth: .infinity, alignment: .trailing)
                                     .gridColumnAlignment(.trailing)
+                                    .disabled(AppDistribution.isAppStore || AppSandbox.isEnabled)
+                            }
+
+                            gridDivider
+
+                            // Row: Use CLI console (no shell)
+                            GridRow {
+                                VStack(alignment: .leading, spacing: 0) {
+                                    Text("Use embedded CLI console (no shell)")
+                                        .font(.subheadline).fontWeight(.medium)
+                                    Text("Starts codex/claude directly")
+                                        .font(.caption).foregroundColor(.secondary)
+                                }
+                                Toggle("", isOn: $preferences.useEmbeddedCLIConsole)
+                                    .labelsHidden()
+                                    .toggleStyle(.switch)
+                                    .controlSize(.small)
+                                    .frame(maxWidth: .infinity, alignment: .trailing)
+                                    .gridColumnAlignment(.trailing)
+                                    .disabled(AppDistribution.isAppStore || AppSandbox.isEnabled)
                             }
 
                             gridDivider
@@ -408,7 +477,6 @@ struct SettingsView: View {
                                 .gridColumnAlignment(.trailing)
                                 .gridCellAnchor(.trailing)
                             }
-                        }
                     }
                 }
             }

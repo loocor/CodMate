@@ -1,8 +1,11 @@
+import Darwin
 import Foundation
+import OSLog
 
 // Actor responsible for interacting with Git in a given working tree.
 // Uses `/usr/bin/env git` and a robust PATH as per CLI integration guidance.
 actor GitService {
+    private static let log = Logger(subsystem: "ai.codmate.app", category: "Git")
     struct Change: Identifiable, Sendable, Hashable {
         enum Kind: String, Sendable { case modified, added, deleted, untracked }
         let id = UUID()
@@ -15,7 +18,48 @@ actor GitService {
         var root: URL
     }
 
+    private static let realHomeDirectory: String = {
+        let fmHome = FileManager.default.homeDirectoryForCurrentUser.path
+        if !fmHome.isEmpty { return fmHome }
+        if let pwDir = getpwuid(getuid())?.pointee.pw_dir {
+            return String(cString: pwDir)
+        }
+        if let envHome = ProcessInfo.processInfo.environment["HOME"], !envHome.isEmpty {
+            return envHome
+        }
+        return NSHomeDirectory()
+    }()
+
     private let envPATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+    private let gitCandidates: [String] = GitService.detectGitCandidates()
+    private var blockedExecutables: Set<String> = []
+    private var lastFailureDescription: String?
+
+    private static func detectGitCandidates() -> [String] {
+        let fm = FileManager.default
+        var seen: Set<String> = []
+        var out: [String] = []
+        func append(_ path: String) {
+            guard !seen.contains(path) else { return }
+            seen.insert(path)
+            if fm.isExecutableFile(atPath: path) {
+                out.append(path)
+            }
+        }
+        let preferred = [
+            "/Library/Developer/CommandLineTools/usr/bin/git",
+            "/Applications/Xcode.app/Contents/Developer/usr/bin/git",
+            "/Applications/Xcode-beta.app/Contents/Developer/usr/bin/git",
+            "/usr/bin/git",
+            "/opt/homebrew/bin/git",
+            "/usr/local/bin/git",
+        ]
+        for path in preferred { append(path) }
+        if !seen.contains("/usr/bin/git") {
+            append("/usr/bin/git")
+        }
+        return out
+    }
 
     // Discover the git repository root for a directory, or nil if not a repo
     func repositoryRoot(for directory: URL) async -> Repo? {
@@ -72,7 +116,20 @@ actor GitService {
             map[name] = c
         }
 
-        return Array(map.values).sorted { $0.path.localizedStandardCompare($1.path) == .orderedAscending }
+        var result = Array(map.values).sorted { $0.path.localizedStandardCompare($1.path) == .orderedAscending }
+        if result.isEmpty {
+            // Fallback: parse porcelain output if name-status produced nothing (e.g., some git configs)
+            if let out = try? await runGit(["status", "--porcelain", "-z"], cwd: repo.root) {
+                let (stagedF, worktreeF, untrackedF) = Self.parsePorcelainZ(out.stdout)
+                var fmap: [String: Change] = [:]
+                func ensure(_ p: String) -> Change { if let c = fmap[p] { return c }; let c = Change(path: p, staged: nil, worktree: nil); fmap[p] = c; return c }
+                for (p, k) in stagedF { var c = ensure(p); c.staged = k; fmap[p] = c }
+                for (p, k) in worktreeF { var c = ensure(p); c.worktree = k; fmap[p] = c }
+                for p in untrackedF { var c = ensure(p); c.worktree = .untracked; fmap[p] = c }
+                result = Array(fmap.values).sorted { $0.path.localizedStandardCompare($1.path) == .orderedAscending }
+            }
+        }
+        return result
     }
 
     // Minimal parser for `git diff --name-status -z` output.
@@ -107,6 +164,43 @@ actor GitService {
             i += 2
         }
         return result
+    }
+
+    // Parse `git status --porcelain -z` into staged/worktree/untracked sets
+    private static func parsePorcelainZ(_ stdout: String) -> ([String: Change.Kind], [String: Change.Kind], [String]) {
+        let tokens = stdout.split(separator: "\0").map(String.init)
+        var i = 0
+        var staged: [String: Change.Kind] = [:]
+        var worktree: [String: Change.Kind] = [:]
+        var untracked: [String] = []
+        func kind(for code: Character) -> Change.Kind {
+            switch code {
+            case "A": return .added
+            case "D": return .deleted
+            case "M", "T", "U": return .modified
+            default: return .modified
+            }
+        }
+        while i < tokens.count {
+            let entry = tokens[i]
+            guard entry.count >= 2 else { break }
+            let x = entry.first!  // index
+            let y = entry.dropFirst().first!  // worktree
+            var path = String(entry.dropFirst(3)) // usually starts at index 3: "XY "
+            // Renames show as Rxxx or Cxxx followed by NUL then new path
+            if x == "R" || x == "C" {
+                // Next token is the new path
+                if i + 1 < tokens.count { path = tokens[i+1]; i += 1 }
+            }
+            if x == "?" && y == "?" {
+                untracked.append(path)
+            } else {
+                if x != " " { staged[path] = kind(for: x) }
+                if y != " " { worktree[path] = kind(for: y) }
+            }
+            i += 1
+        }
+        return (staged, worktree, untracked)
     }
 
     // Unified diff for the file; staged toggles --cached
@@ -173,24 +267,93 @@ actor GitService {
     // MARK: - Helpers
     private struct ProcOut { let stdout: String; let stderr: String; let exitCode: Int32 }
 
+    func takeLastFailureDescription() -> String? {
+        let message = lastFailureDescription
+        lastFailureDescription = nil
+        return message
+    }
+
     private func runGit(_ args: [String], cwd: URL) async throws -> ProcOut {
-        let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        proc.arguments = ["git"] + args
-        proc.currentDirectoryURL = cwd
-        var env = ProcessInfo.processInfo.environment
-        env["PATH"] = envPATH + ":" + (env["PATH"] ?? "")
-        proc.environment = env
+        var lastError: ProcOut? = nil
+        let home = Self.realHomeDirectory
+        Self.log.debug("Running git \(args.joined(separator: " "), privacy: .public) in \(cwd.path, privacy: .public)")
 
-        let outPipe = Pipe(); proc.standardOutput = outPipe
-        let errPipe = Pipe(); proc.standardError = errPipe
+        let candidates = gitCandidates + ["/usr/bin/env"]
+        for path in candidates {
+            if blockedExecutables.contains(path) {
+                continue
+            }
+            let proc = Process()
+            if path == "/usr/bin/env" {
+                proc.executableURL = URL(fileURLWithPath: path)
+                proc.arguments = ["git"] + args
+            } else {
+                proc.executableURL = URL(fileURLWithPath: path)
+                proc.arguments = args
+            }
+            proc.currentDirectoryURL = cwd
 
-        try proc.run()
-        let outData = try outPipe.fileHandleForReading.readToEnd() ?? Data()
-        let errData = try errPipe.fileHandleForReading.readToEnd() ?? Data()
-        proc.waitUntilExit()
-        let stdout = String(data: outData, encoding: .utf8) ?? ""
-        let stderr = String(data: errData, encoding: .utf8) ?? ""
-        return ProcOut(stdout: stdout, stderr: stderr, exitCode: proc.terminationStatus)
+            var env = ProcessInfo.processInfo.environment
+            // Robust PATH for sandboxed process
+            env["PATH"] = envPATH + ":" + (env["PATH"] ?? "")
+            // Avoid invoking pagers or external tools
+            env["GIT_PAGER"] = "cat"
+            env["GIT_EDITOR"] = ":"
+            env["GIT_OPTIONAL_LOCKS"] = "0"
+            // Prevent reading global/system configs that may live outside sandbox
+            env["GIT_CONFIG_NOSYSTEM"] = "1"
+            let existingConfigCount = Int(env["GIT_CONFIG_COUNT"] ?? "0") ?? 0
+            env["GIT_CONFIG_COUNT"] = String(existingConfigCount + 1)
+            env["GIT_CONFIG_KEY_\(existingConfigCount)"] = "safe.directory"
+            env["GIT_CONFIG_VALUE_\(existingConfigCount)"] = "*"
+            env["HOME"] = home
+            if path.contains("/CommandLineTools/") {
+                env["DEVELOPER_DIR"] = "/Library/Developer/CommandLineTools"
+            } else if path.contains("/Applications/Xcode") {
+                env["DEVELOPER_DIR"] = "/Applications/Xcode.app/Contents/Developer"
+            }
+            proc.environment = env
+
+            let outPipe = Pipe(); proc.standardOutput = outPipe
+            let errPipe = Pipe(); proc.standardError = errPipe
+
+            do {
+                try proc.run()
+            } catch {
+                Self.log.debug("Failed to launch \(path, privacy: .public): \(error.localizedDescription, privacy: .public)")
+                if path != "/usr/bin/env" {
+                    blockedExecutables.insert(path)
+                }
+                continue
+            }
+            let outData = try outPipe.fileHandleForReading.readToEnd() ?? Data()
+            let errData = try errPipe.fileHandleForReading.readToEnd() ?? Data()
+            proc.waitUntilExit()
+            let stdout = String(data: outData, encoding: .utf8) ?? ""
+            let stderr = String(data: errData, encoding: .utf8) ?? ""
+            let out = ProcOut(stdout: stdout, stderr: stderr, exitCode: proc.terminationStatus)
+            if out.exitCode == 0 {
+                Self.log.debug("git succeeded via \(path, privacy: .public)")
+                return out
+            }
+            Self.log.debug("git via \(path, privacy: .public) exited with code \(out.exitCode, privacy: .public)")
+            if path != "/usr/bin/env",
+               out.stderr.contains("App Sandbox") || out.stderr.contains("xcrun: error")
+            {
+                blockedExecutables.insert(path)
+            }
+            lastError = out
+            // Try next candidate
+        }
+        if let e = lastError {
+            Self.log.error("git failed: code=\(e.exitCode, privacy: .public), stderr=\(e.stderr, privacy: .public)")
+            let text = e.stderr.isEmpty ? e.stdout : e.stderr
+            lastFailureDescription = text.isEmpty ? "git exited with code \(e.exitCode)" : text
+            return e
+        }
+        let fallback = ProcOut(stdout: "", stderr: "failed to launch git", exitCode: -1)
+        Self.log.error("git failed to launch via all candidates")
+        lastFailureDescription = "git failed to launch via all candidates"
+        return fallback
     }
 }

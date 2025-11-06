@@ -20,6 +20,14 @@ struct CodMateApp: App {
         _listViewModel = StateObject(wrappedValue: SessionListViewModel(preferences: prefs))
         // Prepare user notifications early so banners can show while app is active
         SystemNotifier.shared.bootstrap()
+        // In App Sandbox, restore security-scoped access to user-selected directories
+        SecurityScopedBookmarks.shared.restoreAndStartAccess()
+        // Restore all dynamic bookmarks (e.g., repository directories for Git Review)
+        SecurityScopedBookmarks.shared.restoreAllDynamicBookmarks()
+        // Restore and check sandbox permissions for critical directories
+        Task { @MainActor in
+            SandboxPermissionsManager.shared.restoreAccess()
+        }
     }
 
     var bodyCommands: some Commands {
@@ -94,7 +102,7 @@ private struct SettingsWindowContainer: View {
 #if os(macOS)
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
-        #if canImport(SwiftTerm)
+        #if canImport(SwiftTerm) && !APPSTORE
             // Synchronously stop all terminal sessions to ensure clean exit
             // This prevents orphaned codex/claude processes when app quits
             let manager = TerminalSessionManager.shared
@@ -108,7 +116,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        #if canImport(SwiftTerm)
+        #if canImport(SwiftTerm) && !APPSTORE
             // Check if there are any running terminal sessions
             let manager = TerminalSessionManager.shared
             if manager.hasAnyRunningProcesses() {

@@ -11,6 +11,7 @@ final class DialecticsVM: ObservableObject {
     @Published var claudePresent: Bool = false
     @Published var claudeVersion: String? = nil
     @Published var pathEnv: String = ProcessInfo.processInfo.environment["PATH"] ?? ""
+    @Published var sandboxOn: Bool = ProcessInfo.processInfo.environment["APP_SANDBOX_CONTAINER_ID"] != nil
 
     private let sessionsSvc = SessionsDiagnosticsService()
 
@@ -31,7 +32,19 @@ final class DialecticsVM: ObservableObject {
             claudeCurrentRoot: claudeCurrent,
             claudeDefaultRoot: claudeDefault
         )
-        let mergedPATH = Self.detectLoginShellPATH() ?? Self.defaultMergedPATH()
+        let sandboxed = ProcessInfo.processInfo.environment["APP_SANDBOX_CONTAINER_ID"] != nil
+        // Prefer a robust PATH in sandboxed mode; shell-derived PATH can be restricted
+        var mergedPATH: String
+        if sandboxed {
+            // Attempt to start access for common binary folders if already authorized dynamically
+            let brew = URL(fileURLWithPath: "/opt/homebrew/bin", isDirectory: true)
+            let usrLocal = URL(fileURLWithPath: "/usr/local/bin", isDirectory: true)
+            _ = SecurityScopedBookmarks.shared.startAccessDynamic(for: brew)
+            _ = SecurityScopedBookmarks.shared.startAccessDynamic(for: usrLocal)
+            mergedPATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+        } else {
+            mergedPATH = Self.detectLoginShellPATH() ?? Self.defaultMergedPATH()
+        }
         let resolved = Self.which("codex", path: mergedPATH)
         let resolvedClaude = Self.which("claude", path: mergedPATH)
         self.sessions = s
@@ -40,6 +53,7 @@ final class DialecticsVM: ObservableObject {
         self.codexVersion = resolved != nil ? Self.version(of: "codex", path: mergedPATH) : nil
         self.claudeVersion = resolvedClaude != nil ? Self.version(of: "claude", path: mergedPATH) : nil
         self.pathEnv = mergedPATH
+        self.sandboxOn = sandboxed
     }
 
     private static func defaultMergedPATH() -> String {

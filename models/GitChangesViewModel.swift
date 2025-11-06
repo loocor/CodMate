@@ -17,6 +17,7 @@ final class GitChangesViewModel: ObservableObject {
     @Published var commitMessage: String = ""
     @Published var isGenerating: Bool = false
     @Published private(set) var generatingRepoPath: String? = nil
+    @Published private(set) var isResolvingRepo: Bool = true
 
     private let service = GitService()
     private var monitorWorktree: DirectoryMonitor?
@@ -26,8 +27,10 @@ final class GitChangesViewModel: ObservableObject {
     private var generatingTask: Task<Void, Never>? = nil
 
     func attach(to directory: URL) {
+        isResolvingRepo = true
         Task { [weak self] in
             guard let self else { return }
+            defer { self.isResolvingRepo = false }
             await self.resolveRepoRoot(from: directory)
             await self.refreshStatus()
             self.configureMonitors()
@@ -42,17 +45,73 @@ final class GitChangesViewModel: ObservableObject {
         changes = []
         selectedPath = nil
         diffText = ""
+        isResolvingRepo = false
     }
 
     private func resolveRepoRoot(from directory: URL) async {
         let canonical = directory
         if let repo = await service.repositoryRoot(for: canonical) {
+            // Git CLI succeeded - ensure we have sandbox access
+            if SecurityScopedBookmarks.shared.isSandboxed {
+                let hasBookmark = SecurityScopedBookmarks.shared.hasDynamicBookmark(for: repo.root)
+                Self.log.info("Repository at \(repo.root.path, privacy: .public) has bookmark: \(hasBookmark, privacy: .public)")
+
+                let hasAccess = SecurityScopedBookmarks.shared.startAccessDynamic(for: repo.root)
+                Self.log.info("Started access for \(repo.root.path, privacy: .public): \(hasAccess, privacy: .public)")
+
+                if !hasAccess {
+                    Self.log.error("Failed to start access for repository at \(repo.root.path, privacy: .public)")
+                    if hasBookmark {
+                        errorMessage = "Repository access failed. The bookmark may be stale. Please re-authorize."
+                    } else {
+                        errorMessage = "Repository access required. Please authorize the repository folder: \(repo.root.path)"
+                    }
+                }
+            }
             self.repo = repo
             self.repoRoot = repo.root
-        } else {
-            self.repo = nil
-            self.repoRoot = nil
+            Self.log.info("Git repository resolved: \(repo.root.path, privacy: .public)")
+            return
         }
+        // Fallback: walk up to find a folder containing .git when git CLI is unavailable
+        var cur = canonical.standardizedFileURL
+        let fm = FileManager.default
+        var guardCounter = 0
+        while guardCounter < 200 {
+            let gitDir = cur.appendingPathComponent(".git", isDirectory: true)
+            var isDir: ObjCBool = false
+            if fm.fileExists(atPath: gitDir.path, isDirectory: &isDir), isDir.boolValue {
+                // Found repository via filesystem - try to start sandbox access
+                if SecurityScopedBookmarks.shared.isSandboxed {
+                    let hasBookmark = SecurityScopedBookmarks.shared.hasDynamicBookmark(for: cur)
+                    Self.log.info("Repository at \(cur.path, privacy: .public) has bookmark: \(hasBookmark, privacy: .public)")
+
+                    let hasAccess = SecurityScopedBookmarks.shared.startAccessDynamic(for: cur)
+                    Self.log.info("Started access for \(cur.path, privacy: .public): \(hasAccess, privacy: .public)")
+
+                    if !hasAccess {
+                        Self.log.error("Failed to start access for repository at \(cur.path, privacy: .public)")
+                        if hasBookmark {
+                            errorMessage = "Repository access failed. The bookmark may be stale. Please re-authorize."
+                        } else {
+                            errorMessage = "Repository access required. Please authorize the repository folder: \(cur.path)"
+                        }
+                    }
+                }
+                self.repo = GitService.Repo(root: cur)
+                self.repoRoot = cur
+                Self.log.info("Git repository resolved via filesystem: \(cur.path, privacy: .public)")
+                return
+            }
+            let parent = cur.deletingLastPathComponent()
+            if parent.path == cur.path { break }
+            cur = parent
+            guardCounter += 1
+        }
+        Self.log.warning("No Git repository found starting from \(directory.path, privacy: .public)")
+        self.repo = nil
+        self.repoRoot = nil
+        errorMessage = "No Git repository found"
     }
 
     private func configureMonitors() {
@@ -79,9 +138,36 @@ final class GitChangesViewModel: ObservableObject {
         guard let repo = self.repo else {
             changes = []; selectedPath = nil; diffText = ""; return
         }
+
+        // Ensure we have access before executing git commands
+        if SecurityScopedBookmarks.shared.isSandboxed {
+            let hasAccess = SecurityScopedBookmarks.shared.startAccessDynamic(for: repo.root)
+            if !hasAccess {
+                Self.log.error("Failed to start access for repository at \(repo.root.path, privacy: .public)")
+                errorMessage = "Repository access required. Please authorize the repository folder."
+                changes = []
+                return
+            }
+        }
+
         isLoading = true
+        errorMessage = nil // Clear previous errors
         let list = await service.status(in: repo)
         isLoading = false
+
+        if list.isEmpty {
+            if let failure = await service.takeLastFailureDescription() {
+                errorMessage = Self.describeGitFailure(failure)
+            }
+        } else {
+            _ = await service.takeLastFailureDescription()
+        }
+
+        if list.isEmpty && SecurityScopedBookmarks.shared.isSandboxed {
+            // Verify git can actually access the repository
+            Self.log.warning("Git status returned empty for \(repo.root.path, privacy: .public)")
+        }
+
         changes = list
         // Maintain selection when possible
         if let sel = selectedPath, !list.contains(where: { $0.path == sel }) {
@@ -93,6 +179,12 @@ final class GitChangesViewModel: ObservableObject {
 
     func refreshDetail() async {
         guard let repo = self.repo, let path = selectedPath else { diffText = ""; return }
+
+        // Ensure access before reading files
+        if SecurityScopedBookmarks.shared.isSandboxed {
+            _ = SecurityScopedBookmarks.shared.startAccessDynamic(for: repo.root)
+        }
+
         if showPreviewInsteadOfDiff {
             let text = await service.readFile(in: repo, path: path)
             diffText = text
@@ -127,6 +219,20 @@ final class GitChangesViewModel: ObservableObject {
         out.append("@@ -0,0 +\(count) @@")
         for l in lines { out.append("+" + String(l)) }
         return out.joined(separator: "\\n")
+    }
+
+    private static func describeGitFailure(_ raw: String) -> String {
+        let message = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if message.isEmpty {
+            return "Git 命令执行失败（未返回错误信息）。"
+        }
+        if message.contains("App Sandbox") || message.contains("xcrun: error") {
+            return "系统自带 git 依赖 xcrun，在 App Sandbox 中被拒绝访问。请安装 Xcode Command Line Tools（xcode-select --install），或在系统中提供一个可访问的 git 可执行文件。"
+        }
+        if message.contains("not a git repository") {
+            return "当前目录不是 Git 仓库。"
+        }
+        return message
     }
 
 
@@ -276,7 +382,8 @@ final class GitChangesViewModel: ObservableObject {
             print("[AICommit] Start generation providerId=\(providerId ?? "(auto)") bytes=\(truncated.utf8.count)")
             Self.log.info("Start generation providerId=\(providerId ?? "(auto)", privacy: .public) bytes=\(truncated.utf8.count)")
             do {
-                let res = try await llm.generateText(prompt: prompt, options: .init(preferred: .auto, model: modelId, timeout: 25, providerId: providerId))
+                // Allow a slightly longer timeout for commit generation to reduce provider-specific timeouts
+                let res = try await llm.generateText(prompt: prompt, options: .init(preferred: .auto, model: modelId, timeout: 45, providerId: providerId))
                 let cleaned = Self.cleanCommitMessage(from: res.text)
                 await MainActor.run {
                     if self.repoRoot?.path == repoPath {
@@ -289,10 +396,20 @@ final class GitChangesViewModel: ObservableObject {
                 let preview = cleaned.prefix(120)
                 print("[AICommit] Success provider=\(res.providerId) elapsedMs=\(res.elapsedMs) msg=\(preview)")
                 Self.log.info("Success provider=\(res.providerId, privacy: .public) elapsedMs=\(res.elapsedMs) msg=\(String(preview), privacy: .public)")
+                await SystemNotifier.shared.notify(
+                    title: "AI Commit",
+                    body: "Generated commit message (\(res.providerId)) in \(res.elapsedMs)ms",
+                    threadId: "ai-commit"
+                )
             } catch {
                 print("[AICommit] Error: \(error.localizedDescription)")
                 Self.log.error("Generation error: \(error.localizedDescription, privacy: .public)")
-                await MainActor.run { self.errorMessage = "AI generation failed" }
+                await MainActor.run { self.errorMessage = "AI generation failed: \(error.localizedDescription)" }
+                await SystemNotifier.shared.notify(
+                    title: "AI Commit",
+                    body: "Generation failed: \(error.localizedDescription)",
+                    threadId: "ai-commit"
+                )
             }
         }
     }

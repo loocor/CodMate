@@ -10,6 +10,8 @@ import SwiftUI
         // Do not reuse across different panes (e.g. Resume vs New).
         let terminalKey: String
         let initialCommands: String
+        struct ConsoleSpec { let executable: String; let args: [String]; let cwd: String; let env: [String:String] }
+        var consoleSpec: ConsoleSpec? = nil
         let font: NSFont
         let isDark: Bool
 
@@ -149,7 +151,14 @@ import SwiftUI
 
             // Get or create terminal view from manager (reuses existing if available)
             let v = TerminalSessionManager.shared.view(
-                for: terminalKey, initialCommands: initialCommands, font: font)
+                for: terminalKey,
+                initialCommands: initialCommands,
+                font: font,
+                consoleSpec: consoleSpec.map { spec in
+                    TerminalSessionManager.ConsoleSpec(
+                        executable: spec.executable, args: spec.args, cwd: spec.cwd, env: spec.env)
+                }
+            )
             applyTheme(v)
             v.disableBuiltInScroller()
             // Freeze grid reflow during live-resize; reflow once at the end to avoid duplicate/garbled text

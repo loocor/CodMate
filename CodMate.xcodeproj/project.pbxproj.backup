@@ -394,7 +394,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				PRODUCT_BUNDLE_IDENTIFIER = io.umate.codex;
+				PRODUCT_BUNDLE_IDENTIFIER = ai.umate.codmate;
 				PRODUCT_NAME = CodMate;
 				SDKROOT = macosx;
 				SUPPORTS_MACCATALYST = NO;
@@ -427,7 +427,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				PRODUCT_BUNDLE_IDENTIFIER = io.umate.codex;
+				PRODUCT_BUNDLE_IDENTIFIER = ai.umate.codmate;
 				PRODUCT_NAME = CodMate;
 				SDKROOT = macosx;
 				SUPPORTS_MACCATALYST = NO;

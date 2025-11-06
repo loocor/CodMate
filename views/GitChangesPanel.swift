@@ -8,6 +8,7 @@ struct GitChangesPanel: View {
     let workingDirectory: URL
     var presentation: Presentation = .embedded
     let preferences: SessionPreferencesStore
+    var onRequestAuthorization: (() -> Void)? = nil
     @Binding var savedState: ReviewPanelState
     @StateObject private var vm = GitChangesViewModel()
     // Layout state
@@ -64,7 +65,42 @@ struct GitChangesPanel: View {
     @State private var hoverWand: Bool = false
 
     var body: some View {
-        contentWithPresentation
+        Group {
+            if vm.repoRoot == nil {
+                if vm.isResolvingRepo {
+                    VStack(spacing: 16) {
+                        ProgressView()
+                        Text("Resolving repository access…")
+                            .font(.headline)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    VStack(spacing: 12) {
+                        Image(systemName: "lock.rectangle.on.rectangle")
+                            .font(.system(size: 42))
+                            .foregroundStyle(.secondary)
+                        Text("Git Review Unavailable")
+                            .font(.headline)
+                        Text("This folder is either not a Git repository or requires permission. Authorize the repository root (the folder containing .git).")
+                            .font(.subheadline)
+                            .multilineTextAlignment(.center)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: 520)
+                        Button("Authorize Repository Folder…") {
+                            onRequestAuthorization?()
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            } else {
+                contentWithPresentation
+            }
+        }
+            .onReceive(NotificationCenter.default.publisher(for: .codMateRepoAuthorizationChanged)) { _ in
+                vm.attach(to: workingDirectory)
+            }
             .alert("Discard changes?", isPresented: $showDiscardAlert) {
                 Button("Discard", role: .destructive) {
                     let paths = pendingDiscardPaths
@@ -189,11 +225,32 @@ struct GitChangesPanel: View {
             HStack(spacing: 8) {
                 Label("Changes", systemImage: "arrow.triangle.branch")
                     .font(.headline)
-                if let root = vm.repoRoot?.path {
-                    Text(root)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .padding(.leading, 8)
+                if let rootURL = vm.repoRoot {
+                    let authorized = SecurityScopedBookmarks.shared.isSandboxed
+                        ? SecurityScopedBookmarks.shared.hasDynamicBookmark(for: rootURL)
+                        : true
+                    HStack(spacing: 8) {
+                        Text(rootURL.path)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .padding(.leading, 8)
+                        // Inline authorization status + revoke/authorize
+                        if SecurityScopedBookmarks.shared.isSandboxed {
+                            Button {
+                                if authorized {
+                                    SecurityScopedBookmarks.shared.removeDynamic(url: rootURL)
+                                    NotificationCenter.default.post(name: .codMateRepoAuthorizationChanged, object: nil)
+                                } else {
+                                    onRequestAuthorization?()
+                                }
+                            } label: {
+                                Image(systemName: authorized ? "checkmark.shield" : "exclamationmark.shield")
+                                    .foregroundStyle(authorized ? .green : .orange)
+                            }
+                            .buttonStyle(.plain)
+                            .help(authorized ? "Revoke repository authorization" : "Authorize repository folder…")
+                        }
+                    }
                 }
                 Spacer()
                 Picker("", selection: $vm.showPreviewInsteadOfDiff) {
@@ -224,6 +281,7 @@ struct GitChangesPanel: View {
                 .buttonStyle(.bordered)
                 .controlSize(.small)
             }
+            // Moved authorization controls inline in header path; remove separate row
             if let err = vm.errorMessage, !err.isEmpty {
                 HStack(spacing: 6) {
                     Image(systemName: "exclamationmark.triangle.fill")

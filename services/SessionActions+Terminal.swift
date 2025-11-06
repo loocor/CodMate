@@ -4,6 +4,13 @@ import Foundation
 extension SessionActions {
     func openInTerminal(session: SessionSummary, executableURL: URL, options: ResumeOptions) -> Bool
     {
+        #if APPSTORE
+        // App Store build: avoid Apple Events. Copy command and open Terminal at directory.
+        copyResumeCommands(session: session, executableURL: executableURL, options: options)
+        let cwd = FileManager.default.fileExists(atPath: session.cwd) ? session.cwd : session.fileURL.deletingLastPathComponent().path
+        _ = openAppleTerminal(at: cwd)
+        return true
+        #else
         let scriptText = {
             let lines = buildResumeCommandLines(
                 session: session, executableURL: executableURL, options: options
@@ -23,11 +30,19 @@ extension SessionActions {
             return errorDict == nil
         }
         return false
+        #endif
     }
 
     @discardableResult
     func openNewSession(session: SessionSummary, executableURL: URL, options: ResumeOptions) -> Bool
     {
+        #if APPSTORE
+        // App Store build: copy command and open Terminal without Apple Events
+        copyNewSessionCommands(session: session, executableURL: executableURL, options: options)
+        let cwd = FileManager.default.fileExists(atPath: session.cwd) ? session.cwd : session.fileURL.deletingLastPathComponent().path
+        _ = openAppleTerminal(at: cwd)
+        return true
+        #else
         let scriptText = {
             let lines = buildNewSessionCommandLines(
                 session: session, executableURL: executableURL, options: options
@@ -47,6 +62,7 @@ extension SessionActions {
             return errorDict == nil
         }
         return false
+        #endif
     }
 
     // Open a terminal app without auto-executing; user can paste clipboard
