@@ -27,6 +27,9 @@ set -euo pipefail
 #   ARCH_MATRIX (default: "arm64 x86_64"), e.g. set to "arm64" to build only arm64
 #   SIGNING_CERT (default: Developer ID Application; maps from APPLE_SIGNING_IDENTITY if present)
 #   VERSION (if set, will override Marketing Version at export time when possible)
+#   SANDBOX=on|off (default: on). When off, build without App Sandbox entitlements (unrestricted mode)
+#   APPSTORE_SIM=1 to compile with APPSTORE condition (mimic Mac App Store build-time gating)
+#   MIN_MACOS (default: 15.0) sets MACOSX_DEPLOYMENT_TARGET for all targets including packages
 #
 
 SCHEME="${SCHEME:-CodMate}"
@@ -106,6 +109,67 @@ compute_build_number() {
 BUILD_NUMBER="$(compute_build_number)"
 DISPLAY_VERSION="${BASE_VERSION}+${BUILD_NUMBER}"
 
+# Compose extra xcodebuild args BEFORE starting the archive loop
+EXTRA_XC_ARGS=()
+if [[ "${APPSTORE_SIM:-0}" == "1" ]]; then
+  # Prefer Swift 5+ macro; still pass OTHER_SWIFT_FLAGS for older setups
+  # Also define SYSTEM_PACKAGE_DARWIN to satisfy swift-system 1.6+ platform gating
+  EXTRA_XC_ARGS+=("SWIFT_ACTIVE_COMPILATION_CONDITIONS=APPSTORE")
+  # Also define SUBPROCESS_ASYNCIO_DISPATCH so Subprocess picks the DispatchIO AsyncIO on macOS
+  # Enable experimental features required by swift-subprocess main branch
+  EXTRA_XC_ARGS+=("OTHER_SWIFT_FLAGS=-DAPPSTORE -DSYSTEM_PACKAGE_DARWIN -DSUBPROCESS_ASYNCIO_DISPATCH -enable-experimental-feature LifetimeDependence -enable-experimental-feature NonescapableTypes")
+  echo "[info] APPSTORE_SIM=1 → compiling with -DAPPSTORE, -DSYSTEM_PACKAGE_DARWIN, -DSUBPROCESS_ASYNCIO_DISPATCH, experimental features"
+fi
+
+# Entitlements: sandbox on/off
+SANDBOX="${SANDBOX:-on}"
+if [[ "$SANDBOX" == "off" ]]; then
+  EXTRA_XC_ARGS+=("CODE_SIGN_ENTITLEMENTS=")
+  echo "[info] SANDBOX=off → building without App Sandbox entitlements"
+else
+  EXTRA_XC_ARGS+=("CODE_SIGN_ENTITLEMENTS=CodMate/CodMate.entitlements")
+  echo "[info] SANDBOX=on  → App Sandbox entitlements enabled"
+fi
+
+# Force a modern macOS deployment target to avoid arm64 + 10.13 mismatches in Swift packages
+MIN_MACOS="${MIN_MACOS:-15.0}"
+EXTRA_XC_ARGS+=("MACOSX_DEPLOYMENT_TARGET=${MIN_MACOS}")
+echo "[info] MIN_MACOS=${MIN_MACOS} → MACOSX_DEPLOYMENT_TARGET=${MIN_MACOS}"
+
+# Ensure Swift flags needed by some packages are always present for macOS builds
+if [[ "${APPSTORE_SIM:-0}" != "1" ]]; then
+  # Pass macOS-friendly defines so swift-system and swift-subprocess select the right code paths
+  # Also enable experimental features required by swift-subprocess main branch
+  EXTRA_XC_ARGS+=("OTHER_SWIFT_FLAGS=-DSYSTEM_PACKAGE_DARWIN -DSUBPROCESS_ASYNCIO_DISPATCH -enable-experimental-feature LifetimeDependence -enable-experimental-feature NonescapableTypes")
+  echo "[info] Adding default Swift flags: -DSYSTEM_PACKAGE_DARWIN -DSUBPROCESS_ASYNCIO_DISPATCH -enable-experimental-feature LifetimeDependence"
+fi
+
+# Pre-resolve packages so we can apply any necessary build-time patches
+echo "[prep] Resolving Swift packages (to enable pre-build patches)"
+xcrun xcodebuild \
+  -project "$PROJECT" \
+  -scheme "$SCHEME" \
+  -derivedDataPath "$DERIVED_DATA" \
+  -resolvePackageDependencies >/dev/null || true
+
+# Workaround: some Xcode toolchains fail to propagate swift-system's
+# SYSTEM_PACKAGE_DARWIN compile definition into the build. When that happens,
+# swift-system emits "#error(\"Unsupported Platform\")" on Apple platforms.
+# Patch the local checkout to also accept canImport(Darwin) as a Darwin signal.
+SWIFT_SYSTEM_INTERNALS_DIR="$DERIVED_DATA/SourcePackages/checkouts/swift-system/Sources/System/Internals"
+if [[ -d "$SWIFT_SYSTEM_INTERNALS_DIR" ]]; then
+  for f in CInterop.swift Constants.swift Exports.swift Syscalls.swift; do
+    p="$SWIFT_SYSTEM_INTERNALS_DIR/$f"
+    if [[ -f "$p" ]] && grep -q "^#if SYSTEM_PACKAGE_DARWIN" "$p" 2>/dev/null; then
+      echo "[patch] swift-system: relaxing Darwin guard in $f"
+      # Replace the first line "#if SYSTEM_PACKAGE_DARWIN" with
+      # "#if canImport(Darwin) || SYSTEM_PACKAGE_DARWIN"
+      # Use ed-style safe, portable replacement
+      perl -0777 -pe 's/^#if SYSTEM_PACKAGE_DARWIN/#if canImport(Darwin) || SYSTEM_PACKAGE_DARWIN/m' -i "$p"
+    fi
+  done
+fi
+
 for ARCH in "${ARCH_MATRIX[@]}"; do
   ARCHIVE_PATH="$BUILD_DIR/$SCHEME-$ARCH.xcarchive"
   EXPORT_DIR="$BUILD_DIR/export-$ARCH"
@@ -127,6 +191,7 @@ for ARCH in "${ARCH_MATRIX[@]}"; do
       DEVELOPMENT_TEAM="${TEAM_ID:-}" \
       CODE_SIGN_IDENTITY="${SIGNING_CERT}" \
       ARCHS="$ARCH" ONLY_ACTIVE_ARCH=YES \
+      "${EXTRA_XC_ARGS[@]}" \
       | xcpretty
   else
     xcrun xcodebuild \
@@ -142,7 +207,8 @@ for ARCH in "${ARCH_MATRIX[@]}"; do
       CODE_SIGN_STYLE=Automatic \
       DEVELOPMENT_TEAM="${TEAM_ID:-}" \
       CODE_SIGN_IDENTITY="${SIGNING_CERT}" \
-      ARCHS="$ARCH" ONLY_ACTIVE_ARCH=YES
+      ARCHS="$ARCH" ONLY_ACTIVE_ARCH=YES \
+      "${EXTRA_XC_ARGS[@]}"
   fi
 
   echo "[2/7][$ARCH] Preparing ExportOptions.plist"
@@ -189,6 +255,27 @@ PLIST
     exit 1
   fi
 
+  echo "[verify][$ARCH] entitlements (pre post-sign)"
+  codesign -d --entitlements :- "$APP_PATH" 2>/dev/null || true
+
+  # Ensure sandbox entitlements are present on the exported app.
+  # Some export paths strip entitlements; re-sign with our entitlements when SANDBOX=on.
+  if [[ "$SANDBOX" == "on" ]]; then
+    ENT_FILE="$ROOT_DIR/CodMate/CodMate.entitlements"
+    if [[ -f "$ENT_FILE" ]]; then
+      echo "[post][$ARCH] Re-signing app with entitlements to preserve App Sandbox"
+      codesign --force --options runtime \
+        --entitlements "$ENT_FILE" \
+        --sign "${SIGNING_CERT}" \
+        "$APP_PATH"
+    else
+      echo "[WARN][$ARCH] Entitlements file missing at $ENT_FILE; skipping post re-sign"
+    fi
+  fi
+
+  echo "[verify][$ARCH] entitlements (after post-sign)"
+  codesign -d --entitlements :- "$APP_PATH" 2>/dev/null || true
+
   echo "[verify][$ARCH] codesign (deep, strict)"
   codesign --verify --deep --strict --verbose=2 "$APP_PATH"
 
@@ -207,6 +294,11 @@ PLIST
   APP_BUNDLE_ID=$(defaults read "$APP_PATH/Contents/Info" CFBundleIdentifier 2>/dev/null || true)
   APP_VERSION=$(defaults read "$APP_PATH/Contents/Info" CFBundleShortVersionString 2>/dev/null || true)
   APP_VERSION=${APP_VERSION:-$BASE_VERSION}
+
+  # Sanity: ensure PrivacyInfo.xcprivacy is embedded for MAS readiness
+  if [[ ! -f "$APP_PATH/Contents/Resources/PrivacyInfo.xcprivacy" ]]; then
+    echo "[WARN][$ARCH] PrivacyInfo.xcprivacy not found in app Resources. Ensure it's added to Copy Bundle Resources."
+  fi
 
   PRODUCT_NAME=$(basename "$APP_PATH" .app)
   # Output naming for GitHub Releases "latest/download" links

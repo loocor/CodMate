@@ -3,6 +3,7 @@
 .DS_Store
 artifacts/
 build/
+build-mas/
 .xcuserstate
 
 # Xcode per-user state and caches

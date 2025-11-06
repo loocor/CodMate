@@ -10,14 +10,11 @@
 	<string>$(MACOSX_DEPLOYMENT_TARGET)</string>
 	<key>CFBundleIconName</key>
 	<string>AppIcon</string>
-	<key>NSAppTransportSecurity</key>
-	<dict>
-		<key>NSAllowsArbitraryLoads</key>
-		<true/>
-	</dict>
+    <!-- Remove ATS exceptions for App Store compliance; rely on HTTPS endpoints. -->
+    <!-- If specific exceptions are needed, define narrowly in the project, not as global allows. -->
 	<key>NSSupportsAutomaticGraphicsSwitching</key>
 	<true/>
-	<key>NSUserNotificationUsageDescription</key>
-	<string>The recovery results need to be displayed to you.</string>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>CodMate may open Terminal or other apps on your request.</string>
 </dict>
 </plist>
