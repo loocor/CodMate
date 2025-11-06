@@ -73,8 +73,7 @@ actor SessionIndexer {
     init(fileManager: FileManager = .default) {
         self.fileManager = fileManager
         self.diskCache = DiskCache()
-        decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
+        decoder = FlexibleDecoders.iso8601Flexible()
     }
 
     func refreshSessions(root: URL, scope: SessionLoadScope) async throws -> [SessionSummary] {

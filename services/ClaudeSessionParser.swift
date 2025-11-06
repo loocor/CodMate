@@ -11,9 +11,7 @@ struct ClaudeSessionParser {
     private let carriageReturn: UInt8 = 0x0D
 
     init() {
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        self.decoder = decoder
+        self.decoder = FlexibleDecoders.iso8601Flexible()
     }
 
     /// Fast path: extract sessionId by scanning until a line that carries it.

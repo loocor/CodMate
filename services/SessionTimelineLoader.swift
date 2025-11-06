@@ -8,8 +8,7 @@ struct SessionTimelineLoader {
     ]
 
     init() {
-        decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
+        decoder = FlexibleDecoders.iso8601Flexible()
     }
 
     func load(url: URL) throws -> [ConversationTurn] {
