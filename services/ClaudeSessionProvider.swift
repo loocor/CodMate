@@ -1,5 +1,10 @@
 import Foundation
 
+import Foundation
+#if canImport(Darwin)
+import Darwin
+#endif
+
 actor ClaudeSessionProvider {
     private let parser = ClaudeSessionParser()
     private let fileManager: FileManager
@@ -9,11 +14,26 @@ actor ClaudeSessionProvider {
 
     init(fileManager: FileManager = .default) {
         self.fileManager = fileManager
-        let home = fileManager.homeDirectoryForCurrentUser
+        // Use real user home directory, not sandbox container
+        let home = Self.getRealUserHomeURL()
         let projects = home
             .appendingPathComponent(".claude", isDirectory: true)
             .appendingPathComponent("projects", isDirectory: true)
         root = fileManager.fileExists(atPath: projects.path) ? projects : nil
+    }
+    
+    /// Get the real user home directory (not sandbox container)
+    private static func getRealUserHomeURL() -> URL {
+        #if canImport(Darwin)
+        if let homeDir = getpwuid(getuid())?.pointee.pw_dir {
+            let path = String(cString: homeDir)
+            return URL(fileURLWithPath: path, isDirectory: true)
+        }
+        #endif
+        if let home = ProcessInfo.processInfo.environment["HOME"] {
+            return URL(fileURLWithPath: home, isDirectory: true)
+        }
+        return FileManager.default.homeDirectoryForCurrentUser
     }
 
     func sessions(scope: SessionLoadScope) -> [SessionSummary] {

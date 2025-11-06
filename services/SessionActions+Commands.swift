@@ -1,8 +1,8 @@
 import AppKit
+import Security
 import Foundation
 
 extension SessionActions {
-
     @MainActor
     func resume(session: SessionSummary, executableURL: URL, options: ResumeOptions) async throws
         -> ProcessResult
@@ -29,7 +29,7 @@ extension SessionActions {
             }
             if options.claudeSkipPermissions { args.append("--dangerously-skip-permissions") }
             if options.claudeAllowSkipPermissions { args.append("--allow-dangerously-skip-permissions") }
-            if options.claudeAllowUnsandboxedCommands { args.append("--allow-unsandboxed-commands") }
+            // Claude CLI does not support an "--allow-unsandboxed-commands" flag; omit it.
             if let allowed = options.claudeAllowedTools, !allowed.isEmpty {
                 args.append(contentsOf: ["--allowed-tools", allowed])
             }
@@ -43,7 +43,7 @@ extension SessionActions {
             }
             if options.claudeIDE { args.append("--ide") }
             if options.claudeStrictMCP { args.append("--strict-mcp-config") }
-            // Export MCP servers to ~/.claude.json (Claude Code auto-loads from there)
+            // Export MCP servers to ~/.claude/settings.json (Claude Code auto-loads from there)
             let mcpStore = MCPServersStore()
             try? await mcpStore.exportEnabledForClaudeConfig()
             if let fb = options.claudeFallbackModel, !fb.isEmpty { args.append(contentsOf: ["--fallback-model", fb]) }
@@ -83,7 +83,7 @@ extension SessionActions {
                         let bindings = await registry.getBindings()
                         let activeId = bindings.activeProvider?[ProvidersRegistryService.Consumer.claudeCode.rawValue]
                         if let activeId, !activeId.isEmpty {
-                            let providers = await registry.listProviders()
+                            let providers = await registry.listAllProviders()
                             if let p = providers.first(where: { $0.id == activeId }) {
                                 let conn = p.connectors[ProvidersRegistryService.Consumer.claudeCode.rawValue]
                                 let loginMethod = conn?.loginMethod?.lowercased() ?? "api"
@@ -93,9 +93,14 @@ extension SessionActions {
                                 // Subscription login: do not inject token; rely on `claude login`
                                 if loginMethod != "subscription" {
                                     // Map custom env key to ANTHROPIC_AUTH_TOKEN if available in current env
-                                    if let keyName = conn?.envKey, !keyName.isEmpty {
+                                    if let keyName = (p.envKey ?? conn?.envKey), !keyName.isEmpty {
                                         if let tokenVal = ProcessInfo.processInfo.environment[keyName], !tokenVal.isEmpty {
                                             envOverlays["ANTHROPIC_AUTH_TOKEN"] = tokenVal
+                                        } else {
+                                            // If keyName itself looks like a token, use it directly
+                                            let v = keyName
+                                            let looksLikeToken = v.lowercased().contains("sk-") || v.hasPrefix("eyJ") || v.contains(".")
+                                            if looksLikeToken { envOverlays["ANTHROPIC_AUTH_TOKEN"] = v }
                                         }
                                     } else if let tokenVal = ProcessInfo.processInfo.environment["ANTHROPIC_AUTH_TOKEN"], !tokenVal.isEmpty {
                                         envOverlays["ANTHROPIC_AUTH_TOKEN"] = tokenVal
@@ -174,6 +179,17 @@ extension SessionActions {
         return lines
     }
 
+    // Build environment overlay map for embedding (DEV CLI console)
+    func embeddedEnvironment(for source: SessionSource) -> [String: String] {
+        var env: [String: String] = [:]
+        env["LANG"] = "zh_CN.UTF-8"
+        env["LC_ALL"] = "zh_CN.UTF-8"
+        env["LC_CTYPE"] = "zh_CN.UTF-8"
+        env["TERM"] = "xterm-256color"
+        if source == .codex { env["CODEX_DISABLE_COLOR_QUERY"] = "1" }
+        return env
+    }
+
     private func flags(from options: ResumeOptions) -> [String] {
         // Highest precedence: dangerously bypass
         if options.dangerouslyBypass { return ["--dangerously-bypass-approvals-and-sandbox"] }
@@ -192,8 +208,9 @@ extension SessionActions {
         let exe = shellQuoteIfNeeded(executablePath)
         switch session.source {
         case .codex:
-            // Resume should preserve original session semantics; do not override flags.
-            return "\(exe) resume \(conversationId(for: session))"
+            let f = flags(from: options).map { shellQuoteIfNeeded($0) }
+            if f.isEmpty { return "\(exe) resume \(conversationId(for: session))" }
+            return ([exe] + f + ["resume", shellQuoteIfNeeded(conversationId(for: session))]).joined(separator: " ")
         case .claude:
             var parts: [String] = [exe]
             parts.append("--resume")
@@ -209,7 +226,7 @@ extension SessionActions {
             }
             if options.claudeSkipPermissions { parts.append("--dangerously-skip-permissions") }
             if options.claudeAllowSkipPermissions { parts.append("--allow-dangerously-skip-permissions") }
-            if options.claudeAllowUnsandboxedCommands { parts.append("--allow-unsandboxed-commands") }
+            // Claude CLI does not support an "--allow-unsandboxed-commands" flag; omit it.
             if let allowed = options.claudeAllowedTools, !allowed.isEmpty {
                 parts.append(contentsOf: ["--allowed-tools", shellQuoteIfNeeded(allowed)])
             }
@@ -227,7 +244,7 @@ extension SessionActions {
         }
     }
 
-    private func buildNewSessionArguments(session: SessionSummary, options: ResumeOptions)
+    func buildNewSessionArguments(session: SessionSummary, options: ResumeOptions)
         -> [String]
     {
         var args: [String] = []
@@ -313,7 +330,7 @@ extension SessionActions {
             }
             if options.claudeSkipPermissions { parts.append("--dangerously-skip-permissions") }
             if options.claudeAllowSkipPermissions { parts.append("--allow-dangerously-skip-permissions") }
-            if options.claudeAllowUnsandboxedCommands { parts.append("--allow-unsandboxed-commands") }
+            // Claude CLI does not support an "--allow-unsandboxed-commands" flag; omit it.
             if let allowed = options.claudeAllowedTools, !allowed.isEmpty {
                 parts.append(contentsOf: ["--allowed-tools", shellQuoteIfNeeded(allowed)])
             }
@@ -339,8 +356,8 @@ extension SessionActions {
     }
 
     func buildResumeArguments(session: SessionSummary, options: ResumeOptions) -> [String] {
-        // Do not append flags; resume should restore original semantics.
-        ["resume", conversationId(for: session)]
+        let f = flags(from: options)
+        return f + ["resume", conversationId(for: session)]
     }
 
     func buildResumeCommandLines(
@@ -350,15 +367,23 @@ extension SessionActions {
             FileManager.default.fileExists(atPath: session.cwd)
             ? session.cwd : session.fileURL.deletingLastPathComponent().path
         let cd = "cd " + shellEscapedPath(cwd)
+        // Embedded terminal: keep environment exports for robustness (source-specific)
+        let exports = embeddedExportLines(for: session.source).joined(separator: "; ")
+        #if APPSTORE
+        // MAS sandbox: do not auto-execute external CLI inside the app. Only prepare directory and env.
+        // The user can copy or insert the real command via UI prompts.
+        let cliName = session.source == .codex ? "codex" : "claude"
+        let notice = "echo \"[CodMate] App Store 沙盒无法直接运行 \(cliName) CLI，请使用右侧按钮复制命令，在外部终端执行。\""
+        return cd + "\n" + exports + "\n" + notice + "\n"
+        #else
         let injectedPATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:${PATH}"
         // Use bare executable name for embedded terminal to respect user's PATH resolution
         let execPath = session.source == .codex ? "codex" : "claude"
-        // Embedded terminal: keep environment exports for robustness (source-specific)
-        let exports = embeddedExportLines(for: session.source).joined(separator: "; ")
         let invocation = buildResumeCLIInvocation(
             session: session, executablePath: execPath, options: options)
         let resume = "PATH=\(injectedPATH) \(invocation)"
         return cd + "\n" + exports + "\n" + resume + "\n"
+        #endif
     }
 
     func buildNewSessionCommandLines(
@@ -369,11 +394,17 @@ extension SessionActions {
             FileManager.default.fileExists(atPath: session.cwd)
             ? session.cwd : session.fileURL.deletingLastPathComponent().path
         let cd = "cd " + shellEscapedPath(cwd)
-        let injectedPATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:${PATH}"
         let exports = embeddedExportLines(for: session.source).joined(separator: "; ")
+        #if APPSTORE
+        // MAS: do not execute external CLI in embedded terminal.
+        let notice = "echo \"[CodMate] App Store 沙盒无法直接运行 codex/claude CLI，请在外部终端执行复制的命令。\""
+        return cd + "\n" + exports + "\n" + notice + "\n"
+        #else
+        let injectedPATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:${PATH}"
         let invocation = buildNewSessionCLIInvocation(session: session, options: options)
         let command = "PATH=\(injectedPATH) \(invocation)"
         return cd + "\n" + exports + "\n" + command + "\n"
+        #endif
     }
 
     func buildExternalNewSessionCommands(
@@ -846,7 +877,10 @@ extension SessionActions {
             return parts.joined(separator: " ")
         }
 
-        // For Codex, place global flags before subcommand: codex --profile <pid> resume <id>
+        // For Codex, place flags + profile before subcommand: codex <flags> --profile <pid> resume <id>
+        let globalFlags = flags(from: options).map { arg -> String in
+            arg.contains(where: { $0.isWhitespace || $0 == "'" }) ? shellEscapedPath(arg) : arg
+        }
         let args = buildResumeArguments(
             using: project, fallbackModel: effectiveCodexModel(for: session), options: options
         ).map { arg -> String in
@@ -855,7 +889,7 @@ extension SessionActions {
             }
             return arg
         }
-        parts.append(contentsOf: args)
+        parts.append(contentsOf: globalFlags + args)
         parts.append("resume")
         parts.append(conversationId(for: session))
         return parts.joined(separator: " ")
@@ -874,7 +908,10 @@ extension SessionActions {
             return parts.joined(separator: " ")
         }
 
-        // For Codex, place global flags before subcommand: codex --profile <pid> resume <id>
+        // For Codex, place flags + profile before subcommand: codex <flags> --profile <pid> resume <id>
+        let globalFlags = flags(from: options).map { arg -> String in
+            arg.contains(where: { $0.isWhitespace || $0 == "'" }) ? shellEscapedPath(arg) : arg
+        }
         let args = buildResumeArguments(
             using: project, fallbackModel: effectiveCodexModel(for: session), options: options
         ).map { arg -> String in
@@ -883,7 +920,7 @@ extension SessionActions {
             }
             return arg
         }
-        parts.append(contentsOf: args)
+        parts.append(contentsOf: globalFlags + args)
         parts.append("resume")
         parts.append(conversationId(for: session))
         return parts.joined(separator: " ")

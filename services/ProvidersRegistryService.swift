@@ -47,6 +47,11 @@ actor ProvidersRegistryService {
         var name: String?
         var `class`: String? // openai-compatible | anthropic | other
         var managedByCodMate: Bool
+        // Shared API key environment variable (preferred). Connector-level envKey is deprecated.
+        var envKey: String?
+        // Optional references for user guidance (Get Key / Docs)
+        var keyURL: String?
+        var docsURL: String?
         var connectors: [String: Connector] // consumer -> connector
         var catalog: Catalog?
         var recommended: Recommended?
@@ -113,6 +118,71 @@ actor ProvidersRegistryService {
     }
 
     func listProviders() -> [Provider] { load().providers }
+
+    // MARK: - Bundled registry (read-only, loaded from app bundle)
+    private struct BundledProvidersFile: Codable { let providers: [Provider] }
+
+    private func loadBundledRegistry() -> Registry? {
+        // Try reading providers.json from the application bundle.
+        // Support payload/providers.json as well as top-level providers.json.
+        let bundle = Bundle.main
+        var urls: [URL] = []
+        if let u = bundle.url(forResource: "providers", withExtension: "json") { urls.append(u) }
+        if let u = bundle.url(forResource: "providers", withExtension: "json", subdirectory: "payload") { urls.append(u) }
+        for url in urls {
+            guard let data = try? Data(contentsOf: url) else { continue }
+            let dec = JSONDecoder()
+            // Full registry
+            if let reg = try? dec.decode(Registry.self, from: data) { return reg }
+            // { providers: [...] }
+            if let file = try? dec.decode(BundledProvidersFile.self, from: data) {
+                return Registry(version: 1, providers: file.providers, bindings: .init(activeProvider: nil, defaultModel: nil), migration: nil)
+            }
+            // [Provider]
+            if let arr = try? dec.decode([Provider].self, from: data) {
+                return Registry(version: 1, providers: arr, bindings: .init(activeProvider: nil, defaultModel: nil), migration: nil)
+            }
+        }
+        return nil
+    }
+
+    // Public reader that merges user-defined providers with bundled ones (dedup by id, preferring user)
+    func listAllProviders() -> [Provider] {
+        let user = load().providers
+        let builtins = loadBundledRegistry()?.providers ?? []
+        let userIds = Set(user.map { $0.id })
+        let extra = builtins.filter { !userIds.contains($0.id) }
+        return user + extra
+    }
+
+    // Helper for services that need a full registry view including bundled providers
+    func mergedRegistry() -> Registry {
+        let base = load()
+        let mergedProviders = listAllProviders()
+        // Merge bindings: user > bundled defaults
+        let bundled = loadBundledRegistry()
+        var mergedBindings = base.bindings
+        if let b = bundled?.bindings {
+            // activeProvider
+            var ap = mergedBindings.activeProvider ?? [:]
+            for k in (b.activeProvider ?? [:]).keys {
+                if ap[k] == nil { ap[k] = b.activeProvider?[k] }
+            }
+            mergedBindings.activeProvider = ap.isEmpty ? nil : ap
+            // defaultModel
+            var dm = mergedBindings.defaultModel ?? [:]
+            for k in (b.defaultModel ?? [:]).keys {
+                if dm[k] == nil { dm[k] = b.defaultModel?[k] }
+            }
+            mergedBindings.defaultModel = dm.isEmpty ? nil : dm
+        }
+        return Registry(version: base.version, providers: mergedProviders, bindings: mergedBindings, migration: base.migration)
+    }
+
+    // MARK: - Public: list bundled providers (templates only, no merge)
+    func listBundledProviders() -> [Provider] {
+        return loadBundledRegistry()?.providers ?? []
+    }
 
     func upsertProvider(_ provider: Provider) throws {
         var reg = load()
@@ -181,6 +251,7 @@ actor ProvidersRegistryService {
                 name: p.name,
                 class: "openai-compatible",
                 managedByCodMate: p.managedByCodMate,
+                envKey: p.envKey,
                 connectors: connectors,
                 catalog: nil,
                 recommended: nil

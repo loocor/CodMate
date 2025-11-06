@@ -17,6 +17,8 @@ UI Rules (macOS specific)
 - Settings uses macOS 15's new TabView API (`Tab("…", systemImage: "…")`) to split into multiple tabs; container padding is unified (horizontal 16pt, top 16pt).
   - Tab content uniformly uses `SettingsTabContent` container (top-aligned, overall 8pt padding) to ensure consistent layout and spacing across pages.
 - Providers has been separated from the Codex tab into a top-level Settings page: Settings › Providers manages global providers and Codex/Claude bindings; Settings › Codex only retains Runtime/Notifications/Privacy/Raw Config (no longer includes Providers).
+  - Built-in providers are auto-loaded from an app-bundled `payload/providers.json` (managedByCodMate=true). This avoids hardcoding and lets users simply provide API keys; base URLs/models come pre-filled. The list merges bundled entries with `~/.codmate/providers.json` (user overrides win).
+  - Schema note: use a single provider-level `envKey` (preferred) for both Codex and Claude Code connectors. Connector-level `envKey` remains tolerated for backward compatibility but is considered deprecated and will be ignored at save time to avoid duplication.
 - MCP Servers page (aligned with Providers style):
   - Main page directly displays existing server list (name, type icon, description, URL/command), with enable toggle on the left; provides pencil edit entry on the right.
   - Fixed "Add" button in top-right corner; clicking opens independent "New MCP Server" window for Uni‑Import.
@@ -42,6 +44,7 @@ UI Rules (macOS specific)
     - Auto-detects the Git repo at the session’s working directory (uses `/usr/bin/env git` and a robust PATH).
     - Lists changed files with stage/unstage toggles and shows a unified diff or a raw file preview (updates on save). Preview is text-only in phase 1.
     - Provides a commit box. In full-area mode it uses a multi-line editor with more space.
+    - Repository authorization is on-demand: when opening Review, the app resolves the repository root (the folder containing `.git`) and, if needed, prompts the user with an NSOpenPanel to authorize that folder via a security-scoped bookmark. The Settings page no longer lists authorized repositories; authorization and revoke are managed inline in the Review header.
   - “Task Instructions” uses a DisclosureGroup; load lazily when expanded.
   - Conversation timeline uses LazyVStack; differentiate user/assistant/tool/info bubbles.
   - Timeline & Markdown visibility: Settings › General provides per-surface checkboxes to choose which message types are shown in the conversation timeline and included when exporting Markdown. Defaults: Timeline shows all except Environment Context (which has its own section); Markdown includes only User and Assistant.

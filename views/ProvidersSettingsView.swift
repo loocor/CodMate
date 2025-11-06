@@ -21,12 +21,11 @@ struct ProvidersSettingsView: View {
                 if !newValue {
                     // Reset new provider state when sheet closes
                     vm.isNewProvider = false
-                    vm.newProviderPreset = nil
                 }
             }
         )) { ProviderEditorSheet(vm: vm) }
         .presentationSizing(.automatic)
-        .task { await vm.loadAll() }
+        .task { await vm.loadAll(); await vm.loadTemplates() }
         .confirmationDialog(
             "Delete Provider",
             isPresented: Binding(
@@ -66,10 +65,14 @@ struct ProvidersSettingsView: View {
             HStack {
                 Spacer()
                 Menu {
-                    Button("K2") { vm.addPreset(.k2) }
-                    Button("GLM") { vm.addPreset(.glm) }
-                    Button("DeepSeek") { vm.addPreset(.deepseek) }
-                    Divider()
+                    if vm.templates.isEmpty {
+                        Text("No templates found")
+                    } else {
+                        ForEach(vm.templates, id: \.id) { t in
+                            Button(t.name?.isEmpty == false ? t.name! : t.id) { vm.startFromTemplate(t) }
+                        }
+                        Divider()
+                    }
                     Button("Other…") { vm.startNewProvider() }
                 } label: { Label("Add", systemImage: "plus") }
             }
@@ -473,61 +476,7 @@ private struct ProviderEditorSheet: View {
 @available(macOS 15.0, *)
 @MainActor
 final class ProvidersVM: ObservableObject {
-    enum Preset: String, Identifiable {
-        case k2 = "K2"
-        case glm = "GLM"
-        case deepseek = "DeepSeek"
-
-        var id: String { rawValue }
-
-        var baseURL: String {
-            switch self {
-            case .k2: return "https://api.moonshot.cn/v1"
-            case .glm: return "https://open.bigmodel.cn/api/paas/v4/"
-            case .deepseek: return "https://api.deepseek.com/v1"
-            }
-        }
-
-        var claudeBaseURL: String? {
-            switch self {
-            case .k2: return "https://api.moonshot.cn/anthropic"
-            case .glm: return nil
-            case .deepseek: return nil
-            }
-        }
-
-        var envKey: String {
-            switch self {
-            case .k2: return "K2_API_KEY"
-            case .glm: return "ZHIPUAI_API_KEY"
-            case .deepseek: return "DEEPSEEK_API_KEY"
-            }
-        }
-
-        var getKeyURL: String {
-            switch self {
-            case .k2: return "https://platform.moonshot.cn/console/api-keys"
-            case .glm: return "https://open.bigmodel.cn/usercenter/apikeys"
-            case .deepseek: return "https://platform.deepseek.com/api_keys"
-            }
-        }
-
-        var serviceName: String {
-            switch self {
-            case .k2: return "Moonshot AI"
-            case .glm: return "GLM-4"
-            case .deepseek: return "DeepSeek"
-            }
-        }
-
-        var docsURL: String? {
-            switch self {
-            case .k2: return "https://platform.moonshot.cn/docs"
-            case .glm: return "https://open.bigmodel.cn/dev/api"
-            case .deepseek: return "https://platform.deepseek.com/docs"
-            }
-        }
-    }
+    
 
     @Published var providers: [ProvidersRegistryService.Provider] = []
     @Published var selectedId: String? = nil {
@@ -555,19 +504,28 @@ final class ProvidersVM: ObservableObject {
     @Published var testResultText: String? = nil
     @Published var showEditor: Bool = false
     @Published var isNewProvider: Bool = false
-    @Published var newProviderPreset: Preset? = nil
+    
     @Published var providerKeyURL: URL? = nil
     @Published var providerDocsURL: URL? = nil
 
     private let registry = ProvidersRegistryService()
     private let codex = CodexConfigService()
+    @Published var templates: [ProvidersRegistryService.Provider] = []
 
     func loadAll() async {
         await registry.migrateFromCodexIfNeeded(codex: codex)
         await reload()
     }
 
+    func loadTemplates() async {
+        let list = await registry.listBundledProviders()
+        func display(_ p: ProvidersRegistryService.Provider) -> String { (p.name?.isEmpty == false ? p.name! : p.id).lowercased() }
+        let sorted = list.sorted { display($0) < display($1) }
+        await MainActor.run { templates = sorted }
+    }
+
     func reload() async {
+        // Only show user-added providers in list to avoid confusion
         let list = await registry.listProviders()
         providers = list
         let bindings = await registry.getBindings()
@@ -594,7 +552,6 @@ final class ProvidersVM: ObservableObject {
             codexWireAPI = "chat"
             claudeBaseURL = ""
             defaultModelId = nil
-            applyPresetMetadata(nil)
             recomputeCanSave()
             return
         }
@@ -602,10 +559,11 @@ final class ProvidersVM: ObservableObject {
         let codexConnector = provider.connectors[ProvidersRegistryService.Consumer.codex.rawValue]
         let claudeConnector = provider.connectors[ProvidersRegistryService.Consumer.claudeCode.rawValue]
         codexBaseURL = codexConnector?.baseURL ?? ""
-        codexEnvKey = codexConnector?.envKey ?? claudeConnector?.envKey ?? "OPENAI_API_KEY"
+        codexEnvKey = provider.envKey ?? codexConnector?.envKey ?? claudeConnector?.envKey ?? "OPENAI_API_KEY"
         codexWireAPI = normalizedWireAPI(codexConnector?.wireAPI)
         claudeBaseURL = claudeConnector?.baseURL ?? ""
-        applyPresetMetadata(presetFor(provider: provider))
+        // For prebuilt-like providers, supply Get Key / Docs links by matching templates by baseURL
+        applyTemplateMetadataForCurrent(provider: provider)
         recomputeCanSave()
     }
 
@@ -629,6 +587,8 @@ final class ProvidersVM: ObservableObject {
     @Published var defaultModelRowID: UUID? = nil
 
     func loadModelRowsFromSelected() {
+        // When creating from a template, modelRows are already seeded; avoid clearing.
+        if isNewProvider { return }
         guard let sel = selectedId, let p = providers.first(where: { $0.id == sel }) else {
             modelRows = []
             return
@@ -768,32 +728,7 @@ final class ProvidersVM: ObservableObject {
         }
     }
 
-    private func presetFor(provider: ProvidersRegistryService.Provider) -> Preset? {
-        let id = provider.id.lowercased()
-        if id == "k2" || provider.connectors.values.contains(where: { ($0.baseURL ?? "").contains("moonshot") }) {
-            return .k2
-        }
-        if id == "glm" || provider.connectors.values.contains(where: { ($0.baseURL ?? "").contains("bigmodel") }) {
-            return .glm
-        }
-        if id == "deepseek" || provider.connectors.values.contains(where: { ($0.baseURL ?? "").contains("deepseek") }) {
-            return .deepseek
-        }
-        return nil
-    }
-
-    private func applyPresetMetadata(_ preset: Preset?) {
-        if let preset, let keyURL = URL(string: preset.getKeyURL) {
-            providerKeyURL = keyURL
-        } else {
-            providerKeyURL = nil
-        }
-        if let preset, let docs = preset.docsURL, let url = URL(string: docs) {
-            providerDocsURL = url
-        } else {
-            providerDocsURL = nil
-        }
-    }
+    // Preset helpers removed; providers are now sourced from bundled providers.json
 
     private func recomputeCanSave() {
         let codex = codexBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -820,13 +755,15 @@ final class ProvidersVM: ObservableObject {
         let trimmedEnv = codexEnvKey.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalizedWire = normalizedWireAPI(codexWireAPI)
         conn.baseURL = trimmedCodexBase.isEmpty ? nil : trimmedCodexBase
-        conn.envKey = trimmedEnv.isEmpty ? nil : trimmedEnv
+        // Use provider-level envKey; avoid duplicating at connector level
+        p.envKey = trimmedEnv.isEmpty ? nil : trimmedEnv
+        conn.envKey = nil
         conn.wireAPI = normalizedWire
         p.connectors[ProvidersRegistryService.Consumer.codex.rawValue] = conn
         var cconn = p.connectors[ProvidersRegistryService.Consumer.claudeCode.rawValue] ?? .init(baseURL: nil, wireAPI: nil, envKey: nil, queryParams: nil, httpHeaders: nil, envHttpHeaders: nil, requestMaxRetries: nil, streamMaxRetries: nil, streamIdleTimeoutMs: nil, modelAliases: nil)
         let trimmedClaudeBase = claudeBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
         cconn.baseURL = trimmedClaudeBase.isEmpty ? nil : trimmedClaudeBase
-        cconn.envKey = trimmedEnv.isEmpty ? nil : trimmedEnv
+        cconn.envKey = nil
         p.connectors[ProvidersRegistryService.Consumer.claudeCode.rawValue] = cconn
         let cleanedModels: [ProvidersRegistryService.ModelEntry] = modelRows.compactMap { r in
             let trimmed = r.modelId.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -886,7 +823,7 @@ final class ProvidersVM: ObservableObject {
 
     private func saveNewProvider() async -> Bool {
         let trimmedName = providerName.trimmingCharacters(in: .whitespacesAndNewlines)
-        let list = await registry.listProviders()
+        let list = await registry.listAllProviders()
         let baseSlug = slugify(trimmedName.isEmpty ? "provider" : trimmedName)
         var candidate = baseSlug
         var n = 2
@@ -901,7 +838,7 @@ final class ProvidersVM: ObservableObject {
             connectors[ProvidersRegistryService.Consumer.codex.rawValue] = .init(
                 baseURL: trimmedCodexBase.isEmpty ? nil : trimmedCodexBase,
                 wireAPI: normalizedWire,
-                envKey: trimmedEnv.isEmpty ? nil : trimmedEnv,
+                envKey: nil,
                 queryParams: nil, httpHeaders: nil, envHttpHeaders: nil,
                 requestMaxRetries: nil, streamMaxRetries: nil, streamIdleTimeoutMs: nil, modelAliases: nil
             )
@@ -912,7 +849,7 @@ final class ProvidersVM: ObservableObject {
             let cconn = ProvidersRegistryService.Connector(
                 baseURL: trimmedClaudeBase.isEmpty ? nil : trimmedClaudeBase,
                 wireAPI: nil,
-                envKey: trimmedEnv.isEmpty ? nil : trimmedEnv,
+                envKey: nil,
                 queryParams: nil, httpHeaders: nil, envHttpHeaders: nil,
                 requestMaxRetries: nil, streamMaxRetries: nil, streamIdleTimeoutMs: nil, modelAliases: nil
             )
@@ -941,15 +878,20 @@ final class ProvidersVM: ObservableObject {
             ])
         }
 
-        let provider = ProvidersRegistryService.Provider(
+        var provider = ProvidersRegistryService.Provider(
             id: candidate,
             name: trimmedName.isEmpty ? nil : trimmedName,
             class: "openai-compatible",
             managedByCodMate: true,
+            envKey: trimmedEnv.isEmpty ? nil : trimmedEnv,
             connectors: connectors,
             catalog: catalog,
             recommended: recommended
         )
+        // Clear connector-level envKey to avoid duplication; prefer provider-level envKey
+        for key in [ProvidersRegistryService.Consumer.codex.rawValue, ProvidersRegistryService.Consumer.claudeCode.rawValue] {
+            if var c = provider.connectors[key] { c.envKey = nil; provider.connectors[key] = c }
+        }
 
         do {
             try await registry.upsertProvider(provider)
@@ -1045,30 +987,17 @@ final class ProvidersVM: ObservableObject {
         await reload()
     }
 
-    func addOther() { startNewProvider(preset: nil) }
+    func addOther() { startNewProvider() }
 
-    func startNewProvider(preset: Preset? = nil) {
+    func startNewProvider() {
         isNewProvider = true
-        newProviderPreset = preset
         selectedId = "new-provider-temp"
-
-        if let preset = preset {
-            // Pre-fill with preset values
-            providerName = preset.rawValue
-            codexBaseURL = preset.baseURL
-            codexEnvKey = preset.envKey
-            codexWireAPI = "chat"
-            claudeBaseURL = preset.claudeBaseURL ?? ""
-            applyPresetMetadata(preset)
-        } else {
-            // Empty for custom provider
-            providerName = ""
-            codexBaseURL = ""
-            codexEnvKey = "OPENAI_API_KEY"
-            codexWireAPI = "chat"
-            claudeBaseURL = ""
-            applyPresetMetadata(nil)
-        }
+        // Empty for custom provider
+        providerName = ""
+        codexBaseURL = ""
+        codexEnvKey = "OPENAI_API_KEY"
+        codexWireAPI = "chat"
+        claudeBaseURL = ""
 
         modelRows = []
         defaultModelId = nil
@@ -1079,9 +1008,54 @@ final class ProvidersVM: ObservableObject {
         showEditor = true
     }
 
-    func addPreset(_ preset: Preset) {
-        startNewProvider(preset: preset)
+    func startFromTemplate(_ t: ProvidersRegistryService.Provider) {
+        isNewProvider = true
+        selectedId = "new-provider-temp"
+        providerName = t.name ?? t.id
+        let codexConnector = t.connectors[ProvidersRegistryService.Consumer.codex.rawValue]
+        let claudeConnector = t.connectors[ProvidersRegistryService.Consumer.claudeCode.rawValue]
+        codexBaseURL = codexConnector?.baseURL ?? ""
+        codexWireAPI = normalizedWireAPI(codexConnector?.wireAPI)
+        claudeBaseURL = claudeConnector?.baseURL ?? ""
+        codexEnvKey = t.envKey ?? "OPENAI_API_KEY"
+        // Seed catalog into rows
+        modelRows = (t.catalog?.models ?? []).map { me in
+            let c = me.caps
+            return ModelRow(
+                modelId: me.vendorModelId,
+                reasoning: c?.reasoning ?? false,
+                toolUse: c?.tool_use ?? false,
+                vision: c?.vision ?? false,
+                longContext: c?.long_context ?? false
+            )
+        }
+        if let def = providerDefaultModel(from: t), let match = modelRows.first(where: { $0.modelId == def }) {
+            defaultModelRowID = match.id; defaultModelId = match.modelId
+        } else { defaultModelRowID = modelRows.first?.id; defaultModelId = modelRows.first?.modelId }
+        testResultText = nil
+        lastError = nil
+        // Provide helpful links on template
+        applyTemplateMetadataFor(template: t)
+        recomputeCanSave()
+        showEditor = true
     }
+
+    private func applyTemplateMetadataFor(template: ProvidersRegistryService.Provider) {
+        if let s = template.keyURL, let url = URL(string: s) { providerKeyURL = url } else { providerKeyURL = nil }
+        if let s = template.docsURL, let url = URL(string: s) { providerDocsURL = url } else { providerDocsURL = nil }
+    }
+
+    private func applyTemplateMetadataForCurrent(provider: ProvidersRegistryService.Provider) {
+        // Match by baseURL to a bundled template to surface links
+        let codexBase = provider.connectors[ProvidersRegistryService.Consumer.codex.rawValue]?.baseURL?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let claudeBase = provider.connectors[ProvidersRegistryService.Consumer.claudeCode.rawValue]?.baseURL?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if let t = templates.first(where: { ( $0.connectors[ProvidersRegistryService.Consumer.codex.rawValue]?.baseURL?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "" ) == codexBase || ( $0.connectors[ProvidersRegistryService.Consumer.claudeCode.rawValue]?.baseURL?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "" ) == claudeBase }) {
+            applyTemplateMetadataFor(template: t)
+        } else {
+            providerKeyURL = nil; providerDocsURL = nil
+        }
+    }
+    
 
     private func slugify(_ s: String) -> String {
         let lower = s.lowercased()
@@ -1115,8 +1089,15 @@ final class ProvidersVM: ObservableObject {
     }
 
     private func directAPIKeyValue() -> String? {
+        // Heuristic: accept direct tokens for quick testing when user pasted a key here
+        // Recognize common patterns like OpenAI (sk-...), JWT-like (eyJ... or with dots),
+        // or any long mixed-case string without underscores.
         let trimmed = codexEnvKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.hasPrefix("sk-") ? trimmed : nil
+        if trimmed.isEmpty { return nil }
+        if trimmed.hasPrefix("sk-") { return trimmed }
+        if trimmed.hasPrefix("eyJ") { return trimmed } // JWT-style
+        if trimmed.contains(".") && trimmed.count >= 20 { return trimmed }
+        return nil
     }
 
     private func evaluateEndpoint(label: String, urlString: String) async -> EndpointCheck {
@@ -1152,10 +1133,10 @@ final class ProvidersVM: ObservableObject {
                 let (_, resp) = try await URLSession.shared.data(for: req)
                 let code = (resp as? HTTPURLResponse)?.statusCode ?? -1
                 let isMessagesProbe = candidate.path.lowercased().contains("/messages")
+                let isChatProbe = candidate.path.lowercased().contains("/chat/completions") || candidate.path.lowercased().contains("/responses")
                 let allow404 =
-                    isMessagesProbe
-                    && lower.contains("anthropic")
-                    && code == 404
+                    (isMessagesProbe && lower.contains("anthropic") && code == 404) ||
+                    (isChatProbe && code == 404) // Some vendors return 404 on GET for chat endpoints
                 let ok = (200...299).contains(code) || code == 401 || code == 403 || code == 405 || allow404
                 let message = "\(label): HTTP \(code) \(ok ? "(reachable)" : "(unexpected)")"
                 let result = EndpointCheck(message: message, ok: ok, statusCode: code)

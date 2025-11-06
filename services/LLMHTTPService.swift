@@ -24,17 +24,18 @@ actor LLMHTTPService {
 
     func generateText(prompt: String, options: Options = Options()) async throws -> Result {
         let start = Date()
-        let reg = await providers.load()
+        let reg = await providers.mergedRegistry()
 
         guard let sel = selectConnector(reg: reg, preferred: options.preferred, providerId: options.providerId) else {
             throw HTTPError.noActiveProvider
         }
 
-        // Determine target API family and resolve model id robustly
+        // Determine target API family based on selected consumer first, then provider class fallback
         let providerClass = (sel.provider.class ?? "openai-compatible").lowercased()
+        let isAnthropicFamily = (sel.consumerKey == ProvidersRegistryService.Consumer.claudeCode.rawValue) || providerClass == "anthropic"
         let candidates = candidateModels(reg: reg, selection: sel, preferred: options.model)
         var lastErr: Error? = nil
-        if providerClass == "anthropic" {
+        if isAnthropicFamily {
             for m in candidates {
                 do {
                     let (code, text) = try await callAnthropic(baseURL: sel.baseURL, headers: sel.headers, model: m, prompt: prompt, options: options)
@@ -126,8 +127,17 @@ actor LLMHTTPService {
             if let h = connector.httpHeaders { for (k,v) in h { headers[k] = v } }
             // Fill envHttpHeaders from env
             if let eh = connector.envHttpHeaders { for (k, envKey) in eh { if let val = ProcessInfo.processInfo.environment[envKey], !val.isEmpty { headers[k] = val } } }
-            // If Authorization missing but envKey looks like a key, use Bearer
-            if headers["Authorization"] == nil, let k = connector.envKey, k.lowercased().contains("sk-") { headers["Authorization"] = "Bearer \(k)" }
+            // If Authorization missing, use provider/envKey -> env var or direct token
+            if headers["Authorization"] == nil {
+                if let name = provider.envKey ?? connector.envKey,
+                   let val = ProcessInfo.processInfo.environment[name], !val.isEmpty {
+                    headers["Authorization"] = val.hasPrefix("Bearer ") ? val : "Bearer \(val)"
+                } else if let k = provider.envKey ?? connector.envKey {
+                    let lower = k.lowercased()
+                    let looksLikeToken = lower.contains("sk-") || k.hasPrefix("eyJ") || k.contains(".")
+                    if looksLikeToken { headers["Authorization"] = k.hasPrefix("Bearer ") ? k : "Bearer \(k)" }
+                }
+            }
             return (provider, connector, base, headers, key)
         }
 
@@ -221,13 +231,25 @@ actor LLMHTTPService {
         return (code, json)
     }
 
-    // Build OpenAI-compatible endpoints robustly against base URLs with or without trailing /v1
+    // Build OpenAI-compatible endpoints robustly against base URLs that may already include a version (e.g., /v1 or /v4)
     private func openAIEndpoint(baseURL: String, path: String) -> URL {
+        func hasNumericVersionSuffix(_ urlString: String) -> Bool {
+            guard let u = URL(string: urlString) else { return false }
+            let parts = u.path.split(separator: "/")
+            guard let last = parts.last else { return false }
+            let s = String(last).lowercased()
+            if s.hasPrefix("v") {
+                let digits = s.dropFirst()
+                return !digits.isEmpty && digits.allSatisfy { $0.isNumber }
+            }
+            return false
+        }
+
         var base = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
-        // Remove trailing slash
         if base.hasSuffix("/") { base.removeLast() }
-        // If base already ends with /v1, don't add another /v1
-        if base.lowercased().hasSuffix("/v1") {
+        let lower = base.lowercased()
+        // If base already ends with /v1 or /v{number}, don't append another /v1
+        if lower.hasSuffix("/v1") || hasNumericVersionSuffix(base) {
             return URL(string: base + "/" + path)!
         } else {
             return URL(string: base + "/v1/" + path)!

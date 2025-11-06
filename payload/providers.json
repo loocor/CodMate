@@ -1,0 +1,266 @@
+{
+  "version" : 1,
+  "providers" : [
+    {
+      "id" : "openrouter",
+      "name" : "OpenRouter",
+      "class" : "openai-compatible",
+      "managedByCodMate" : true,
+      "envKey" : "OPENROUTER_API_KEY",
+      "keyURL" : "https://openrouter.ai/keys",
+      "docsURL" : "https://openrouter.ai/docs",
+      "connectors" : {
+        "codex" : {
+          "baseURL" : "https://openrouter.ai/api",
+          "wireAPI" : "chat",
+          "envHttpHeaders" : {
+            "HTTP-Referer" : "OPENROUTER_REFERRER",
+            "X-Title" : "OPENROUTER_TITLE"
+          }
+        }
+      },
+      "catalog" : {
+        "models" : [
+          { "vendorModelId" : "openrouter/auto", "caps" : { "reasoning": false, "tool_use": true, "long_context": true, "vision": true } }
+        ]
+      },
+      "recommended" : { "defaultModelFor" : { "codex" : "openrouter/auto" } }
+    },
+    {
+      "id" : "openai",
+      "name" : "OpenAI",
+      "class" : "openai-compatible",
+      "managedByCodMate" : true,
+      "envKey" : "OPENAI_API_KEY",
+      "keyURL" : "https://platform.openai.com/api-keys",
+      "docsURL" : "https://platform.openai.com/docs",
+      "connectors" : {
+        "codex" : {
+          "baseURL" : "https://api.openai.com/v1",
+          "wireAPI" : "chat"
+        }
+      },
+      "catalog" : {
+        "models" : [
+          { "vendorModelId" : "gpt-4o-mini", "caps": { "reasoning": false, "tool_use": true, "long_context": true, "vision": true } },
+          { "vendorModelId" : "gpt-4.1-mini", "caps": { "reasoning": false, "tool_use": true, "long_context": true, "vision": true } }
+        ]
+      },
+      "recommended" : { "defaultModelFor" : { "codex" : "gpt-4o-mini" } }
+    },
+    {
+      "envKey" : "K2_API_KEY",
+      "keyURL" : "https://platform.moonshot.cn/console/api-keys",
+      "docsURL" : "https://platform.moonshot.cn/docs",
+      "connectors" : {
+        "codex" : {
+          "wireAPI" : "chat",
+          "baseURL" : "https://api.moonshot.cn/v1"
+        },
+        "claudeCode" : {
+          "modelAliases" : {
+            "default" : "kimi-k2-0905-preview"
+          },
+          "baseURL" : "https://api.moonshot.cn/anthropic"
+        }
+      },
+      "name" : "K2",
+      "catalog" : {
+        "models" : [
+          {
+            "caps" : {
+              "reasoning" : false,
+              "tool_use" : true,
+              "long_context" : true,
+              "vision" : false
+            },
+            "vendorModelId" : "kimi-k2-0905-preview"
+          },
+          {
+            "caps" : {
+              "reasoning" : false,
+              "tool_use" : true,
+              "long_context" : true,
+              "vision" : false
+            },
+            "vendorModelId" : "kimi-k2-turbo-preview"
+          }
+        ]
+      },
+      "id" : "k2",
+      "class" : "openai-compatible",
+      "managedByCodMate" : true,
+      "recommended" : {
+        "defaultModelFor" : {
+          "claudeCode" : "kimi-k2-0905-preview",
+          "codex" : "kimi-k2-0905-preview"
+        }
+      }
+    },
+    {
+      "id" : "anthropic",
+      "name" : "Anthropic",
+      "class" : "anthropic",
+      "managedByCodMate" : true,
+      "envKey" : "ANTHROPIC_AUTH_TOKEN",
+      "keyURL" : "https://console.anthropic.com/settings/keys",
+      "docsURL" : "https://docs.anthropic.com/en/docs/about-claude/models",
+      "connectors" : {
+        "claudeCode" : {
+          "baseURL" : "https://api.anthropic.com",
+          "modelAliases" : {
+            "default" : "claude-sonnet-4-5",
+            "haiku" : "claude-haiku-4-5"
+          }
+        }
+      },
+      "catalog" : {
+        "models" : [
+          { "vendorModelId" : "claude-sonnet-4-5", "caps": { "reasoning": true, "tool_use": true, "long_context": true, "vision": true } },
+          { "vendorModelId" : "claude-haiku-4-5", "caps": { "reasoning": false, "tool_use": true, "long_context": true, "vision": true } },
+          { "vendorModelId" : "claude-opus-4-1", "caps": { "reasoning": true, "tool_use": true, "long_context": true, "vision": true } }
+        ]
+      },
+      "recommended" : { "defaultModelFor" : { "claudeCode" : "claude-sonnet-4-5" } }
+    },
+    {
+      "envKey" : "ZHIPUAI_API_KEY",
+      "keyURL" : "https://open.bigmodel.cn/usercenter/apikeys",
+      "docsURL" : "https://open.bigmodel.cn/dev/api",
+      "connectors" : {
+        "claudeCode" : {
+          "modelAliases" : {
+            "default" : "glm-4.6"
+          },
+          "baseURL" : "https://open.bigmodel.cn/api/anthropic"
+        },
+        "codex" : {
+          "wireAPI" : "chat",
+          "baseURL" : "https://open.bigmodel.cn/api/paas/v4/"
+        }
+      },
+      "name" : "GLM",
+      "catalog" : {
+        "models" : [
+          {
+            "caps" : {
+              "reasoning" : false,
+              "tool_use" : true,
+              "long_context" : false,
+              "vision" : false
+            },
+            "vendorModelId" : "glm-4.6"
+          },
+          {
+            "caps" : {
+              "reasoning" : false,
+              "tool_use" : true,
+              "long_context" : false,
+              "vision" : false
+            },
+            "vendorModelId" : "glm-4.5"
+          },
+          {
+            "caps" : {
+              "reasoning" : false,
+              "tool_use" : true,
+              "long_context" : false,
+              "vision" : false
+            },
+            "vendorModelId" : "glm-4.5-air"
+          }
+        ]
+      },
+      "id" : "glm",
+      "class" : "openai-compatible",
+      "managedByCodMate" : true,
+      "recommended" : {
+        "defaultModelFor" : {
+          "claudeCode" : "glm-4.6",
+          "codex" : "glm-4.6"
+        }
+      }
+    },
+    {
+      "id" : "minimax",
+      "name" : "MiniMax",
+      "class" : "openai-compatible",
+      "managedByCodMate" : true,
+      "envKey" : "MINIMAX_API_KEY",
+      "keyURL" : "https://platform.minimaxi.com/user-center/basic-information/interface-key",
+      "docsURL" : "https://platform.minimaxi.com/docs/guides/models-intro",
+      "connectors" : {
+        "codex" : {
+          "baseURL" : "https://api.minimaxi.com/v1",
+          "wireAPI" : "chat",
+          "requestMaxRetries" : 4,
+          "streamMaxRetries" : 10,
+          "streamIdleTimeoutMs" : 300000
+        },
+        "claudeCode" : {
+          "baseURL" : "https://api.minimaxi.com/anthropic",
+          "modelAliases" : {
+            "default" : "MiniMax-M2",
+            "haiku" : "MiniMax-M2"
+          }
+        }
+      },
+      "catalog" : {
+        "models" : [
+          { "vendorModelId" : "MiniMax-M2", "caps": { "reasoning": false, "tool_use": true, "long_context": true, "vision": false } }
+        ]
+      },
+      "recommended" : {
+        "defaultModelFor" : {
+          "codex" : "MiniMax-M2",
+          "claudeCode" : "MiniMax-M2"
+        }
+      }
+    },
+    {
+      "id" : "deepseek",
+      "name" : "DeepSeek",
+      "class" : "openai-compatible",
+      "managedByCodMate" : true,
+      "envKey" : "DEEPSEEK_API_KEY",
+      "keyURL" : "https://platform.deepseek.com/api_keys",
+      "docsURL" : "https://api-docs.deepseek.com/zh-cn/",
+      "connectors" : {
+        "codex" : {
+          "baseURL" : "https://api.deepseek.com/v1",
+          "wireAPI" : "chat"
+        },
+        "claudeCode" : {
+          "baseURL" : "https://api.deepseek.com/anthropic",
+          "modelAliases" : {
+            "default" : "deepseek-chat",
+            "haiku" : "deepseek-chat"
+          },
+          "envHttpHeaders" : {
+            "x-api-key" : "DEEPSEEK_API_KEY"
+          }
+        }
+      },
+      "catalog" : {
+        "models" : [
+          { "vendorModelId" : "deepseek-chat", "caps": { "reasoning": false, "tool_use": true, "long_context": true, "vision": false } },
+          { "vendorModelId" : "deepseek-reasoner", "caps": { "reasoning": true, "tool_use": true, "long_context": true, "vision": false } }
+        ]
+      },
+      "recommended" : {
+        "defaultModelFor" : {
+          "codex" : "deepseek-chat",
+          "claudeCode" : "deepseek-chat"
+        }
+      }
+    }
+  ],
+  "bindings" : {
+    "activeProvider" : {
+
+    },
+    "defaultModel" : {
+      "codex" : "gpt-5"
+    }
+  }
+}

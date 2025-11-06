@@ -7,6 +7,7 @@ struct NewWithContextSheet: View {
     let anchor: SessionSummary
 
     @State private var searchText: String = ""
+    @FocusState private var searchFocused: Bool
     @State private var selectedIDs = Set<String>()
     @State private var options = TreeshakeOptions()
     @State private var previewText: String = ""
@@ -14,9 +15,21 @@ struct NewWithContextSheet: View {
     private let treeshaker = ContextTreeshaker()
     @State private var previewTask: Task<Void, Never>? = nil
     @State private var escMonitor: Any? = nil
+    @State private var selectedSource: SessionSource? = nil
+    @State private var includeSessionExcerpts: Bool = true
+    @State private var includeProjectInstructions: Bool = false
+    @State private var selectedProjectId: String? = nil
+    @State private var additionalInstructions: String = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
+            WindowConfigurator { window in
+                window.isMovableByWindowBackground = true
+                window.styleMask.insert(.resizable)
+                var min = window.contentMinSize; min.width = max(min.width, 760); min.height = max(min.height, 420); window.contentMinSize = min
+                var maxS = window.contentMaxSize; if maxS.width <= 0 { maxS.width = 2000 } ; if maxS.height <= 0 { maxS.height = 1400 } ; window.contentMaxSize = maxS
+            }
+            .frame(width: 0, height: 0)
             HStack {
                 Text("New Session With Context")
                     .font(.title3).fontWeight(.semibold)
@@ -49,11 +62,14 @@ struct NewWithContextSheet: View {
                 .keyboardShortcut(.defaultAction)
             }
         }
-        .frame(width: 860, height: 540)
+        .frame(minWidth: 960, idealWidth: 1024, maxWidth: .infinity,
+               minHeight: 540, idealHeight: 680, maxHeight: .infinity)
         .padding(16)
         .task { await initialDefaults() }
         .onAppear {
             viewModel.cancelHeavyWork()
+            // Default focus to the left search field
+            DispatchQueue.main.async { self.searchFocused = true }
             // Intercept ESC to cancel heavy work without closing the sheet
             escMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
                 if event.keyCode == 53 { // ESC
@@ -108,13 +124,50 @@ struct NewWithContextSheet: View {
             .listStyle(.plain)
             .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 6, trailing: 0))
         }
-        .frame(width: 360)
+        .frame(minWidth: 200, idealWidth: 240, maxWidth: 280)
     }
 
     private var rightOptionsAndPreview: some View {
         VStack(alignment: .leading, spacing: 8) {
             GroupBox {
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: 10) {
+                    // Provider picker (no title, right aligned)
+                    HStack {
+                        Spacer(minLength: 0)
+                        Picker("Provider", selection: Binding(get: {
+                            selectedSource ?? .codex
+                        }, set: { newVal in
+                            selectedSource = newVal
+                        })) {
+                            Text("Codex").tag(SessionSource.codex)
+                            Text("Claude Code").tag(SessionSource.claude)
+                        }
+                        .pickerStyle(.menu)
+                        .frame(maxWidth: 240, alignment: .trailing)
+                    }
+                    Divider()
+                    Toggle("Include selected session excerpts", isOn: $includeSessionExcerpts)
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Toggle("Include project instructions", isOn: $includeProjectInstructions)
+                        Spacer(minLength: 12)
+                        if includeProjectInstructions {
+                            Picker("Project", selection: Binding(get: {
+                                selectedProjectId ?? viewModel.projectIdForSession(anchor.id)
+                            }, set: { newVal in
+                                selectedProjectId = newVal
+                                schedulePreview()
+                            })) {
+                                ForEach(viewModel.projects, id: \.id) { p in
+                                    Text(p.name).tag(Optional(p.id))
+                                }
+                            }
+                            .labelsHidden()
+                            .frame(width: 240, alignment: .trailing)
+                        }
+                    }
+                    // Removed inline project instructions preview per design — keep UI compact.
+                    Divider()
+                    // Preview configuration (merged into same card)
                     Toggle("Merge consecutive assistant replies", isOn: $options.mergeConsecutiveAssistant)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .lineLimit(1)
@@ -183,6 +236,7 @@ struct NewWithContextSheet: View {
             TextField("Search", text: $searchText)
                 .textFieldStyle(.plain)
                 .frame(maxWidth: .infinity)
+                .focused($searchFocused)
             if !searchText.isEmpty {
                 Button { searchText = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.tertiary) }
                     .buttonStyle(.plain)
@@ -219,24 +273,38 @@ struct NewWithContextSheet: View {
 
     private func schedulePreview() {
         previewTask?.cancel()
+        // Capture inputs on MainActor
         let ids = selectedIDs
         let opt = options
-        // Use the same universe as the left list to avoid scope mismatch with middle list sections
+        let kinds = viewModel.preferences.markdownVisibleKinds
         let all = viewModel.allSessionsInSameProject(as: anchor)
         let lookup = Dictionary(uniqueKeysWithValues: all.map { ($0.id, $0) })
-        let sessions = ids.compactMap { lookup[$0] }.sorted { $0.startedAt < $1.startedAt }
-        let kinds = viewModel.preferences.markdownVisibleKinds
+        let takeSessions = includeSessionExcerpts
+        let sessions = takeSessions ? ids.compactMap { lookup[$0] }.sorted { $0.startedAt < $1.startedAt } : []
+        let takeProject = includeProjectInstructions
+        let pid = selectedProjectId ?? viewModel.projectIdForSession(anchor.id)
+        let projectInstructions: String? = {
+            guard takeProject, let pid = pid,
+                  let p = viewModel.projects.first(where: { $0.id == pid }),
+                  let instr = p.instructions, !instr.isEmpty else { return nil }
+            return instr
+        }()
+
         previewTask = Task.detached { [treeshaker] in
-            try? await Task.sleep(nanoseconds: 220_000_000)
+            try? await Task.sleep(nanoseconds: 200_000_000)
             if Task.isCancelled { return }
-            var use = opt
-            use.visibleKinds = kinds
-            // Respect visibility for reasoning/tool by AND-ing with toggles
-            if !(kinds.contains(.reasoning)) { use.includeReasoning = false }
-            if !(kinds.contains(.infoOther)) { use.includeToolSummary = false }
-            let text = await treeshaker.generateMarkdown(for: sessions, options: use)
+            var parts: [String] = []
+            if takeSessions, !sessions.isEmpty {
+                var use = opt
+                use.visibleKinds = kinds
+                if !(kinds.contains(.reasoning)) { use.includeReasoning = false }
+                if !(kinds.contains(.infoOther)) { use.includeToolSummary = false }
+                let text = await treeshaker.generateMarkdown(for: sessions, options: use)
+                if !text.isEmpty { parts.append(text) }
+            }
+            if let instr = projectInstructions { parts.append("Project Instructions:\n\n" + instr) }
             if Task.isCancelled { return }
-            await MainActor.run { self.previewText = text }
+            await MainActor.run { self.previewText = parts.joined(separator: "\n\n---\n\n") }
         }
     }
 
@@ -254,30 +322,32 @@ struct NewWithContextSheet: View {
 
     private func copyOpenNew() {
         // Record pending intent for auto-assign
-        viewModel.recordIntentForDetailNew(anchor: anchor)
+        let chosenSource = selectedSource ?? anchor.source
+        let chosen = (chosenSource == anchor.source) ? anchor : anchor.overridingSource(chosenSource)
+        viewModel.recordIntentForDetailNew(anchor: chosen)
         let prompt = previewText
-        let dir = FileManager.default.fileExists(atPath: anchor.cwd) ? anchor.cwd : anchor.fileURL.deletingLastPathComponent().path
+        let dir = FileManager.default.fileExists(atPath: chosen.cwd) ? chosen.cwd : chosen.fileURL.deletingLastPathComponent().path
         let app = viewModel.preferences.defaultResumeExternalApp
         switch app {
         case .iterm2:
-            let cmd = viewModel.buildNewSessionCLIInvocationRespectingProject(session: anchor, initialPrompt: prompt)
+            let cmd = viewModel.buildNewSessionCLIInvocationRespectingProject(session: chosen, initialPrompt: prompt)
             // Copy full command for visibility and shareability
             let pb = NSPasteboard.general; pb.clearContents(); pb.setString(cmd + "\n", forType: .string)
             viewModel.openPreferredTerminalViaScheme(app: .iterm2, directory: dir, command: cmd)
         case .warp:
             // Warp cannot execute a command via URL; open tab at path and copy command for the user to paste.
-            let cmd = viewModel.buildNewSessionCLIInvocationRespectingProject(session: anchor, initialPrompt: prompt)
+            let cmd = viewModel.buildNewSessionCLIInvocationRespectingProject(session: chosen, initialPrompt: prompt)
             let pb = NSPasteboard.general; pb.clearContents(); pb.setString(cmd + "\n", forType: .string)
             viewModel.openPreferredTerminalViaScheme(app: .warp, directory: dir)
         case .terminal:
             // Apple Terminal via AppleScript: run with PATH/env/profile + initial prompt
-            viewModel.openNewSessionRespectingProject(session: anchor, initialPrompt: prompt)
-            let cmd = viewModel.buildNewSessionCLIInvocationRespectingProject(session: anchor, initialPrompt: prompt)
+            viewModel.openNewSessionRespectingProject(session: chosen, initialPrompt: prompt)
+            let cmd = viewModel.buildNewSessionCLIInvocationRespectingProject(session: chosen, initialPrompt: prompt)
             let pb = NSPasteboard.general; pb.clearContents(); pb.setString(cmd + "\n", forType: .string)
         case .none:
             // Fallback: open Terminal at dir and copy command
             _ = viewModel.openAppleTerminal(at: dir)
-            let cmd = viewModel.buildNewSessionCLIInvocationRespectingProject(session: anchor, initialPrompt: prompt)
+            let cmd = viewModel.buildNewSessionCLIInvocationRespectingProject(session: chosen, initialPrompt: prompt)
             let pb = NSPasteboard.general; pb.clearContents(); pb.setString(cmd + "\n", forType: .string)
         }
         Task { await SystemNotifier.shared.notify(title: "CodMate", body: "Command copied. Session starts with provided context.") }
@@ -286,5 +356,7 @@ struct NewWithContextSheet: View {
     private func initialDefaults() async {
         // Default to same project filter; do not preselect to avoid heavy preview on open
         selectedIDs = []
+        selectedSource = .codex
+        selectedProjectId = viewModel.projectIdForSession(anchor.id)
     }
 }

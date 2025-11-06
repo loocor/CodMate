@@ -25,7 +25,9 @@ actor CodexConfigService {
         let configURL: URL
 
         static func `default`(fileManager: FileManager = .default) -> Paths {
-            let home = fileManager.homeDirectoryForCurrentUser.appendingPathComponent(".codex", isDirectory: true)
+            // Use real user home (not sandbox container) so Codex CLI can read the config
+            let userHome = SessionPreferencesStore.getRealUserHomeURL()
+            let home = userHome.appendingPathComponent(".codex", isDirectory: true)
             return Paths(home: home, configURL: home.appendingPathComponent("config.toml", isDirectory: false))
         }
     }
@@ -174,13 +176,15 @@ done
                 try setActiveProvider(nil)
                 return
             }
-            var envKeyValue = connector.envKey
+            var envKeyValue = provider.envKey ?? connector.envKey
             var headerMap = connector.httpHeaders ?? [:]
-            if let envKeyValueNonNil = envKeyValue,
-                envKeyValueNonNil.lowercased().contains("sk-")
-            {
-                envKeyValue = nil
-                headerMap["Authorization"] = "Bearer \(envKeyValueNonNil)"
+            if let v = envKeyValue {
+                let lower = v.lowercased()
+                let looksLikeToken = lower.contains("sk-") || v.hasPrefix("eyJ") || v.contains(".")
+                if looksLikeToken {
+                    envKeyValue = nil
+                    headerMap["Authorization"] = v.hasPrefix("Bearer ") ? v : "Bearer \(v)"
+                }
             }
             let codexProvider = CodexProvider(
                 id: provider.id,
@@ -324,7 +328,7 @@ done
         // Ensure at most a single empty line before the managed block
         var region = (text.isEmpty ? "" : "\n\n") + "\(mcpBeginMarker)\n"
         for s in enabled {
-            let header = "[mcp_servers.\(s.name)]\n"
+            // Single canonical block per server: [mcp_servers.<name>]
             var body: [String] = []
             body.append("kind = \"\(s.kind.rawValue)\"")
             if let url = s.url, !url.isEmpty { body.append("url = \"\(url)\"") }
@@ -335,7 +339,7 @@ done
             }
             if let env = s.env, !env.isEmpty { body.append("env = \(renderInlineTable(env))") }
             if let headers = s.headers, !headers.isEmpty { body.append("headers = \(renderInlineTable(headers))") }
-            region += header + body.joined(separator: "\n") + "\n\n"
+            region += "[mcp_servers.\(s.name)]\n" + body.joined(separator: "\n") + "\n\n"
         }
         region += "\(mcpEndMarker)\n"
         text += region

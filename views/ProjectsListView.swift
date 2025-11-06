@@ -76,7 +76,7 @@ struct ProjectsListView: View {
                         Button {
                             viewModel.revealProjectDirectory(p)
                         } label: {
-                            Label("Reveal in Finder", systemImage: "folder")
+                            Label("Reveal in Finder", systemImage: "finder")
                         }
                         .disabled(p.directory == nil || p.directory?.isEmpty == true)
 

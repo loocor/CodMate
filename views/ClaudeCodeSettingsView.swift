@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import Combine
 
 struct ClaudeCodeSettingsView: View {
     @ObservedObject var vm: ClaudeCodeVM
@@ -166,83 +167,152 @@ struct ClaudeCodeSettingsView: View {
     // MARK: - Models / Aliases
     // modelsPane removed; Provider pane now includes the default model picker like Codex
 
-    // MARK: - Raw Config (preview-only, lightweight)
+    // MARK: - Raw Config (read-only; toolbar mirrors Codex)
     private var rawPane: some View {
-        var lines = vm.launchEnvPreview()
-        // Append launch/runtime flags preview
-        lines.append("\n# Launch flags preview")
-        lines.append("permission-mode=\(preferences.claudePermissionMode.rawValue)")
-        lines.append("sandbox=\(preferences.defaultResumeSandboxMode.rawValue)")
-        lines.append("approvals=\(preferences.defaultResumeApprovalPolicy.rawValue)")
-        lines.append("allow-unsandboxed-commands=\(preferences.claudeAllowUnsandboxedCommands ? "true" : "false")")
-        if preferences.claudeDebug { lines.append("debug=true filter=\(preferences.claudeDebugFilter)") } else { lines.append("debug=false") }
-        lines.append("verbose=\(preferences.claudeVerbose ? "true" : "false")")
-        lines.append("ide=\(preferences.claudeIDE ? "true" : "false")")
-        lines.append("strictMCP=\(preferences.claudeStrictMCP ? "true" : "false")")
-        if !preferences.claudeAllowedTools.trimmingCharacters(in: .whitespaces).isEmpty { lines.append("allowed-tools=\(preferences.claudeAllowedTools)") }
-        if !preferences.claudeDisallowedTools.trimmingCharacters(in: .whitespaces).isEmpty { lines.append("disallowed-tools=\(preferences.claudeDisallowedTools)") }
-        if !preferences.claudeFallbackModel.trimmingCharacters(in: .whitespaces).isEmpty { lines.append("fallback-model=\(preferences.claudeFallbackModel)") }
-        // Example command (best-effort) for Claude Code
-        var example: [String] = ["claude"]
-        // Permission mode
-        if preferences.claudePermissionMode.rawValue != "default" {
-            example.append("--permission-mode \(preferences.claudePermissionMode.rawValue)")
-        }
-        // Debug/Verbose
-        if preferences.claudeDebug {
-            if !preferences.claudeDebugFilter.trimmingCharacters(in: .whitespaces).isEmpty {
-                example.append("--debug \(preferences.claudeDebugFilter)")
-            } else { example.append("--debug") }
-        }
-        if preferences.claudeVerbose { example.append("--verbose") }
-        if preferences.claudeAllowUnsandboxedCommands { example.append("--allow-unsandboxed-commands") }
-        // Tools
-        if !preferences.claudeAllowedTools.trimmingCharacters(in: .whitespaces).isEmpty {
-            example.append("--allowed-tools \"\(preferences.claudeAllowedTools)\"")
-        }
-        if !preferences.claudeDisallowedTools.trimmingCharacters(in: .whitespaces).isEmpty {
-            example.append("--disallowed-tools \"\(preferences.claudeDisallowedTools)\"")
-        }
-        // IDE + Strict MCP
-        if preferences.claudeIDE { example.append("--ide") }
-        // Fallback model
-        if !preferences.claudeFallbackModel.trimmingCharacters(in: .whitespaces).isEmpty {
-            example.append("--fallback-model \(preferences.claudeFallbackModel)")
-        }
-        // MCP config path
-        let mcpPath = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".codmate", isDirectory: true)
-            .appendingPathComponent("mcp-enabled-claude.json").path
-        if FileManager.default.fileExists(atPath: mcpPath) {
-            example.append("--mcp-config \(mcpPath)")
-        }
-        lines.append("\n# Example command")
-        lines.append(example.joined(separator: " "))
-
-        let text = lines.joined(separator: "\n")
+        let displayText = vm.rawSettingsText
+        
         return ZStack(alignment: .topTrailing) {
             ScrollView {
-                Text(text.isEmpty ? "(empty)" : text)
+                Text(displayText.isEmpty ? "(empty settings.json)" : displayText)
                     .font(.system(.caption, design: .monospaced))
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .topLeading)
             }
             HStack(spacing: 8) {
-                Button {
-                    let paste = NSPasteboard.general
-                    paste.clearContents()
-                    paste.setString(text, forType: .string)
-                } label: {
-                    Image(systemName: "doc.on.doc")
+                Button { Task { await vm.reloadRawSettings() } } label: {
+                    Image(systemName: "arrow.clockwise")
                 }
-                .help("Copy")
+                .help("Reload")
+                .buttonStyle(.borderless)
+                Button { vm.openSettingsInEditor() } label: {
+                    Image(systemName: "square.and.pencil")
+                }
+                .help("Open in default editor")
                 .buttonStyle(.borderless)
             }
         }
+        .task { await vm.reloadRawSettings() }
+    }
+    
+    private func buildRawConfigText() -> String {
+        // Prefer showing the canonical user settings file in full
+        let settingsURL = SessionPreferencesStore.getRealUserHomeURL()
+            .appendingPathComponent(".claude", isDirectory: true)
+            .appendingPathComponent("settings.json")
+        
+        if let fileText = try? String(contentsOf: settingsURL, encoding: .utf8) {
+            return fileText
+        }
+        
+        // Fallback: build preview from current settings
+        var lines = vm.launchEnvPreview()
+        
+        // Append launch/runtime flags preview
+        lines.append("\n# Launch flags preview")
+        lines.append("permission-mode=\(preferences.claudePermissionMode.rawValue)")
+        lines.append("sandbox=\(preferences.defaultResumeSandboxMode.rawValue)")
+        lines.append("approvals=\(preferences.defaultResumeApprovalPolicy.rawValue)")
+        
+        // Debug info
+        if preferences.claudeDebug {
+            lines.append("debug=true filter=\(preferences.claudeDebugFilter)")
+        } else {
+            lines.append("debug=false")
+        }
+        
+        lines.append("verbose=\(preferences.claudeVerbose ? "true" : "false")")
+        lines.append("ide=\(preferences.claudeIDE ? "true" : "false")")
+        lines.append("strictMCP=\(preferences.claudeStrictMCP ? "true" : "false")")
+        
+        // Tools configuration
+        let allowedTools = preferences.claudeAllowedTools.trimmingCharacters(in: .whitespaces)
+        if !allowedTools.isEmpty {
+            lines.append("allowed-tools=\(allowedTools)")
+        }
+        
+        let disallowedTools = preferences.claudeDisallowedTools.trimmingCharacters(in: .whitespaces)
+        if !disallowedTools.isEmpty {
+            lines.append("disallowed-tools=\(disallowedTools)")
+        }
+        
+        let fallbackModel = preferences.claudeFallbackModel.trimmingCharacters(in: .whitespaces)
+        if !fallbackModel.isEmpty {
+            lines.append("fallback-model=\(fallbackModel)")
+        }
+        
+        // Build example command
+        let exampleCommand = buildExampleCommand()
+        lines.append("\n# Example command")
+        lines.append(exampleCommand)
+        
+        return lines.joined(separator: "\n")
+    }
+    
+    private func buildExampleCommand() -> String {
+        var example: [String] = ["claude"]
+        
+        // Permission mode
+        if preferences.claudePermissionMode.rawValue != "default" {
+            example.append("--permission-mode \(preferences.claudePermissionMode.rawValue)")
+        }
+        
+        // Debug/Verbose
+        if preferences.claudeDebug {
+            let debugFilter = preferences.claudeDebugFilter.trimmingCharacters(in: .whitespaces)
+            if !debugFilter.isEmpty {
+                example.append("--debug \(debugFilter)")
+            } else {
+                example.append("--debug")
+            }
+        }
+        
+        if preferences.claudeVerbose {
+            example.append("--verbose")
+        }
+        
+        // Tools
+        let allowedTools = preferences.claudeAllowedTools.trimmingCharacters(in: .whitespaces)
+        if !allowedTools.isEmpty {
+            example.append("--allowed-tools \"\(allowedTools)\"")
+        }
+        
+        let disallowedTools = preferences.claudeDisallowedTools.trimmingCharacters(in: .whitespaces)
+        if !disallowedTools.isEmpty {
+            example.append("--disallowed-tools \"\(disallowedTools)\"")
+        }
+        
+        // IDE
+        if preferences.claudeIDE {
+            example.append("--ide")
+        }
+        
+        // Fallback model
+        let fallbackModel = preferences.claudeFallbackModel.trimmingCharacters(in: .whitespaces)
+        if !fallbackModel.isEmpty {
+            example.append("--fallback-model \(fallbackModel)")
+        }
+        
+        // MCP config path
+        let mcpPath = SessionPreferencesStore.getRealUserHomeURL()
+            .appendingPathComponent(".codmate", isDirectory: true)
+            .appendingPathComponent("mcp-enabled-claude.json").path
+        
+        if FileManager.default.fileExists(atPath: mcpPath) {
+            example.append("--mcp-config \(mcpPath)")
+        }
+        
+        return example.joined(separator: " ")
     }
 
     // MARK: - Runtime (Claude-native)
     private var runtimePane: some View {
+        runtimePaneGrid
+            .onReceive(preferences.objectWillChange) { _ in
+                Task { await vm.scheduleApplyRuntimeSettings(preferences) }
+            }
+    }
+    
+    private var runtimePaneGrid: some View {
         Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 14) {
             // Claude-native permission mode
             GridRow {
@@ -277,15 +347,7 @@ struct ClaudeCodeSettingsView: View {
                 Toggle("Enable", isOn: $preferences.claudeAllowSkipPermissions)
                     .frame(maxWidth: .infinity, alignment: .trailing)
             }
-            GridRow {
-                VStack(alignment: .leading, spacing: 0) {
-                    Text("Allow Unsandboxed Commands").font(.subheadline).fontWeight(.medium)
-                    Text("Policy-level switch. Turn OFF to disable the 'dangerouslyDisableSandbox' escape hatch.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-                Toggle("Enable", isOn: $preferences.claudeAllowUnsandboxedCommands)
-                    .frame(maxWidth: .infinity, alignment: .trailing)
-            }
+            // Removed: Unsandboxed commands toggle (no official CLI/setting key)
             gridDivider
             GridRow {
                 VStack(alignment: .leading, spacing: 0) {
@@ -370,6 +432,10 @@ private func settingsCard<Content: View>(@ViewBuilder _ content: @escaping () ->
 
 private var gridDivider: some View { Divider().opacity(0.5) }
 
+// MARK: - Runtime Settings Change Handler
+// Removed complex onChange modifier due to type-checker performance; using a single
+// onReceive(preferences.objectWillChange) above to debounce runtime writes.
+
 extension ClaudeCodeVM {
     var selectedClaudeBaseURL: String? {
         guard let id = activeProviderId,
@@ -379,7 +445,7 @@ extension ClaudeCodeVM {
     var selectedClaudeEnvKey: String? {
         guard let id = activeProviderId,
               let p = providers.first(where: { $0.id == id }) else { return nil }
-        return p.connectors[ProvidersRegistryService.Consumer.claudeCode.rawValue]?.envKey ?? "ANTHROPIC_AUTH_TOKEN"
+        return p.envKey ?? p.connectors[ProvidersRegistryService.Consumer.claudeCode.rawValue]?.envKey ?? "ANTHROPIC_AUTH_TOKEN"
     }
 
     func launchEnvPreview() -> [String] {
@@ -407,7 +473,7 @@ extension ClaudeCodeVM {
             }
         }
         // MCP config path preview (used via --mcp-config when launching)
-        let mcpPath = FileManager.default.homeDirectoryForCurrentUser
+        let mcpPath = SessionPreferencesStore.getRealUserHomeURL()
             .appendingPathComponent(".codmate", isDirectory: true)
             .appendingPathComponent("mcp-enabled-claude.json").path
         if FileManager.default.fileExists(atPath: mcpPath) {

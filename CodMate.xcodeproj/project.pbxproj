@@ -13,6 +13,7 @@
 		31B772F52EB0C300004397BC /* MCP in Frameworks */ = {isa = PBXBuildFile; productRef = 31B772F42EB0C300004397BC /* MCP */; };
 		41A001242B30040000000001 /* THIRD-PARTY-NOTICES.md in Resources */ = {isa = PBXBuildFile; fileRef = 41A001232B30040000000001 /* THIRD-PARTY-NOTICES.md */; };
 		41A001282B30040000000005 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 41A001272B30040000000004 /* PrivacyInfo.xcprivacy */; };
+		41A0012A2B30050000000001 /* providers.json in Resources */ = {isa = PBXBuildFile; fileRef = 41A001292B30050000000001 /* providers.json */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -22,6 +23,7 @@
 		31B626792EA279CC008CA40F /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; name = Assets.xcassets; path = CodMate/Assets.xcassets; sourceTree = SOURCE_ROOT; };
 		41A001232B30040000000001 /* THIRD-PARTY-NOTICES.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = "THIRD-PARTY-NOTICES.md"; sourceTree = SOURCE_ROOT; };
 		41A001272B30040000000004 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = PrivacyInfo.xcprivacy; sourceTree = SOURCE_ROOT; };
+		41A001292B30050000000001 /* providers.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; name = providers.json; path = payload/providers.json; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -68,6 +70,7 @@
 				31B626792EA279CC008CA40F /* Assets.xcassets */,
 				41A001232B30040000000001 /* THIRD-PARTY-NOTICES.md */,
 				41A001272B30040000000004 /* PrivacyInfo.xcprivacy */,
+				41A001292B30050000000001 /* providers.json */,
 			);
 			name = CodMate;
 			sourceTree = SOURCE_ROOT;
@@ -150,6 +153,7 @@
 				31B6267A2EA279CC008CA40F /* Assets.xcassets in Resources */,
 				41A001282B30040000000005 /* PrivacyInfo.xcprivacy in Resources */,
 				41A001242B30040000000001 /* THIRD-PARTY-NOTICES.md in Resources */,
+				41A0012A2B30050000000001 /* providers.json in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

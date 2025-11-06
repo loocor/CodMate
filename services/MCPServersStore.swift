@@ -6,7 +6,8 @@ actor MCPServersStore {
     struct Paths { let home: URL; let fileURL: URL }
 
     static func defaultPaths(fileManager: FileManager = .default) -> Paths {
-        let home = fileManager.homeDirectoryForCurrentUser
+        // Persist MCP servers under the real user home (~/.codmate), not sandbox container
+        let home = SessionPreferencesStore.getRealUserHomeURL()
             .appendingPathComponent(".codmate", isDirectory: true)
         return Paths(home: home, fileURL: home.appendingPathComponent("mcp-servers.json"))
     }
@@ -66,11 +67,8 @@ actor MCPServersStore {
         try save(sorted)
     }
 
-    // Export enabled servers to Claude Code config file (~/.claude.json)
-    // Claude Code accepts MCP configuration from:
-    // 1. ~/.claude.json (user-level config for all projects)
-    // 2. <project>/.mcp.json (project-shared config via git)
-    // 3. ~/.claude.json with project-specific overrides
+    // Export enabled servers to Claude Code user settings (~/.claude/settings.json)
+    // Per official docs, settings.json is the canonical configuration entry point.
     //
     // Safety strategy:
     // - Only modifies the "mcpServers" field
@@ -79,14 +77,18 @@ actor MCPServersStore {
     // - Uses atomic write to prevent partial corruption
     func exportEnabledForClaudeConfig() throws {
         let list = load().filter { $0.enabled }
-        let claudeConfigPath = fm.homeDirectoryForCurrentUser.appendingPathComponent(".claude.json")
+        let realHome = SessionPreferencesStore.getRealUserHomeURL()
+        // User settings file under ~/.claude/settings.json (preferred)
+        let claudeDir = realHome.appendingPathComponent(".claude", isDirectory: true)
+        let claudeSettingsPath = claudeDir.appendingPathComponent("settings.json")
+        let codmateDir = realHome.appendingPathComponent(".codmate", isDirectory: true)
+        let helperPath = codmateDir.appendingPathComponent("mcp-enabled-claude.json")
 
-        // Step 1: Load existing config or create empty object
+        // Step 1: Load existing settings or create empty object
         var existingConfig: [String: Any] = [:]
         var existingData: Data? = nil
-
-        if fm.fileExists(atPath: claudeConfigPath.path) {
-            existingData = try? Data(contentsOf: claudeConfigPath)
+        if fm.fileExists(atPath: claudeSettingsPath.path) {
+            existingData = try? Data(contentsOf: claudeSettingsPath)
             if let data = existingData,
                let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
                 existingConfig = json
@@ -112,15 +114,25 @@ actor MCPServersStore {
             existingConfig["mcpServers"] = serversObj
         }
 
-        // Step 4: Create backup if file exists
+        // Step 4: Write atomically to ~/.claude/settings.json (with backup)
+        try fm.createDirectory(at: claudeDir, withIntermediateDirectories: true)
         if let backupData = existingData {
-            let backupPath = claudeConfigPath.appendingPathExtension("backup")
+            let backupPath = claudeSettingsPath.appendingPathExtension("backup")
             try? backupData.write(to: backupPath, options: .atomic)
         }
+        let settingsData = try JSONSerialization.data(withJSONObject: existingConfig, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
+        try settingsData.write(to: claudeSettingsPath, options: .atomic)
 
-        // Step 5: Write atomically to ~/.claude.json
-        let data = try JSONSerialization.data(withJSONObject: existingConfig, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
-        try data.write(to: claudeConfigPath, options: .atomic)
+        // Step 6: Also write a CodMate-managed helper file that contains only the mcpServers object
+        // This is useful for launching Claude with --mcp-config explicitly from copied command examples.
+        // Ensure ~/.codmate exists first.
+        try fm.createDirectory(at: codmateDir, withIntermediateDirectories: true)
+        var helperObj: [String: Any] = [:]
+        if let servers = existingConfig["mcpServers"] {
+            helperObj["mcpServers"] = servers
+        }
+        let helperData = try JSONSerialization.data(withJSONObject: helperObj, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
+        try helperData.write(to: helperPath, options: .atomic)
     }
 
     func delete(name: String) throws {

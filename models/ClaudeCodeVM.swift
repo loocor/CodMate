@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import AppKit
 
 @MainActor
 final class ClaudeCodeVM: ObservableObject {
@@ -17,11 +18,13 @@ final class ClaudeCodeVM: ObservableObject {
     @Published var aliasSonnet: String = ""
     @Published var aliasOpus: String = ""
     @Published var lastError: String?
+    @Published var rawSettingsText: String = ""
 
     private let registry = ProvidersRegistryService()
     private var saveDebounceTask: Task<Void, Never>? = nil
     private var applyProviderDebounceTask: Task<Void, Never>? = nil
     private var defaultAliasDebounceTask: Task<Void, Never>? = nil
+    private var runtimeDebounceTask: Task<Void, Never>? = nil
 
     func loadAll() async {
         let providerList = await registry.listProviders()
@@ -67,6 +70,15 @@ final class ClaudeCodeVM: ObservableObject {
         do {
             try await registry.upsertProvider(provider)
             await MainActor.run { self.aliasDefault = modelId; self.lastError = nil }
+            // Persist to ~/.claude/settings.json → model only for third‑party providers
+            if self.activeProviderId != nil {
+                if SecurityScopedBookmarks.shared.isSandboxed {
+                    let home = SessionPreferencesStore.getRealUserHomeURL()
+                    _ = AuthorizationHub.shared.ensureDirectoryAccessOrPromptSync(directory: home, purpose: .generalAccess, message: "Authorize your Home folder to update Claude settings")
+                }
+                let settings = ClaudeSettingsService()
+                try? await settings.setModel(modelId)
+            }
         } catch { await MainActor.run { self.lastError = "Failed to set default model" } }
     }
 
@@ -75,7 +87,7 @@ final class ClaudeCodeVM: ObservableObject {
         let env = ProcessInfo.processInfo.environment
         if let id = activeProviderId,
            let provider = providers.first(where: { $0.id == id }) {
-            let key = provider.connectors[ProvidersRegistryService.Consumer.claudeCode.rawValue]?.envKey ?? "ANTHROPIC_AUTH_TOKEN"
+            let key = provider.envKey ?? provider.connectors[ProvidersRegistryService.Consumer.claudeCode.rawValue]?.envKey ?? "ANTHROPIC_AUTH_TOKEN"
             let val = env[key]
             return (val == nil || val?.isEmpty == true)
         }
@@ -94,11 +106,60 @@ final class ClaudeCodeVM: ObservableObject {
             self.syncAliases()
             self.syncLoginMethod()
         }
+        // Decide persistence policy
+        let isBuiltin = (activeProviderId == nil)
+        // Built‑in provider → clear provider-specific keys (model/env base URL/forceLogin/token)
+        if isBuiltin {
+            if SecurityScopedBookmarks.shared.isSandboxed {
+                let home = SessionPreferencesStore.getRealUserHomeURL()
+                _ = AuthorizationHub.shared.ensureDirectoryAccessOrPromptSync(directory: home, purpose: .generalAccess)
+            }
+            let settings = ClaudeSettingsService()
+            try? await settings.setModel(nil)
+            try? await settings.setEnvBaseURL(nil)
+            try? await settings.setForceLoginMethod(nil)
+            try? await settings.setEnvToken(nil)
+            return
+        }
+
+        if SecurityScopedBookmarks.shared.isSandboxed {
+            let home = SessionPreferencesStore.getRealUserHomeURL()
+            _ = AuthorizationHub.shared.ensureDirectoryAccessOrPromptSync(directory: home, purpose: .generalAccess)
+        }
+        let settings = ClaudeSettingsService()
+        // Base URL only for third‑party providers
+        let base = isBuiltin ? nil : selectedClaudeBaseURL?.trimmingCharacters(in: .whitespacesAndNewlines)
+        try? await settings.setEnvBaseURL((base?.isEmpty == false) ? base : nil)
+        // Force login only for API; remove for subscription
+        if loginMethod == .api {
+            try? await settings.setForceLoginMethod("console")
+        } else {
+            try? await settings.setForceLoginMethod(nil)
+        }
+        // Token only for API
+        if loginMethod == .api {
+            var token: String? = nil
+            if let id = activeProviderId,
+               let provider = providers.first(where: { $0.id == id }) {
+                let conn = provider.connectors[ProvidersRegistryService.Consumer.claudeCode.rawValue]
+                let keyName = provider.envKey ?? conn?.envKey ?? "ANTHROPIC_AUTH_TOKEN"
+                let env = ProcessInfo.processInfo.environment
+                if let val = env[keyName], !val.isEmpty {
+                    token = val
+                } else {
+                    let looksLikeToken = keyName.lowercased().contains("sk-") || keyName.hasPrefix("eyJ") || keyName.contains(".")
+                    if looksLikeToken { token = keyName }
+                }
+            }
+            try? await settings.setEnvToken(token)
+        } else {
+            try? await settings.setEnvToken(nil)
+        }
     }
 
     func save() async {
         guard let id = activeProviderId else { return }
-        let providerList = await registry.listProviders()
+        let providerList = await registry.listAllProviders()
         guard var provider = providerList.first(where: { $0.id == id }) else { return }
         var connector = provider.connectors[ProvidersRegistryService.Consumer.claudeCode.rawValue] ?? .init(
             baseURL: nil,
@@ -128,6 +189,16 @@ final class ClaudeCodeVM: ObservableObject {
         do {
             try await registry.upsertProvider(provider)
             await MainActor.run { self.lastError = nil }
+            // Persist model only for third‑party providers
+            if self.activeProviderId != nil {
+                if SecurityScopedBookmarks.shared.isSandboxed {
+                    let home = SessionPreferencesStore.getRealUserHomeURL()
+                    _ = AuthorizationHub.shared.ensureDirectoryAccessOrPromptSync(directory: home, purpose: .generalAccess)
+                }
+                let settings = ClaudeSettingsService()
+                let m = aliasDefault.trimmingCharacters(in: .whitespacesAndNewlines)
+                try? await settings.setModel(m.isEmpty ? nil : m)
+            }
             await loadAll()
         } catch {
             await MainActor.run { self.lastError = "Failed to save aliases" }
@@ -145,6 +216,45 @@ final class ClaudeCodeVM: ObservableObject {
             if Task.isCancelled { return }
             await self.save()
         }
+    }
+
+    // MARK: - Runtime settings writer
+    func scheduleApplyRuntimeSettings(_ preferences: SessionPreferencesStore, delayMs: UInt64 = 250) {
+        runtimeDebounceTask?.cancel()
+        runtimeDebounceTask = Task { [weak self] in
+            guard let self else { return }
+            do { try await Task.sleep(nanoseconds: delayMs * 1_000_000) } catch { return }
+            if Task.isCancelled { return }
+            await self.applyRuntimeSettings(preferences)
+        }
+    }
+
+    func applyRuntimeSettings(_ preferences: SessionPreferencesStore) async {
+        if SecurityScopedBookmarks.shared.isSandboxed {
+            let home = SessionPreferencesStore.getRealUserHomeURL()
+            _ = AuthorizationHub.shared.ensureDirectoryAccessOrPromptSync(directory: home, purpose: .generalAccess)
+        }
+        let settings = ClaudeSettingsService()
+        let addDirs: [String]? = {
+            let raw = preferences.claudeAddDirs.trimmingCharacters(in: .whitespacesAndNewlines)
+            if raw.isEmpty { return nil }
+            return raw.split(whereSeparator: { $0 == "," || $0.isWhitespace }).map { String($0) }
+        }()
+        let runtime = ClaudeSettingsService.Runtime(
+            permissionMode: preferences.claudePermissionMode.rawValue,
+            skipPermissions: preferences.claudeSkipPermissions,
+            allowSkipPermissions: preferences.claudeAllowSkipPermissions,
+            debug: preferences.claudeDebug,
+            debugFilter: preferences.claudeDebugFilter,
+            verbose: preferences.claudeVerbose,
+            ide: preferences.claudeIDE,
+            strictMCP: preferences.claudeStrictMCP,
+            fallbackModel: preferences.claudeFallbackModel,
+            allowedTools: preferences.claudeAllowedTools,
+            disallowedTools: preferences.claudeDisallowedTools,
+            addDirs: addDirs
+        )
+        try? await settings.applyRuntime(runtime)
     }
 
     private func syncAliases() {
@@ -193,15 +303,41 @@ final class ClaudeCodeVM: ObservableObject {
             requestMaxRetries: nil, streamMaxRetries: nil, streamIdleTimeoutMs: nil,
             modelAliases: nil)
         conn.loginMethod = method.rawValue
-        // Restore default env key for API login if absent
-        if method == .api && (conn.envKey == nil || conn.envKey?.isEmpty == true) {
-            conn.envKey = "ANTHROPIC_AUTH_TOKEN"
+        // Restore default env key for API login if absent (prefer provider-level key)
+        if method == .api && (p.envKey == nil || p.envKey?.isEmpty == true) {
+            p.envKey = "ANTHROPIC_AUTH_TOKEN"
         }
         if method == .subscription {
             // No need to store token env mapping; leave as-is but it will be ignored at launch.
         }
         p.connectors[ProvidersRegistryService.Consumer.claudeCode.rawValue] = conn
-        do { try await registry.upsertProvider(p) } catch { await MainActor.run { self.lastError = "Failed to save login method" } }
+        do {
+            try await registry.upsertProvider(p)
+            // Persist to settings: only when API; subscription removes forced key and token
+            if SecurityScopedBookmarks.shared.isSandboxed {
+                let home = SessionPreferencesStore.getRealUserHomeURL()
+                _ = AuthorizationHub.shared.ensureDirectoryAccessOrPromptSync(directory: home, purpose: .generalAccess)
+            }
+            let settings = ClaudeSettingsService()
+            if method == .api {
+                try? await settings.setForceLoginMethod("console")
+                var token: String? = nil
+                let env = ProcessInfo.processInfo.environment
+                let keyName = p.envKey ?? p.connectors[ProvidersRegistryService.Consumer.claudeCode.rawValue]?.envKey ?? "ANTHROPIC_AUTH_TOKEN"
+                if let val = env[keyName], !val.isEmpty {
+                    token = val
+                } else {
+                    let looksLikeToken = keyName.lowercased().contains("sk-") || keyName.hasPrefix("eyJ") || keyName.contains(".")
+                    if looksLikeToken { token = keyName }
+                }
+                try? await settings.setEnvToken(token)
+            } else {
+                try? await settings.setForceLoginMethod(nil)
+                try? await settings.setEnvToken(nil)
+            }
+        } catch {
+            await MainActor.run { self.lastError = "Failed to save login method" }
+        }
     }
 
     // MARK: - Debounced operations
@@ -222,6 +358,25 @@ final class ClaudeCodeVM: ObservableObject {
             do { try await Task.sleep(nanoseconds: delayMs * 1_000_000) } catch { return }
             if Task.isCancelled { return }
             await self.applyDefaultAlias(modelId)
+        }
+    }
+
+    // MARK: - Raw settings helpers
+    func settingsFileURL() -> URL {
+        SessionPreferencesStore.getRealUserHomeURL()
+            .appendingPathComponent(".claude", isDirectory: true)
+            .appendingPathComponent("settings.json")
+    }
+
+    func reloadRawSettings() async {
+        let url = settingsFileURL()
+        let text = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+        await MainActor.run { self.rawSettingsText = text }
+    }
+
+    func openSettingsInEditor() {
+        Task { @MainActor in
+            NSWorkspace.shared.open(self.settingsFileURL())
         }
     }
 }

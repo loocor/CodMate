@@ -96,7 +96,7 @@ final class CodexVM: ObservableObject {
     }
 
     func loadRegistryBindings() async {
-        registryProviders = await providersRegistry.listProviders()
+        registryProviders = await providersRegistry.listAllProviders()
         let bindings = await providersRegistry.getBindings()
         registryActiveProviderId = bindings.activeProvider?[
             ProvidersRegistryService.Consumer.codex.rawValue]
