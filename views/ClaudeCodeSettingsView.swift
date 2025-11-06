@@ -308,7 +308,7 @@ struct ClaudeCodeSettingsView: View {
     private var runtimePane: some View {
         runtimePaneGrid
             .onReceive(preferences.objectWillChange) { _ in
-                Task { await vm.scheduleApplyRuntimeSettings(preferences) }
+                Task { vm.scheduleApplyRuntimeSettings(preferences) }
             }
     }
     

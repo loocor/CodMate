@@ -18,6 +18,11 @@ actor GitService {
         var root: URL
     }
 
+    struct VisibleFilesResult: Sendable {
+        var paths: [String]
+        var truncated: Bool
+    }
+
     private static let realHomeDirectory: String = {
         let fmHome = FileManager.default.homeDirectoryForCurrentUser.path
         if !fmHome.isEmpty { return fmHome }
@@ -130,6 +135,32 @@ actor GitService {
             }
         }
         return result
+    }
+
+    func listVisibleFiles(in repo: Repo, limit: Int) async -> VisibleFilesResult? {
+        let arguments = ["ls-files", "-co", "--exclude-standard", "-z"]
+        guard let out = try? await runGit(arguments, cwd: repo.root),
+              out.exitCode == 0
+        else {
+            return nil
+        }
+        let components = out.stdout.split(separator: "\0", omittingEmptySubsequences: false)
+        let maxEntries = limit > 0 ? limit : Int.max
+        var paths: [String] = []
+        paths.reserveCapacity(min(components.count, maxEntries))
+        var truncated = false
+        for component in components {
+            if component.isEmpty { continue }
+            if paths.count >= maxEntries {
+                truncated = true
+                break
+            }
+            paths.append(String(component))
+        }
+        if components.count > maxEntries {
+            truncated = true
+        }
+        return VisibleFilesResult(paths: paths, truncated: truncated)
     }
 
     // Minimal parser for `git diff --name-status -z` output.

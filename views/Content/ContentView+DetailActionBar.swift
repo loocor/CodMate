@@ -34,7 +34,6 @@ extension ContentView {
             if let focused = focusedSummary {
                 // New split control: hidden in Terminal tab
                 if selectedDetailTab != .terminal {
-                    let defaultAppForNew = viewModel.preferences.defaultResumeExternalApp
                     let embeddedPreferredNew = viewModel.preferences.defaultResumeUseEmbeddedTerminal && !AppSandbox.isEnabled
                     SplitPrimaryMenuButton(
                         title: "New",

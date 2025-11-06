@@ -112,19 +112,20 @@ final class SessionPreferencesStore: ObservableObject {
         self.notesRoot = resolvedNotesRoot
         self.projectsRoot = resolvedProjectsRoot
         // Resume defaults (defer assigning to self until value is finalized)
+        let resumeEmbedded: Bool
         #if APPSTORE
-            if defaults.object(forKey: Keys.resumeUseEmbedded) as? Bool == true {
+            if defaults.object(forKey: Keys.resumeUseEmbedded) as? Bool != false {
                 defaults.set(false, forKey: Keys.resumeUseEmbedded)
             }
-            var resumeEmbedded = false
-        #else
-            var resumeEmbedded = defaults.object(forKey: Keys.resumeUseEmbedded) as? Bool ?? true
-        #endif
-        // Runtime sandbox: force disable embedded terminal
-        if AppSandbox.isEnabled, resumeEmbedded {
             resumeEmbedded = false
-            defaults.set(false, forKey: Keys.resumeUseEmbedded)
-        }
+        #else
+            var embedded = defaults.object(forKey: Keys.resumeUseEmbedded) as? Bool ?? true
+            if AppSandbox.isEnabled && embedded {
+                embedded = false
+                defaults.set(false, forKey: Keys.resumeUseEmbedded)
+            }
+            resumeEmbedded = embedded
+        #endif
         self.defaultResumeUseEmbeddedTerminal = resumeEmbedded
         self.defaultResumeCopyToClipboard =
             defaults.object(forKey: Keys.resumeCopyClipboard) as? Bool ?? true
@@ -143,19 +144,20 @@ final class SessionPreferencesStore: ObservableObject {
         self.commitModelId = defaults.string(forKey: Keys.commitModelId)
 
         // Terminal mode (DEV) – compute locally first
+        let cliConsole: Bool
         #if APPSTORE
-            if defaults.object(forKey: Keys.terminalUseCLIConsole) as? Bool == true {
+            if defaults.object(forKey: Keys.terminalUseCLIConsole) as? Bool != false {
                 defaults.set(false, forKey: Keys.terminalUseCLIConsole)
             }
-            var cliConsole = false
-        #else
-            var cliConsole = defaults.object(forKey: Keys.terminalUseCLIConsole) as? Bool ?? true
-        #endif
-        // Runtime sandbox: force disable CLI console
-        if AppSandbox.isEnabled, cliConsole {
             cliConsole = false
-            defaults.set(false, forKey: Keys.terminalUseCLIConsole)
-        }
+        #else
+            var console = defaults.object(forKey: Keys.terminalUseCLIConsole) as? Bool ?? true
+            if AppSandbox.isEnabled && console {
+                console = false
+                defaults.set(false, forKey: Keys.terminalUseCLIConsole)
+            }
+            cliConsole = console
+        #endif
         self.useEmbeddedCLIConsole = cliConsole
 
         // CLI policy defaults (with legacy value coercion)

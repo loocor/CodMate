@@ -24,8 +24,12 @@ extension GitChangesPanel {
                     HStack(spacing: 0) {
                         // Collapse All button
                         Button {
-                            expandedDirsStaged.removeAll()
-                            expandedDirsUnstaged.removeAll()
+                            if mode == .browser {
+                                expandedDirsBrowser.removeAll()
+                            } else {
+                                expandedDirsStaged.removeAll()
+                                expandedDirsUnstaged.removeAll()
+                            }
                         } label: {
                             Image(systemName: "arrow.up.right.and.arrow.down.left")
                                 .font(.system(size: 12))
@@ -45,8 +49,12 @@ extension GitChangesPanel {
 
                         // Expand All button
                         Button {
-                            expandedDirsStaged = Set(allDirectoryKeys(nodes: cachedNodesStaged))
-                            expandedDirsUnstaged = Set(allDirectoryKeys(nodes: cachedNodesUnstaged))
+                            if mode == .browser {
+                                expandedDirsBrowser = Set(allDirectoryKeys(nodes: browserNodes))
+                            } else {
+                                expandedDirsStaged = Set(allDirectoryKeys(nodes: cachedNodesStaged))
+                                expandedDirsUnstaged = Set(allDirectoryKeys(nodes: cachedNodesUnstaged))
+                            }
                         } label: {
                             Image(systemName: "arrow.down.left.and.arrow.up.right")
                                 .font(.system(size: 12))
@@ -64,6 +72,20 @@ extension GitChangesPanel {
                             }
                         }
                     }
+                    Button {
+                        mode.toggle()
+                        if mode == .browser {
+                            reloadBrowserTreeIfNeeded()
+                        }
+                    } label: {
+                        Image(systemName: mode == .browser ? "folder" : "arrow.triangle.branch")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .frame(width: 28, height: 28)
+                    .contentShape(Rectangle())
+                    .help(mode == .browser ? "Switch to Diff" : "Switch to Explorer")
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -104,11 +126,14 @@ extension GitChangesPanel {
                             Button {
                                 vm.generateCommitMessage(providerId: preferences.commitProviderId, modelId: preferences.commitModelId)
                             } label: {
-                                Image(systemName: "sparkles")
-                                    .resizable()
-                                    .scaledToFit()
-                                    .frame(width: 12, height: 12)
-                                    .foregroundStyle(hoverWand ? Color.accentColor : Color.secondary)
+                                ZStack(alignment: .bottomTrailing) {
+                                    Circle()
+                                        .fill(hoverWand ? Color.accentColor.opacity(0.15) : Color.clear)
+                                        .frame(width: wandButtonSize - 1, height: wandButtonSize - 1)
+                                    Image(systemName: "sparkles")
+                                        .font(.system(size: 15, weight: .semibold))
+                                        .foregroundStyle(hoverWand ? Color.accentColor : Color.secondary)
+                                }
                             }
                             .buttonStyle(.plain)
                             .frame(width: wandButtonSize, height: wandButtonSize)
@@ -127,73 +152,77 @@ extension GitChangesPanel {
 
             // Trees in VS Code-style sections
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    // Staged section
-                    HStack(spacing: 6) {
-                        Button {
-                            stagedCollapsed.toggle()
-                        } label: {
-                            Image(systemName: stagedCollapsed ? "chevron.right" : "chevron.down")
+                if mode == .diff {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        // Staged section
+                        HStack(spacing: 6) {
+                            Button {
+                                stagedCollapsed.toggle()
+                            } label: {
+                                Image(systemName: stagedCollapsed ? "chevron.right" : "chevron.down")
+                                    .foregroundStyle(.secondary)
+                                    .font(.system(size: 11))
+                            }
+                            .buttonStyle(.plain)
+                            .frame(width: chevronWidth)
+                            Text("Staged Changes (\(vm.changes.filter { $0.staged != nil }.count))")
+                                .font(.subheadline)
                                 .foregroundStyle(.secondary)
-                                .font(.system(size: 11))
+                            Spacer(minLength: 0)
                         }
-                        .buttonStyle(.plain)
-                        .frame(width: chevronWidth)
-                        Text("Staged Changes (\(vm.changes.filter { $0.staged != nil }.count))")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                        Spacer(minLength: 0)
-                    }
-                    .contentShape(Rectangle())
-                    .onTapGesture { stagedCollapsed.toggle() }
-                    .onHover { hoverStagedHeader = $0 }
-                    .background(
-                        RoundedRectangle(cornerRadius: 4)
-                            .fill(hoverStagedHeader ? Color.secondary.opacity(0.06) : Color.clear)
-                    )
-                    .frame(height: 22)
-                    .contextMenu {
-                        Button("Unstage All") {
-                            let paths = allPaths(in: .staged)
-                            Task { await vm.unstage(paths: paths) }
+                        .contentShape(Rectangle())
+                        .onTapGesture { stagedCollapsed.toggle() }
+                        .onHover { hoverStagedHeader = $0 }
+                        .background(
+                            RoundedRectangle(cornerRadius: 4)
+                                .fill(hoverStagedHeader ? Color.secondary.opacity(0.06) : Color.clear)
+                        )
+                        .frame(height: 22)
+                        .contextMenu {
+                            Button("Unstage All") {
+                                let paths = allPaths(in: .staged)
+                                Task { await vm.unstage(paths: paths) }
+                            }
                         }
-                    }
-                    if !stagedCollapsed {
-                        treeRows(nodes: displayedStaged, depth: 1, scope: .staged)
-                    }
+                        if !stagedCollapsed {
+                            treeRows(nodes: displayedStaged, depth: 1, scope: .staged)
+                        }
 
-                    // Unstaged section
-                    HStack(spacing: 6) {
-                        Button { unstagedCollapsed.toggle() } label: {
-                            Image(systemName: unstagedCollapsed ? "chevron.right" : "chevron.down")
+                        // Unstaged section
+                        HStack(spacing: 6) {
+                            Button { unstagedCollapsed.toggle() } label: {
+                                Image(systemName: unstagedCollapsed ? "chevron.right" : "chevron.down")
+                                    .foregroundStyle(.secondary)
+                                    .font(.system(size: 11))
+                            }
+                            .buttonStyle(.plain)
+                            .frame(width: chevronWidth)
+                            // Show all files with worktree changes, even if they also have staged changes (MM)
+                            Text("Changes (\(vm.changes.filter { $0.worktree != nil }.count))")
+                                .font(.subheadline)
                                 .foregroundStyle(.secondary)
-                                .font(.system(size: 11))
+                            Spacer(minLength: 0)
                         }
-                        .buttonStyle(.plain)
-                        .frame(width: chevronWidth)
-                        // Show all files with worktree changes, even if they also have staged changes (MM)
-                        Text("Changes (\(vm.changes.filter { $0.worktree != nil }.count))")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                        Spacer(minLength: 0)
-                    }
-                    .contentShape(Rectangle())
-                    .onTapGesture { unstagedCollapsed.toggle() }
-                    .onHover { hoverUnstagedHeader = $0 }
-                    .background(
-                        RoundedRectangle(cornerRadius: 4)
-                            .fill(hoverUnstagedHeader ? Color.secondary.opacity(0.06) : Color.clear)
-                    )
-                    .frame(height: 22)
-                    .contextMenu {
-                        Button("Stage All") {
-                            let paths = allPaths(in: .unstaged)
-                            Task { await vm.stage(paths: paths) }
+                        .contentShape(Rectangle())
+                        .onTapGesture { unstagedCollapsed.toggle() }
+                        .onHover { hoverUnstagedHeader = $0 }
+                        .background(
+                            RoundedRectangle(cornerRadius: 4)
+                                .fill(hoverUnstagedHeader ? Color.secondary.opacity(0.06) : Color.clear)
+                        )
+                        .frame(height: 22)
+                        .contextMenu {
+                            Button("Stage All") {
+                                let paths = allPaths(in: .unstaged)
+                                Task { await vm.stage(paths: paths) }
+                            }
+                        }
+                        if !unstagedCollapsed {
+                            treeRows(nodes: displayedUnstaged, depth: 1, scope: .unstaged)
                         }
                     }
-                    if !unstagedCollapsed {
-                        treeRows(nodes: displayedUnstaged, depth: 1, scope: .unstaged)
-                    }
+                } else {
+                    browserTreeView
                 }
             }
             // Provide a generic context menu on empty area as well

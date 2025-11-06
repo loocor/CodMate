@@ -330,6 +330,11 @@ final class GitChangesViewModel: ObservableObject {
         errorMessage = "\(editor.title) is not installed. Please install it or try a different editor."
     }
 
+    func listVisiblePaths(limit: Int) async -> GitService.VisibleFilesResult? {
+        guard let repo else { return nil }
+        return await service.listVisibleFiles(in: repo, limit: limit)
+    }
+
     private static func findExecutableInPath(_ name: String) -> String? {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/which")
@@ -355,7 +360,11 @@ final class GitChangesViewModel: ObservableObject {
         generatingTask = Task { [weak self] in
             guard let self else { return }
             guard let repo = self.repo else {
-                await MainActor.run { self.errorMessage = "Not a Git repository" }
+                await SystemNotifier.shared.notify(
+                    title: "AI Commit",
+                    body: "Cannot generate commit message: not a Git repository.",
+                    threadId: "ai-commit"
+                )
                 return
             }
             let repoPath = repo.root.path
@@ -370,7 +379,11 @@ final class GitChangesViewModel: ObservableObject {
             // Fetch staged diff (index vs HEAD)
             let full = await self.service.stagedUnifiedDiff(in: repo)
             if full.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                await MainActor.run { self.errorMessage = "No staged changes to summarize" }
+                await SystemNotifier.shared.notify(
+                    title: "AI Commit",
+                    body: "No staged changes to summarize.",
+                    threadId: "ai-commit"
+                )
                 print("[AICommit] No staged changes; generation skipped")
                 Self.log.info("No staged changes; generation skipped")
                 return
@@ -384,27 +397,39 @@ final class GitChangesViewModel: ObservableObject {
             do {
                 // Allow a slightly longer timeout for commit generation to reduce provider-specific timeouts
                 let res = try await llm.generateText(prompt: prompt, options: .init(preferred: .auto, model: modelId, timeout: 45, providerId: providerId))
-                let cleaned = Self.cleanCommitMessage(from: res.text)
+                let raw = res.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                let cleaned = Self.cleanCommitMessage(from: raw)
+                let finalMessage = cleaned.isEmpty ? raw : cleaned
                 await MainActor.run {
-                    if self.repoRoot?.path == repoPath {
-                        self.commitMessage = cleaned
-                    } else {
+                    guard self.repoRoot?.path == repoPath else {
                         // Repo changed during generation; drop the result
                         print("[AICommit] Repo switched during generation; result discarded for repo=\(repoPath)")
+                        return
                     }
+                    if finalMessage.isEmpty {
+                        // Leave commit message unchanged; rely on system notification
+                        return
+                    }
+                    self.commitMessage = finalMessage
                 }
-                let preview = cleaned.prefix(120)
-                print("[AICommit] Success provider=\(res.providerId) elapsedMs=\(res.elapsedMs) msg=\(preview)")
-                Self.log.info("Success provider=\(res.providerId, privacy: .public) elapsedMs=\(res.elapsedMs) msg=\(String(preview), privacy: .public)")
+                if finalMessage.isEmpty {
+                    print("[AICommit] Empty response from provider=\(res.providerId), elapsedMs=\(res.elapsedMs)")
+                    Self.log.warning("Empty commit message from provider=\(res.providerId, privacy: .public)")
+                } else {
+                    let preview = finalMessage.prefix(120)
+                    print("[AICommit] Success provider=\(res.providerId) elapsedMs=\(res.elapsedMs) msg=\(preview)")
+                    Self.log.info("Success provider=\(res.providerId, privacy: .public) elapsedMs=\(res.elapsedMs) msg=\(String(preview), privacy: .public)")
+                }
                 await SystemNotifier.shared.notify(
                     title: "AI Commit",
-                    body: "Generated commit message (\(res.providerId)) in \(res.elapsedMs)ms",
+                    body: finalMessage.isEmpty
+                        ? "Generation completed but returned an empty commit message."
+                        : "Generated commit message (\(res.providerId)) in \(res.elapsedMs)ms",
                     threadId: "ai-commit"
                 )
             } catch {
                 print("[AICommit] Error: \(error.localizedDescription)")
                 Self.log.error("Generation error: \(error.localizedDescription, privacy: .public)")
-                await MainActor.run { self.errorMessage = "AI generation failed: \(error.localizedDescription)" }
                 await SystemNotifier.shared.notify(
                     title: "AI Commit",
                     body: "Generation failed: \(error.localizedDescription)",

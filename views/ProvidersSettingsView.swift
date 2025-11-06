@@ -482,9 +482,11 @@ final class ProvidersVM: ObservableObject {
     @Published var selectedId: String? = nil {
         didSet {
             guard selectedId != oldValue else { return }
-            syncEditingFieldsFromSelected()
-            loadModelRowsFromSelected()
-            testResultText = nil
+            Task { @MainActor in
+                syncEditingFieldsFromSelected()
+                loadModelRowsFromSelected()
+                testResultText = nil
+            }
         }
     }
 
@@ -546,25 +548,35 @@ final class ProvidersVM: ObservableObject {
 
     private func syncEditingFieldsFromSelected() {
         guard let sel = selectedId, let provider = providers.first(where: { $0.id == sel }) else {
-            providerName = ""
-            codexBaseURL = ""
-            codexEnvKey = "OPENAI_API_KEY"
-            codexWireAPI = "chat"
-            claudeBaseURL = ""
-            defaultModelId = nil
-            recomputeCanSave()
+            DispatchQueue.main.async {
+                self.providerName = ""
+                self.codexBaseURL = ""
+                self.codexEnvKey = "OPENAI_API_KEY"
+                self.codexWireAPI = "chat"
+                self.claudeBaseURL = ""
+                self.defaultModelId = nil
+                self.recomputeCanSave()
+            }
             return
         }
-        providerName = provider.name ?? ""
+        let name = provider.name ?? ""
         let codexConnector = provider.connectors[ProvidersRegistryService.Consumer.codex.rawValue]
         let claudeConnector = provider.connectors[ProvidersRegistryService.Consumer.claudeCode.rawValue]
-        codexBaseURL = codexConnector?.baseURL ?? ""
-        codexEnvKey = provider.envKey ?? codexConnector?.envKey ?? claudeConnector?.envKey ?? "OPENAI_API_KEY"
-        codexWireAPI = normalizedWireAPI(codexConnector?.wireAPI)
-        claudeBaseURL = claudeConnector?.baseURL ?? ""
-        // For prebuilt-like providers, supply Get Key / Docs links by matching templates by baseURL
-        applyTemplateMetadataForCurrent(provider: provider)
-        recomputeCanSave()
+        let codexBase = codexConnector?.baseURL ?? ""
+        let envKey = provider.envKey ?? codexConnector?.envKey ?? claudeConnector?.envKey ?? "OPENAI_API_KEY"
+        let wireAPI = normalizedWireAPI(codexConnector?.wireAPI)
+        let claudeBase = claudeConnector?.baseURL ?? ""
+        
+        DispatchQueue.main.async {
+            self.providerName = name
+            self.codexBaseURL = codexBase
+            self.codexEnvKey = envKey
+            self.codexWireAPI = wireAPI
+            self.claudeBaseURL = claudeBase
+            // For prebuilt-like providers, supply Get Key / Docs links by matching templates by baseURL
+            self.applyTemplateMetadataForCurrent(provider: provider)
+            self.recomputeCanSave()
+        }
     }
 
     func editingProviderBinding() -> ProvidersRegistryService.Provider? {
@@ -590,7 +602,9 @@ final class ProvidersVM: ObservableObject {
         // When creating from a template, modelRows are already seeded; avoid clearing.
         if isNewProvider { return }
         guard let sel = selectedId, let p = providers.first(where: { $0.id == sel }) else {
-            modelRows = []
+            DispatchQueue.main.async {
+                self.modelRows = []
+            }
             return
         }
         let rows: [ModelRow] = (p.catalog?.models ?? []).map { me in
@@ -603,18 +617,25 @@ final class ProvidersVM: ObservableObject {
                 longContext: c?.long_context ?? false
             )
         }
-        modelRows = rows
-        if let defined = providerDefaultModel(from: p), let match = rows.first(where: { $0.modelId == defined }) {
-            defaultModelRowID = match.id
-            defaultModelId = match.modelId
-        } else if let first = rows.first(where: { !$0.modelId.isEmpty }) {
-            defaultModelRowID = first.id
-            defaultModelId = first.modelId
-        } else {
-            defaultModelRowID = nil
-            defaultModelId = nil
+        
+        let defined = providerDefaultModel(from: p)
+        let matchingRow = rows.first(where: { $0.modelId == defined })
+        let firstNonEmpty = rows.first(where: { !$0.modelId.isEmpty })
+        
+        DispatchQueue.main.async {
+            self.modelRows = rows
+            if let defined = defined, let match = matchingRow {
+                self.defaultModelRowID = match.id
+                self.defaultModelId = match.modelId
+            } else if let first = firstNonEmpty {
+                self.defaultModelRowID = first.id
+                self.defaultModelId = first.modelId
+            } else {
+                self.defaultModelRowID = nil
+                self.defaultModelId = nil
+            }
+            self.normalizeDefaultSelection()
         }
-        normalizeDefaultSelection()
     }
 
     // MARK: - Bindings for Table cells
@@ -668,28 +689,38 @@ final class ProvidersVM: ObservableObject {
 
     private func normalizeDefaultSelection() {
         if modelRows.isEmpty {
-            defaultModelRowID = nil
-            defaultModelId = nil
+            DispatchQueue.main.async {
+                self.defaultModelRowID = nil
+                self.defaultModelId = nil
+            }
             return
         }
         if let rowID = defaultModelRowID,
            let current = modelRows.first(where: { $0.id == rowID }),
            !current.modelId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            defaultModelId = current.modelId.trimmingCharacters(in: .whitespacesAndNewlines)
+            DispatchQueue.main.async {
+                self.defaultModelId = current.modelId.trimmingCharacters(in: .whitespacesAndNewlines)
+            }
             return
         }
         if let defined = defaultModelId,
            let match = modelRows.first(where: { $0.modelId == defined }) {
-            defaultModelRowID = match.id
-            defaultModelId = match.modelId
+            DispatchQueue.main.async {
+                self.defaultModelRowID = match.id
+                self.defaultModelId = match.modelId
+            }
             return
         }
         if let fallback = modelRows.first(where: { !$0.modelId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) {
-            defaultModelRowID = fallback.id
-            defaultModelId = fallback.modelId.trimmingCharacters(in: .whitespacesAndNewlines)
+            DispatchQueue.main.async {
+                self.defaultModelRowID = fallback.id
+                self.defaultModelId = fallback.modelId.trimmingCharacters(in: .whitespacesAndNewlines)
+            }
         } else {
-            defaultModelRowID = nil
-            defaultModelId = nil
+            DispatchQueue.main.async {
+                self.defaultModelRowID = nil
+                self.defaultModelId = nil
+            }
         }
     }
 
@@ -734,7 +765,10 @@ final class ProvidersVM: ObservableObject {
         let codex = codexBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
         let claude = claudeBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
         let env = codexEnvKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        canSave = !env.isEmpty && (!codex.isEmpty || !claude.isEmpty)
+        let newValue = !env.isEmpty && (!codex.isEmpty || !claude.isEmpty)
+        DispatchQueue.main.async {
+            self.canSave = newValue
+        }
     }
 
     @discardableResult
@@ -1041,8 +1075,13 @@ final class ProvidersVM: ObservableObject {
     }
 
     private func applyTemplateMetadataFor(template: ProvidersRegistryService.Provider) {
-        if let s = template.keyURL, let url = URL(string: s) { providerKeyURL = url } else { providerKeyURL = nil }
-        if let s = template.docsURL, let url = URL(string: s) { providerDocsURL = url } else { providerDocsURL = nil }
+        let keyURL: URL? = if let s = template.keyURL, let url = URL(string: s) { url } else { nil }
+        let docsURL: URL? = if let s = template.docsURL, let url = URL(string: s) { url } else { nil }
+        
+        DispatchQueue.main.async {
+            self.providerKeyURL = keyURL
+            self.providerDocsURL = docsURL
+        }
     }
 
     private func applyTemplateMetadataForCurrent(provider: ProvidersRegistryService.Provider) {
@@ -1052,7 +1091,10 @@ final class ProvidersVM: ObservableObject {
         if let t = templates.first(where: { ( $0.connectors[ProvidersRegistryService.Consumer.codex.rawValue]?.baseURL?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "" ) == codexBase || ( $0.connectors[ProvidersRegistryService.Consumer.claudeCode.rawValue]?.baseURL?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "" ) == claudeBase }) {
             applyTemplateMetadataFor(template: t)
         } else {
-            providerKeyURL = nil; providerDocsURL = nil
+            DispatchQueue.main.async {
+                self.providerKeyURL = nil
+                self.providerDocsURL = nil
+            }
         }
     }
     

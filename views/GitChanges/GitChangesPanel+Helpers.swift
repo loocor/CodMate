@@ -1,4 +1,7 @@
 import SwiftUI
+#if canImport(AppKit)
+import AppKit
+#endif
 
 extension GitChangesPanel {
     // MARK: - Helper functions for tree manipulation
@@ -34,6 +37,30 @@ extension GitChangesPanel {
             return out
         }
         return filter(nodes)
+    }
+
+    func explorerSort(_ nodes: [FileNode]) -> [FileNode] {
+        func category(for node: FileNode) -> Int {
+            let isDot = node.name.hasPrefix(".")
+            if node.isDirectory {
+                return isDot ? 1 : 0
+            } else {
+                return isDot ? 3 : 2
+            }
+        }
+        return nodes.sorted {
+            let lhsCategory = category(for: $0)
+            let rhsCategory = category(for: $1)
+            if lhsCategory != rhsCategory {
+                return lhsCategory < rhsCategory
+            }
+            return $0.name.localizedStandardCompare($1.name) == .orderedAscending
+        }
+    }
+
+    func isImagePath(_ path: String) -> Bool {
+        let ext = URL(fileURLWithPath: path).pathExtension.lowercased()
+        return ["png", "jpg", "jpeg", "gif", "bmp", "tiff", "tif", "heic", "heif", "webp"].contains(ext)
     }
 
     // Expand a directory key to concrete file paths present in current change set
@@ -126,4 +153,12 @@ extension GitChangesPanel {
                     .fill(Color.secondary.opacity(0.1))
             )
     }
+
+#if canImport(AppKit)
+    func revealInFinder(path: String, isDirectory: Bool) {
+        guard let root = vm.repoRoot else { return }
+        let url = root.appendingPathComponent(path, isDirectory: isDirectory)
+        NSWorkspace.shared.activateFileViewerSelecting([url])
+    }
+#endif
 }

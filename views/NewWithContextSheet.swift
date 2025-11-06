@@ -304,7 +304,8 @@ struct NewWithContextSheet: View {
             }
             if let instr = projectInstructions { parts.append("Project Instructions:\n\n" + instr) }
             if Task.isCancelled { return }
-            await MainActor.run { self.previewText = parts.joined(separator: "\n\n---\n\n") }
+            let output = parts.joined(separator: "\n\n---\n\n")
+            await MainActor.run { self.previewText = output }
         }
     }
 

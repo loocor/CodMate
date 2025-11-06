@@ -35,14 +35,16 @@ extension GitChangesPanel {
                     }
                 }
                 Spacer()
-                Picker("", selection: $vm.showPreviewInsteadOfDiff) {
-                    Text("Diff").tag(false)
-                    Text("Preview").tag(true)
+                if mode == .diff {
+                    Picker("", selection: $vm.showPreviewInsteadOfDiff) {
+                        Text("Diff").tag(false)
+                        Text("Preview").tag(true)
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(width: 116)
+                    .controlSize(.small)
+                    .labelsHidden()
                 }
-                .pickerStyle(.segmented)
-                .frame(width: 116)
-                .controlSize(.small)
-                .labelsHidden()
 
                 // (wand button moved into commit message box overlay)
 

@@ -1,4 +1,7 @@
 import SwiftUI
+#if canImport(AppKit)
+import AppKit
+#endif
 
 extension GitChangesPanel {
     @ViewBuilder
@@ -95,6 +98,11 @@ extension GitChangesPanel {
                         } else {
                             Button("Stage Folder") { Task { await vm.stage(paths: allPaths) } }
                         }
+#if canImport(AppKit)
+                        Button("Reveal in Finder") {
+                            revealInFinder(path: dir, isDirectory: true)
+                        }
+#endif
                         Divider()
                         Button("Discard Folder Changes…", role: .destructive) {
                             pendingDiscardPaths = allPaths
@@ -213,6 +221,9 @@ extension GitChangesPanel {
                     Button("Open in Cursor") { vm.openFile(path, using: .cursor) }
                     Button("Open in Zed") { vm.openFile(path, using: .zed) }
                     Button("Open with Default App") { NSWorkspace.shared.open(URL(fileURLWithPath: vm.repoRoot?.appendingPathComponent(path).path ?? path)) }
+#if canImport(AppKit)
+                    Button("Reveal in Finder") { revealInFinder(path: path, isDirectory: false) }
+#endif
                     Divider()
                     Button("Discard Changes…", role: .destructive) {
                         pendingDiscardPaths = [path]

@@ -28,6 +28,15 @@ struct GitChangesPanel: View {
     @State var stagedCollapsed: Bool = false
     @State var unstagedCollapsed: Bool = false
     @State var commitInlineHeight: CGFloat = 20
+    @State var mode: ReviewPanelState.Mode = .diff
+    @State var expandedDirsBrowser: Set<String> = []
+    @State var browserNodes: [FileNode] = []
+    @State var displayedBrowserRows: [BrowserRow] = []
+    @State var isLoadingBrowserTree: Bool = false
+    @State var browserTreeError: String? = nil
+    @State var browserTreeTruncated: Bool = false
+    @State var browserTotalEntries: Int = 0
+    @State var browserTreeTask: Task<Void, Never>? = nil
     // Hover state for quick actions
     @State var hoverFilePath: String? = nil
     @State var hoverDirKey: String? = nil
@@ -35,6 +44,11 @@ struct GitChangesPanel: View {
     @State var hoverRevertPath: String? = nil
     @State var hoverStagePath: String? = nil
     @State var hoverDirButtonPath: String? = nil
+    @State var hoverBrowserFilePath: String? = nil
+    @State var hoverBrowserRevealPath: String? = nil
+    @State var hoverBrowserEditPath: String? = nil
+    @State var hoverBrowserStagePath: String? = nil
+    @State var hoverBrowserDirKey: String? = nil
     @State var hoverStagedHeader: Bool = false
     @State var hoverUnstagedHeader: Bool = false
     @State var pendingDiscardPaths: [String] = []
@@ -56,6 +70,7 @@ struct GitChangesPanel: View {
     let trailingPad: CGFloat = 8
     let hoverButtonSpacing: CGFloat = 8
     let statusBadgeWidth: CGFloat = 18
+    let browserEntryLimit: Int = 6000
     // Viewer options (from Settings › Git Review). Defaults: line numbers ON, wrap OFF
     var wrapText: Bool { preferences.gitWrapText }
     var showLineNumbers: Bool { preferences.gitShowLineNumbers }
@@ -63,6 +78,10 @@ struct GitChangesPanel: View {
     let wandButtonSize: CGFloat = 24
     var wandReservedTrailing: CGFloat { wandButtonSize } // equal-width indent to avoid overlap
     @State var hoverWand: Bool = false
+#if canImport(AppKit)
+    @State var previewImage: NSImage? = nil
+    @State var previewImageTask: Task<Void, Never>? = nil
+#endif
 
     var body: some View {
         Group {
@@ -132,15 +151,27 @@ struct GitChangesPanel: View {
             .task(id: workingDirectory) {
                 vm.attach(to: workingDirectory)
             }
+            .task(id: vm.repoRoot?.path) {
+                browserNodes = []
+                displayedBrowserRows = []
+                browserTreeError = nil
+                if mode == .browser {
+                    reloadBrowserTreeIfNeeded(force: true)
+                }
+            }
             .modifier(LifecycleModifier(
                 expandedDirsStaged: $expandedDirsStaged,
                 expandedDirsUnstaged: $expandedDirsUnstaged,
+                expandedDirsBrowser: $expandedDirsBrowser,
                 savedState: $savedState,
+                mode: $mode,
                 vm: vm,
                 treeQuery: treeQuery,
                 onRebuildNodes: rebuildNodes,
                 onRebuildDisplayed: rebuildDisplayed,
-                onEnsureExpandAll: ensureExpandAllIfNeeded
+                onEnsureExpandAll: ensureExpandAllIfNeeded,
+                onRebuildBrowserDisplayed: rebuildBrowserDisplayed,
+                onRefreshBrowserTree: { reloadBrowserTreeIfNeeded(force: false) }
             ))
     }
 
@@ -284,15 +315,16 @@ struct GitChangesPanel: View {
         }
         func convert(_ b: BuilderNode, name: String? = nil) -> [FileNode] {
             var nodes: [FileNode] = []
-            for (k, v) in b.children.sorted(by: { $0.key.localizedStandardCompare($1.key) == .orderedAscending }) {
-                if let p = v.filePath {
+            for (k, v) in b.children {
+                if let p = v.filePath, v.children.isEmpty {
                     nodes.append(FileNode(name: k, fullPath: p, dirPath: nil, children: nil))
                 } else {
                     let key = (name == nil) ? k : (name! + "/" + k)
-                    nodes.append(FileNode(name: k, fullPath: nil, dirPath: key, children: convert(v, name: key)))
+                    let children = explorerSort(convert(v, name: key))
+                    nodes.append(FileNode(name: k, fullPath: nil, dirPath: key, children: children))
                 }
             }
-            return nodes
+            return explorerSort(nodes)
         }
         return convert(root)
     }
