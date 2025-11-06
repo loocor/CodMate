@@ -21,20 +21,20 @@ set -euo pipefail
 #
 # Default behavior: builds two notarized DMGs, one for arm64 and one for x86_64.
 # Optional overrides:
-#   SCHEME (default: CodMate)
-#   PROJECT (default: codmate.xcodeproj)
-#   CONFIG (default: Release)
+#   SCHEME (default: CodMate (Direct) when SANDBOX=off, CodMate (MAS) when SANDBOX=on)
+#   PROJECT (default: CodMate.xcodeproj)
+#   CONFIG (default: Release-Direct when SANDBOX=off, Release-MAS when SANDBOX=on)
 #   ARCH_MATRIX (default: "arm64 x86_64"), e.g. set to "arm64" to build only arm64
 #   SIGNING_CERT (default: Developer ID Application; maps from APPLE_SIGNING_IDENTITY if present)
 #   VERSION (if set, will override Marketing Version at export time when possible)
-#   SANDBOX=on|off (default: on). When off, build without App Sandbox entitlements (unrestricted mode)
+#   SANDBOX=on|off (default: off). When on, force App Sandbox entitlements (Mac App Store-style)
 #   APPSTORE_SIM=1 to compile with APPSTORE condition (mimic Mac App Store build-time gating)
 #   MIN_MACOS (default: 15.0) sets MACOSX_DEPLOYMENT_TARGET for all targets including packages
 #
 
-SCHEME="${SCHEME:-CodMate}"
-PROJECT="${PROJECT:-codmate.xcodeproj}"
-CONFIG="${CONFIG:-Release}"
+SCHEME="${SCHEME:-}"
+PROJECT="${PROJECT:-CodMate.xcodeproj}"
+CONFIG="${CONFIG:-}"
 # Default: build two independent DMGs, one for each arch
 ARCH_MATRIX=( ${ARCH_MATRIX:-arm64 x86_64} )
 SIGNING_CERT="${SIGNING_CERT:-}"
@@ -122,7 +122,7 @@ if [[ "${APPSTORE_SIM:-0}" == "1" ]]; then
 fi
 
 # Entitlements: sandbox on/off
-SANDBOX="${SANDBOX:-on}"
+SANDBOX="${SANDBOX:-off}"
 if [[ "$SANDBOX" == "off" ]]; then
   EXTRA_XC_ARGS+=("CODE_SIGN_ENTITLEMENTS=")
   echo "[info] SANDBOX=off → building without App Sandbox entitlements"
@@ -130,6 +130,24 @@ else
   EXTRA_XC_ARGS+=("CODE_SIGN_ENTITLEMENTS=CodMate/CodMate.entitlements")
   echo "[info] SANDBOX=on  → App Sandbox entitlements enabled"
 fi
+
+if [[ -z "$SCHEME" ]]; then
+  if [[ "$SANDBOX" == "off" ]]; then
+    SCHEME="CodMate (Direct)"
+  else
+    SCHEME="CodMate (MAS)"
+  fi
+fi
+
+if [[ -z "$CONFIG" ]]; then
+  if [[ "$SANDBOX" == "off" ]]; then
+    CONFIG="Release-Direct"
+  else
+    CONFIG="Release-MAS"
+  fi
+fi
+
+echo "[info] Using scheme '$SCHEME' with configuration '$CONFIG'"
 
 # Force a modern macOS deployment target to avoid arm64 + 10.13 mismatches in Swift packages
 MIN_MACOS="${MIN_MACOS:-15.0}"
@@ -170,6 +188,22 @@ if [[ -d "$SWIFT_SYSTEM_INTERNALS_DIR" ]]; then
   done
 fi
 
+CODE_SIGN_IDENTITY_ARGS=()
+if [[ -n "$SIGNING_CERT" ]]; then
+  CODE_SIGN_IDENTITY_ARGS+=("CODE_SIGN_IDENTITY=${SIGNING_CERT}")
+fi
+
+if [[ -n "$SIGNING_CERT" ]] && [[ "$SIGNING_CERT" != "Apple Development" ]] && [[ "$SIGNING_CERT" != "Apple Distribution" ]]; then
+  CODE_SIGN_STYLE_OVERRIDE="Manual"
+else
+  CODE_SIGN_STYLE_OVERRIDE="Automatic"
+fi
+
+if [[ "$CODE_SIGN_STYLE_OVERRIDE" == "Manual" ]]; then
+  CODE_SIGN_IDENTITY_ARGS+=("PROVISIONING_PROFILE_SPECIFIER=")
+  CODE_SIGN_IDENTITY_ARGS+=("PROVISIONING_PROFILE=")
+fi
+
 for ARCH in "${ARCH_MATRIX[@]}"; do
   ARCHIVE_PATH="$BUILD_DIR/$SCHEME-$ARCH.xcarchive"
   EXPORT_DIR="$BUILD_DIR/export-$ARCH"
@@ -187,10 +221,10 @@ for ARCH in "${ARCH_MATRIX[@]}"; do
       MARKETING_VERSION="$BASE_VERSION" \
       CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
       archive \
-      CODE_SIGN_STYLE=Automatic \
+      CODE_SIGN_STYLE="$CODE_SIGN_STYLE_OVERRIDE" \
       DEVELOPMENT_TEAM="${TEAM_ID:-}" \
-      CODE_SIGN_IDENTITY="${SIGNING_CERT}" \
       ARCHS="$ARCH" ONLY_ACTIVE_ARCH=YES \
+      "${CODE_SIGN_IDENTITY_ARGS[@]}" \
       "${EXTRA_XC_ARGS[@]}" \
       | xcpretty
   else
@@ -204,10 +238,10 @@ for ARCH in "${ARCH_MATRIX[@]}"; do
       MARKETING_VERSION="$BASE_VERSION" \
       CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
       archive \
-      CODE_SIGN_STYLE=Automatic \
+      CODE_SIGN_STYLE="$CODE_SIGN_STYLE_OVERRIDE" \
       DEVELOPMENT_TEAM="${TEAM_ID:-}" \
-      CODE_SIGN_IDENTITY="${SIGNING_CERT}" \
       ARCHS="$ARCH" ONLY_ACTIVE_ARCH=YES \
+      "${CODE_SIGN_IDENTITY_ARGS[@]}" \
       "${EXTRA_XC_ARGS[@]}"
   fi
 
