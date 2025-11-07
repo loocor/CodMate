@@ -104,7 +104,20 @@ struct ContentView: View {
         ]
     }
     enum DetailTab: Hashable { case timeline, review, terminal }
-    @State var selectedDetailTab: DetailTab = .timeline
+    // Per-session detail tab state: tracks which tab (timeline/review/terminal) each session is viewing
+    @State var sessionDetailTabs: [SessionSummary.ID: DetailTab] = [:]
+
+    // Computed property: current session's detail tab (defaults to .timeline for new sessions)
+    var selectedDetailTab: DetailTab {
+        get {
+            guard let focused = focusedSummary else { return .timeline }
+            return sessionDetailTabs[focused.id] ?? .timeline
+        }
+        nonmutating set {
+            guard let focused = focusedSummary else { return }
+            sessionDetailTabs[focused.id] = newValue
+        }
+    }
     // Track pending rekey for embedded New so we can move the PTY to the real new session id
     struct PendingEmbeddedRekey {
         let anchorId: String
@@ -201,6 +214,12 @@ struct ContentView: View {
                 #if canImport(SwiftTerm) && !APPSTORE
                     for s in summaries { TerminalSessionManager.shared.stop(key: s.id) }
                 #endif
+                // Clean up per-session state for deleted sessions
+                for id in ids {
+                    sessionDetailTabs.removeValue(forKey: id)
+                    embeddedInitialCommands.removeValue(forKey: id)
+                    runningSessionIDs.remove(id)
+                }
                 isPerformingAction = false
                 selection.subtract(ids)
                 normalizeSelection()

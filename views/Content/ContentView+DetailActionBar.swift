@@ -45,7 +45,11 @@ extension ContentView {
                         .init(title: "Timeline", systemImage: "clock", tag: .timeline),
                         .init(title: "Git Review", systemImage: "arrow.triangle.branch", tag: .review)
                     ]
-                    SegmentedIconPicker(items: items, selection: $selectedDetailTab)
+                    let selection = Binding<ContentView.DetailTab>(
+                        get: { selectedDetailTab },
+                        set: { selectedDetailTab = $0 }
+                    )
+                    SegmentedIconPicker(items: items, selection: selection)
                 #endif
             }
 
