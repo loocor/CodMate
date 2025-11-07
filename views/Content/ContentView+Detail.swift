@@ -13,10 +13,19 @@ extension ContentView {
                 .animation(nil, value: isListHidden)
         }
         .onChange(of: selectedDetailTab) { _, newVal in
-            guard newVal == .review else { return }
-            ensureRepoAccessForReview()
+            // Save current session's tab state
+            if let focused = focusedSummary {
+                sessionDetailTabs[focused.id] = newVal
+            }
+            if newVal == .review {
+                ensureRepoAccessForReview()
+            }
         }
-        .onChange(of: focusedSummary?.id) { _, _ in
+        .onChange(of: focusedSummary?.id) { _, newId in
+            // Restore new session's tab state
+            if let newId = newId {
+                selectedDetailTab = sessionDetailTabs[newId] ?? .timeline
+            }
             if selectedDetailTab == .review { ensureRepoAccessForReview() }
             normalizeDetailTabForTerminalAvailability()
         }

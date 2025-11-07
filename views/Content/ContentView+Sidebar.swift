@@ -62,6 +62,12 @@ extension ContentView {
                 .help("Some directories need authorization to access sessions data")
             }
 
+            UsageStatusControl(
+                snapshots: viewModel.usageSnapshots,
+                selectedProvider: $usageProviderSelection,
+                onRequestRefresh: { viewModel.requestUsageStatusRefresh(for: $0) }
+            )
+
             Button { Task { await viewModel.refreshSessions(force: true) } } label: {
                 if viewModel.isEnriching {
                     ProgressView().progressViewStyle(.circular).controlSize(.small).frame(width: 16, height: 16)

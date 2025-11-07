@@ -21,7 +21,24 @@ extension ContentView {
             } else {
                 // Non-review paths: either Terminal tab or Timeline
                 #if canImport(SwiftTerm) && !APPSTORE
-                if selectedDetailTab == .terminal, let terminalKey = activeTerminalKey() {
+                if selectedDetailTab == .terminal, let focused = focusedSummary, runningSessionIDs.contains(focused.id) {
+                    // Show the terminal for the currently focused session
+                    let terminalKey = focused.id
+                    let isConsole = viewModel.preferences.useEmbeddedCLIConsole
+                    let host = TerminalHostView(
+                        terminalKey: terminalKey,
+                        initialCommands: terminalHostInitialCommands(for: terminalKey),
+                        consoleSpec: isConsole ? consoleSpecForTerminalKey(terminalKey) : nil,
+                        font: makeTerminalFont(),
+                        cursorStyleOption: viewModel.preferences.terminalCursorStyleOption,
+                        isDark: colorScheme == .dark
+                    )
+                    host
+                        .id(terminalKey)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .padding(16)
+                } else if selectedDetailTab == .terminal, let terminalKey = fallbackRunningAnchorId() {
+                    // Fallback: show anchor terminal (for new sessions without a focused session yet)
                     let isConsole = viewModel.preferences.useEmbeddedCLIConsole
                     let host = TerminalHostView(
                         terminalKey: terminalKey,

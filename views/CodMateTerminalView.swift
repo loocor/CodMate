@@ -4,7 +4,6 @@ import Foundation
 #if canImport(SwiftTerm)
     import SwiftTerm
 
-    @MainActor
     /// A thin subclass to add image-paste support without modifying SwiftTerm.
     /// Behavior:
     /// - If the pasteboard contains an image reference (and no plain string), simulate Ctrl+V so the CLI can handle it.
@@ -17,7 +16,29 @@ import Foundation
         // Session identifier used to attribute OSC 777 notifications to a list row
         var sessionID: String?
 
+        private let processDispatchQueue = DispatchQueue(
+            label: "io.codmate.terminal.process", qos: .userInitiated)
+        private var pendingChunks: [[UInt8]] = []
+        private var pendingFlushWork: DispatchWorkItem?
+        private let flushInterval: TimeInterval = 0.002
+        private let maxBatchChunks = 32
+        private let immediateFlushThresholdBytes = 96
+        private let typingFlushWindow: TimeInterval = 0.08
+        private let typingChunkSoftLimit = 512
+        private var lastTypingAt: TimeInterval = 0
+        private let dragTypes: [NSPasteboard.PasteboardType] = [
+            .fileURL,
+            .URL,
+            NSPasteboard.PasteboardType("public.file-url"),
+            NSPasteboard.PasteboardType("public.url"),
+            NSPasteboard.PasteboardType("NSFilenamesPboardType"),
+        ]
+
         deinit {}
+
+        override func makeLocalProcess() -> LocalProcess {
+            LocalProcess(delegate: self, dispatchQueue: processDispatchQueue)
+        }
 
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
@@ -25,10 +46,21 @@ import Foundation
                 wantsLayer = true
                 layer?.backgroundColor = NSColor.clear.cgColor
                 installKeyMonitorIfNeeded()
+                registerForDraggedTypes(dragTypes)
             } else if let m = keyMonitor {
                 NSEvent.removeMonitor(m)
                 keyMonitor = nil
+                unregisterDraggedTypes()
             }
+        }
+
+        private func markTypingEvent() {
+            lastTypingAt = CFAbsoluteTimeGetCurrent()
+        }
+
+        override func send(source: TerminalView, data: ArraySlice<UInt8>) {
+            markTypingEvent()
+            super.send(source: source, data: data)
         }
 
         override func paste(_ sender: Any) {
@@ -161,6 +193,70 @@ import Foundation
             onScrolled?(position, self.scrollThumbsize)
         }
 
+        override func dataReceived(slice: ArraySlice<UInt8>) {
+            if Thread.isMainThread {
+                forwardDataReceived(slice: slice)
+                return
+            }
+            enqueueChunk(Array(slice))
+        }
+
+        private func enqueueChunk(_ chunk: [UInt8]) {
+            if shouldFlushImmediately(for: chunk) {
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    self.forwardDataReceived(slice: chunk[...])
+                }
+                return
+            }
+            pendingChunks.append(chunk)
+            if pendingChunks.count >= maxBatchChunks {
+                flushPendingChunks()
+            } else {
+                scheduleFlush()
+            }
+        }
+
+        private func shouldFlushImmediately(for chunk: [UInt8]) -> Bool {
+            if pendingChunks.isEmpty && chunk.count <= immediateFlushThresholdBytes {
+                return true
+            }
+            if chunk.count <= typingChunkSoftLimit {
+                let now = CFAbsoluteTimeGetCurrent()
+                if now - lastTypingAt <= typingFlushWindow {
+                    return true
+                }
+            }
+            return false
+        }
+
+        private func scheduleFlush() {
+            guard pendingFlushWork == nil else { return }
+            let work = DispatchWorkItem { [weak self] in
+                self?.flushPendingChunks()
+            }
+            pendingFlushWork = work
+            processDispatchQueue.asyncAfter(deadline: .now() + flushInterval, execute: work)
+        }
+
+        private func flushPendingChunks() {
+            pendingFlushWork?.cancel()
+            pendingFlushWork = nil
+            guard !pendingChunks.isEmpty else { return }
+            let chunks = pendingChunks
+            pendingChunks.removeAll(keepingCapacity: true)
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                for chunk in chunks {
+                    self.forwardDataReceived(slice: chunk[...])
+                }
+            }
+        }
+
+        private func forwardDataReceived(slice: ArraySlice<UInt8>) {
+            super.dataReceived(slice: slice)
+        }
+
         // TerminalDelegate notification hook: handle OSC 777 notifications emitted by the TUI/CLI.
         public func notify(source: Terminal, title: String, body: String) {
             Task { @MainActor in
@@ -208,13 +304,88 @@ import Foundation
         // No-op for now: path injection fallback removed in favor of Ctrl+V simulation.
 
         override func processTerminated(_ source: LocalProcess, exitCode: Int32?) {
-            super.processTerminated(source, exitCode: exitCode)
             let id = sessionID ?? ""
+            let action: () -> Void = { [weak self] in
+                guard let self else { return }
+                self.finalizeProcessTermination(source: source, exitCode: exitCode, sessionID: id)
+            }
+            if Thread.isMainThread {
+                action()
+            } else {
+                DispatchQueue.main.async(execute: action)
+            }
+        }
+
+        private func finalizeProcessTermination(
+            source: LocalProcess,
+            exitCode: Int32?,
+            sessionID: String
+        ) {
+            super.processTerminated(source, exitCode: exitCode)
             NotificationCenter.default.post(
                 name: .codMateTerminalExited,
                 object: nil,
-                userInfo: ["sessionID": id, "exitCode": exitCode as Any]
+                userInfo: ["sessionID": sessionID, "exitCode": exitCode as Any]
             )
+        }
+
+        // MARK: - Drag & Drop
+        override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+            return canAcceptDraggedFiles(sender.draggingPasteboard) ? .copy : []
+        }
+
+        override func prepareForDragOperation(_ sender: NSDraggingInfo) -> Bool {
+            return canAcceptDraggedFiles(sender.draggingPasteboard)
+        }
+
+        override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+            let pb = sender.draggingPasteboard
+            let urls = extractFileURLs(from: pb)
+            guard !urls.isEmpty else { return false }
+            insertPaths(urls)
+            return true
+        }
+
+        private func canAcceptDraggedFiles(_ pb: NSPasteboard) -> Bool {
+            return !extractFileURLs(from: pb).isEmpty
+        }
+
+        private func extractFileURLs(from pb: NSPasteboard) -> [URL] {
+            if let objs = pb.readObjects(
+                forClasses: [NSURL.self],
+                options: [.urlReadingFileURLsOnly: true]
+            ) as? [URL], !objs.isEmpty {
+                return objs
+            }
+            if let list = pb.propertyList(forType: NSPasteboard.PasteboardType("NSFilenamesPboardType"))
+                as? [String], !list.isEmpty
+            {
+                return list.map { URL(fileURLWithPath: $0) }
+            }
+            if let str = pb.string(forType: .fileURL),
+               let url = URL(string: str), url.isFileURL
+            {
+                return [url]
+            }
+            return []
+        }
+
+        private func insertPaths(_ urls: [URL]) {
+            let escaped = urls.map { shellEscapedPath($0.path) }
+            guard !escaped.isEmpty else { return }
+            let text = escaped.joined(separator: " ") + " "
+            send(txt: text)
+        }
+
+        private func shellEscapedPath(_ path: String) -> String {
+            if path.isEmpty { return "''" }
+            let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "/.-_"))
+            let needsQuotes = path.rangeOfCharacter(from: allowed.inverted) != nil
+            var output = path.replacingOccurrences(of: "'", with: "'\\''")
+            if needsQuotes {
+                output = "'\(output)'"
+            }
+            return output
         }
     }
 #endif

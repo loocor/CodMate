@@ -319,6 +319,7 @@ private struct SearchField: NSViewRepresentable {
         let field = NSSearchField(frame: .zero)
         field.placeholderString = placeholder
         field.delegate = context.coordinator
+        field.focusRingType = .none
         // Avoid premature submit during IME composition; we handle Return/Escape in delegate instead
         field.sendsSearchStringImmediately = false
         field.sendsWholeSearchString = true

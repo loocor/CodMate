@@ -45,11 +45,7 @@ extension ContentView {
                         .init(title: "Timeline", systemImage: "clock", tag: .timeline),
                         .init(title: "Git Review", systemImage: "arrow.triangle.branch", tag: .review)
                     ]
-                    let selection = Binding<ContentView.DetailTab>(
-                        get: { selectedDetailTab },
-                        set: { selectedDetailTab = $0 }
-                    )
-                    SegmentedIconPicker(items: items, selection: selection)
+                    SegmentedIconPicker(items: items, selection: $selectedDetailTab)
                 #endif
             }
 
@@ -188,7 +184,8 @@ extension ContentView {
                             query: $promptQuery,
                             loaded: $loadedPrompts,
                             hovered: $hoveredPromptKey,
-                            pendingDelete: $pendingDelete
+                            pendingDelete: $pendingDelete,
+                            onDismiss: { showPromptPicker = false }
                         )
                     }
                 }
@@ -334,6 +331,7 @@ private struct PromptsPopover: View {
     @Binding var loaded: [ContentView.SourcedPrompt]
     @Binding var hovered: String?
     @Binding var pendingDelete: ContentView.SourcedPrompt?
+    let onDismiss: () -> Void
     @FocusState private var searchFocused: Bool
 
     var body: some View {
@@ -389,6 +387,8 @@ private struct PromptsPopover: View {
                             pb.clearContents()
                             pb.setString(sp.command, forType: .string)
                             #endif
+                            // Auto-dismiss popover after selecting a preset
+                            onDismiss()
                         }
                     }
                     if shouldOfferAdd() {

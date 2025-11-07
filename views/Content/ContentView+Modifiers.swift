@@ -22,8 +22,7 @@ extension ContentView {
         }
         let viewWithTasks = applyTaskAndChangeModifiers(to: baseView)
         let viewWithNotifications = applyNotificationModifiers(to: viewWithTasks)
-        let finalView = applyDialogsAndAlerts(to: viewWithNotifications)
-        return finalView
+        return applyDialogsAndAlerts(to: viewWithNotifications)
     }
 
     func applyTaskAndChangeModifiers<V: View>(to view: V) -> some View {
