@@ -62,6 +62,7 @@ import Darwin
     @MainActor
     final class TerminalSessionManager {
         static let shared = TerminalSessionManager()
+        static let standardExecutablePrefix = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
         // Keyed by terminalKey (not session id). Allows multiple panes per session.
         private var views: [String: LocalProcessTerminalView] = [:]
         private var bootstrapped: Set<String> = []
@@ -472,9 +473,12 @@ import Darwin
         }
 
         private func buildEnvironment(consoleSpec: ConsoleSpec?) -> ([String: String], [String]) {
-            let prefixPATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
             var env = ProcessInfo.processInfo.environment
-            if let old = env["PATH"], !old.isEmpty { env["PATH"] = prefixPATH + ":" + old } else { env["PATH"] = prefixPATH }
+            if let old = env["PATH"], !old.isEmpty {
+                env["PATH"] = Self.standardExecutablePrefix + ":" + old
+            } else {
+                env["PATH"] = Self.standardExecutablePrefix
+            }
             env["LANG"] = env["LANG"] ?? "zh_CN.UTF-8"
             env["LC_ALL"] = env["LC_ALL"] ?? "zh_CN.UTF-8"
             env["LC_CTYPE"] = env["LC_CTYPE"] ?? "zh_CN.UTF-8"
@@ -497,6 +501,21 @@ import Darwin
             var args = spec.args
             args.insert(spec.executable, at: 0)
             return ("/usr/bin/env", args)
+        }
+
+        static func executableExists(_ name: String) -> Bool {
+            let fm = FileManager.default
+            let envPATH = ProcessInfo.processInfo.environment["PATH"] ?? ""
+            let combined = envPATH.isEmpty ? standardExecutablePrefix : standardExecutablePrefix + ":" + envPATH
+            for raw in combined.split(separator: ":") {
+                guard !raw.isEmpty else { continue }
+                let dir = String(raw)
+                let candidate = (dir as NSString).appendingPathComponent(name)
+                if fm.isExecutableFile(atPath: candidate) {
+                    return true
+                }
+            }
+            return false
         }
     }
 

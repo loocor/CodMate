@@ -5,27 +5,48 @@ extension ContentView {
     // Sticky detail action bar at the top of the detail column
     var detailActionBar: some View {
         HStack(spacing: 12) {
-            // Left: view mode segmented (Timeline | Git Review | Terminal*)
+            // Left: view mode segmented (Timeline | Git Review | Terminal)
             Group {
-                let isTerminalTab = (selectedDetailTab == .terminal)
-                let hasTerminal: Bool = {
-                    if let anchor = fallbackRunningAnchorId() { return !anchor.isEmpty }
-                    if let f = focusedSummary { return runningSessionIDs.contains(f.id) }
-                    return false
-                }()
-                let items: [SegmentedIconPicker<ContentView.DetailTab>.Item] = {
-                    if isTerminalTab {
-                        // In Terminal mode, only show the Terminal segment to avoid accidental switching
-                        return [.init(title: "Terminal", systemImage: "terminal", tag: .terminal)]
-                    } else {
-                        var arr: [SegmentedIconPicker<ContentView.DetailTab>.Item] = []
-                        arr.append(.init(title: "Timeline", systemImage: "clock", tag: .timeline))
-                        arr.append(.init(title: "Git Review", systemImage: "arrow.triangle.branch", tag: .review))
-                        if hasTerminal { arr.append(.init(title: "Terminal", systemImage: "terminal", tag: .terminal)) }
-                        return arr
-                    }
-                }()
-                SegmentedIconPicker(items: items, selection: $selectedDetailTab, isInteractive: !isTerminalTab)
+                #if canImport(SwiftTerm) && !APPSTORE
+                    let hasTerminal = hasAvailableEmbeddedTerminal()
+                    let items: [SegmentedIconPicker<ContentView.DetailTab>.Item] = [
+                        .init(title: "Timeline", systemImage: "clock", tag: .timeline),
+                        .init(title: "Git Review", systemImage: "arrow.triangle.branch", tag: .review),
+                        .init(title: "Terminal", systemImage: "terminal", tag: .terminal, isEnabled: hasTerminal)
+                    ]
+                    let selection = Binding<ContentView.DetailTab>(
+                        get: {
+                            // Always return the actual selectedDetailTab to ensure correct highlighting
+                            return selectedDetailTab
+                        },
+                        set: { newValue in
+                            // Re-evaluate terminal availability at SET time to get fresh value
+                            let currentHasTerminal = hasAvailableEmbeddedTerminal()
+                            if newValue == .terminal {
+                                guard currentHasTerminal else {
+                                    return
+                                }
+                                // When switching to terminal, ensure selectedTerminalKey points to focused session's terminal
+                                if let focused = focusedSummary, runningSessionIDs.contains(focused.id) {
+                                    selectedTerminalKey = focused.id
+                                } else if let anchorId = fallbackRunningAnchorId() {
+                                    selectedTerminalKey = anchorId
+                                } else {
+                                    // Fallback: use any available terminal
+                                    selectedTerminalKey = runningSessionIDs.first
+                                }
+                            }
+                            selectedDetailTab = newValue
+                        }
+                    )
+                    SegmentedIconPicker(items: items, selection: selection)
+                #else
+                    let items: [SegmentedIconPicker<ContentView.DetailTab>.Item] = [
+                        .init(title: "Timeline", systemImage: "clock", tag: .timeline),
+                        .init(title: "Git Review", systemImage: "arrow.triangle.branch", tag: .review)
+                    ]
+                    SegmentedIconPicker(items: items, selection: $selectedDetailTab)
+                #endif
             }
 
             Spacer(minLength: 12)
@@ -175,7 +196,7 @@ extension ContentView {
                     }
                 } else {
                     ChromedIconButton(systemImage: "arrow.uturn.backward", help: "Return to History") {
-                        let id = fallbackRunningAnchorId() ?? focused.id
+                        let id = activeTerminalKey() ?? focused.id
                         softReturnPending = true
                         requestStopEmbedded(forID: id)
                     }
@@ -192,6 +213,14 @@ private struct SegmentedIconPicker<Selection: Hashable>: NSViewRepresentable {
         let title: String
         let systemImage: String
         let tag: Selection
+        let isEnabled: Bool
+
+        init(title: String, systemImage: String, tag: Selection, isEnabled: Bool = true) {
+            self.title = title
+            self.systemImage = systemImage
+            self.tag = tag
+            self.isEnabled = isEnabled
+        }
     }
 
     let items: [Item]
@@ -232,6 +261,7 @@ private struct SegmentedIconPicker<Selection: Hashable>: NSViewRepresentable {
                 control.setImage(img, forSegment: i)
                 control.setImageScaling(.scaleProportionallyDown, forSegment: i)
             }
+            control.setEnabled(it.isEnabled, forSegment: i)
         }
         if let idx = items.firstIndex(where: { $0.tag == selection }) { control.selectedSegment = idx }
         else { control.selectedSegment = -1 }
@@ -246,6 +276,7 @@ private struct SegmentedIconPicker<Selection: Hashable>: NSViewRepresentable {
                 control.setImage(img, forSegment: i)
                 control.setImageScaling(.scaleProportionallyDown, forSegment: i)
             }
+            control.setEnabled(it.isEnabled, forSegment: i)
         }
     }
 
@@ -437,6 +468,7 @@ private struct SplitPrimaryMenuButton: View {
                     .foregroundStyle(.primary)
                     .padding(.horizontal, 12)
                     .frame(height: h)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
 

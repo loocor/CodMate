@@ -35,6 +35,72 @@ extension ContentView {
         return runningSessionIDs.first(where: { !realIds.contains($0) })
     }
 
+    func synchronizeSelectedTerminalKey() {
+        #if canImport(SwiftTerm) && !APPSTORE
+            if let key = selectedTerminalKey, runningSessionIDs.contains(key) { return }
+            selectedTerminalKey = runningSessionIDs.first
+        #else
+            selectedTerminalKey = nil
+        #endif
+    }
+
+    func activeTerminalKey() -> String? {
+        #if canImport(SwiftTerm) && !APPSTORE
+            if let key = selectedTerminalKey, runningSessionIDs.contains(key) {
+                return key
+            }
+            return runningSessionIDs.first
+        #else
+            return nil
+        #endif
+    }
+
+    func hasAvailableEmbeddedTerminal() -> Bool {
+        #if canImport(SwiftTerm) && !APPSTORE
+            // Check if there's a terminal available for the focused session
+            guard let focused = focusedSummary else {
+                // No focused session, check if there are any anchor terminals (new sessions)
+                return fallbackRunningAnchorId() != nil
+            }
+            // Check if focused session has a running terminal
+            return runningSessionIDs.contains(focused.id)
+        #else
+            return false
+        #endif
+    }
+
+    func normalizeDetailTabForTerminalAvailability() {
+        #if canImport(SwiftTerm) && !APPSTORE
+            if selectedDetailTab == .terminal && activeTerminalKey() == nil {
+                selectedDetailTab = .timeline
+            }
+        #else
+            if selectedDetailTab == .terminal {
+                selectedDetailTab = .timeline
+            }
+        #endif
+    }
+
+    func terminalHostInitialCommands(for key: String) -> String {
+        if let stored = embeddedInitialCommands[key] { return stored }
+        if let summary = summaryLookup[key] {
+            return viewModel.buildResumeCommands(session: summary)
+        }
+        return ""
+    }
+
+    func consoleSpecForTerminalKey(_ key: String) -> TerminalHostView.ConsoleSpec? {
+        #if canImport(SwiftTerm) && !APPSTORE
+            if key.hasPrefix("new-anchor:"), let spec = consoleSpecForAnchor(key) {
+                return spec
+            }
+            if let summary = summaryLookup[key] {
+                return consoleSpecForResume(summary)
+            }
+        #endif
+        return nil
+    }
+
     func canonicalizePath(_ path: String) -> String {
         let expanded = (path as NSString).expandingTildeInPath
         var standardized = URL(fileURLWithPath: expanded).standardizedFileURL.path

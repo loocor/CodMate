@@ -70,11 +70,11 @@ extension SessionActions {
                     process.standardOutput = pipe
                     process.standardError = pipe
                     var env = ProcessInfo.processInfo.environment
-                    let injectedPATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+                    let basePath = CLIEnvironment.buildBasePATH()
                     if let current = env["PATH"], !current.isEmpty {
-                        env["PATH"] = injectedPATH + ":" + current
+                        env["PATH"] = basePath + ":" + current
                     } else {
-                        env["PATH"] = injectedPATH
+                        env["PATH"] = basePath
                     }
                     // Prepare environment overlays (Claude Code picks up Anthropic-compatible vars)
                     if session.source == .claude {
@@ -376,7 +376,7 @@ extension SessionActions {
         let notice = "echo \"[CodMate] App Store 沙盒无法直接运行 \(cliName) CLI，请使用右侧按钮复制命令，在外部终端执行。\""
         return cd + "\n" + exports + "\n" + notice + "\n"
         #else
-        let injectedPATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:${PATH}"
+        let injectedPATH = CLIEnvironment.buildInjectedPATH()
         // Use bare executable name for embedded terminal to respect user's PATH resolution
         let execPath = session.source == .codex ? "codex" : "claude"
         let invocation = buildResumeCLIInvocation(
@@ -400,7 +400,7 @@ extension SessionActions {
         let notice = "echo \"[CodMate] App Store 沙盒无法直接运行 codex/claude CLI，请在外部终端执行复制的命令。\""
         return cd + "\n" + exports + "\n" + notice + "\n"
         #else
-        let injectedPATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:${PATH}"
+        let injectedPATH = CLIEnvironment.buildInjectedPATH()
         let invocation = buildNewSessionCLIInvocation(session: session, options: options)
         let command = "PATH=\(injectedPATH) \(invocation)"
         return cd + "\n" + exports + "\n" + command + "\n"
@@ -551,9 +551,9 @@ extension SessionActions {
         let prependString = prepend.filter {
             !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }.joined(separator: ":")
-        let defaultPATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
-        let injectedPATH =
-            (prependString.isEmpty ? defaultPATH : prependString + ":" + defaultPATH) + ":${PATH}"
+        let injectedPATH = CLIEnvironment.buildInjectedPATH(
+            additionalPaths: prependString.isEmpty ? [] : [prependString]
+        )
         // Exports: locale defaults + project env
         var exportLines: [String] = [
             "export LANG=zh_CN.UTF-8",
@@ -596,9 +596,9 @@ extension SessionActions {
         let prependString = prepend.filter {
             !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }.joined(separator: ":")
-        let defaultPATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
-        let injectedPATH =
-            (prependString.isEmpty ? defaultPATH : prependString + ":" + defaultPATH) + ":${PATH}"
+        let injectedPATH = CLIEnvironment.buildInjectedPATH(
+            additionalPaths: prependString.isEmpty ? [] : [prependString]
+        )
         var exportLines: [String] = [
             "export LANG=zh_CN.UTF-8",
             "export LC_ALL=zh_CN.UTF-8",
@@ -765,9 +765,9 @@ extension SessionActions {
         let prependString = prepend.filter {
             !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }.joined(separator: ":")
-        let defaultPATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
-        let injectedPATH =
-            (prependString.isEmpty ? defaultPATH : prependString + ":" + defaultPATH) + ":${PATH}"
+        let injectedPATH = CLIEnvironment.buildInjectedPATH(
+            additionalPaths: prependString.isEmpty ? [] : [prependString]
+        )
         var exportLines: [String] = [
             "export LANG=zh_CN.UTF-8",
             "export LC_ALL=zh_CN.UTF-8",
@@ -939,9 +939,9 @@ extension SessionActions {
         let prependString = prepend.filter {
             !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }.joined(separator: ":")
-        let defaultPATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
-        let injectedPATH =
-            (prependString.isEmpty ? defaultPATH : prependString + ":" + defaultPATH) + ":${PATH}"
+        let injectedPATH = CLIEnvironment.buildInjectedPATH(
+            additionalPaths: prependString.isEmpty ? [] : [prependString]
+        )
         var exportLines: [String] = [
             "export LANG=zh_CN.UTF-8",
             "export LC_ALL=zh_CN.UTF-8",

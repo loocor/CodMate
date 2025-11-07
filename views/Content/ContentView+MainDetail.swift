@@ -21,33 +21,18 @@ extension ContentView {
             } else {
                 // Non-review paths: either Terminal tab or Timeline
                 #if canImport(SwiftTerm) && !APPSTORE
-                if selectedDetailTab == .terminal, let anchorId = fallbackRunningAnchorId() {
+                if selectedDetailTab == .terminal, let terminalKey = activeTerminalKey() {
                     let isConsole = viewModel.preferences.useEmbeddedCLIConsole
                     let host = TerminalHostView(
-                        terminalKey: anchorId,
-                        initialCommands: embeddedInitialCommands[anchorId] ?? "",
-                        consoleSpec: isConsole ? consoleSpecForAnchor(anchorId) : nil,
+                        terminalKey: terminalKey,
+                        initialCommands: terminalHostInitialCommands(for: terminalKey),
+                        consoleSpec: isConsole ? consoleSpecForTerminalKey(terminalKey) : nil,
                         font: makeTerminalFont(),
                         cursorStyleOption: viewModel.preferences.terminalCursorStyleOption,
                         isDark: colorScheme == .dark
                     )
                     host
-                        .id(anchorId)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .padding(16)
-                } else if selectedDetailTab == .terminal, let focused = focusedSummary, runningSessionIDs.contains(focused.id) {
-                    let isConsole = viewModel.preferences.useEmbeddedCLIConsole
-                    let host = TerminalHostView(
-                        terminalKey: focused.id,
-                        initialCommands: embeddedInitialCommands[focused.id]
-                            ?? viewModel.buildResumeCommands(session: focused),
-                        consoleSpec: isConsole ? consoleSpecForResume(focused) : nil,
-                        font: makeTerminalFont(),
-                        cursorStyleOption: viewModel.preferences.terminalCursorStyleOption,
-                        isDark: colorScheme == .dark
-                    )
-                    host
-                        .id(focused.id)
+                        .id(terminalKey)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .padding(16)
                 } else if let focused = focusedSummary {

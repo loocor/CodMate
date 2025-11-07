@@ -18,6 +18,7 @@ struct ContentView: View {
     @State var selectingSessionsRoot = false
     // Track which sessions are running in embedded terminal
     @State var runningSessionIDs = Set<SessionSummary.ID>()
+    @State var selectedTerminalKey: SessionSummary.ID? = nil
     @State var isDetailMaximized = false
     @State var isListHidden = false
     @SceneStorage("cm.sidebarHidden") var storeSidebarHidden: Bool = false
@@ -230,6 +231,7 @@ struct ContentView: View {
         // Build the default resume commands for this session so TerminalHostView can inject them
         embeddedInitialCommands[session.id] = viewModel.buildResumeCommands(session: session)
         runningSessionIDs.insert(session.id)
+        selectedTerminalKey = session.id
         // Switch detail surface to Terminal when embedded starts
         selectedDetailTab = .terminal
         // User已接手：清除待跟进高亮
@@ -248,9 +250,14 @@ struct ContentView: View {
         #endif
         runningSessionIDs.remove(id)
         embeddedInitialCommands.removeValue(forKey: id)
+        if selectedTerminalKey == id {
+            selectedTerminalKey = runningSessionIDs.first
+        }
         // 退出内置终端：清除待跟进高亮
         viewModel.clearAwaitingFollowup(id)
-        if selectedDetailTab == .terminal { selectedDetailTab = .timeline }
+        if selectedDetailTab == .terminal {
+            selectedDetailTab = .timeline
+        }
         // If this stop is triggered by Return to History, do not alter sidebar/list
         // visibility to keep the view stable.
         if softReturnPending {
@@ -384,6 +391,12 @@ struct ContentView: View {
             return nil
         }
         let exe = (session.source == .codex) ? "codex" : "claude"
+        #if canImport(SwiftTerm)
+            guard TerminalSessionManager.executableExists(exe) else {
+                NSLog("⚠️ [ContentView] CLI executable %@ not found on PATH; falling back to shell", exe)
+                return nil
+            }
+        #endif
         let args = viewModel.buildResumeCLIArgs(session: session)
         let cwd = workingDirectory(for: session)
         AuthorizationHub.shared.ensureDirectoryAccessOrPrompt(
@@ -401,6 +414,12 @@ struct ContentView: View {
         // As a preview, run `codex` without args in the project directory if we can infer it.
         if let pending = pendingEmbeddedRekeys.first(where: { $0.anchorId == anchorId }) {
             let exe = "codex"
+            #if canImport(SwiftTerm)
+                guard TerminalSessionManager.executableExists(exe) else {
+                    NSLog("⚠️ [ContentView] CLI executable %@ not found on PATH for anchor %@; falling back to shell", exe, anchorId)
+                    return nil
+                }
+            #endif
             let args: [String] = []
             AuthorizationHub.shared.ensureDirectoryAccessOrPrompt(
                 directory: URL(fileURLWithPath: pending.expectedCwd, isDirectory: true),
@@ -438,7 +457,7 @@ struct ContentView: View {
             }
         }
         let cd = "cd " + shellEscapeForCD(cwd)
-        let injectedPATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:${PATH}"
+        let injectedPATH = CLIEnvironment.buildInjectedPATH()
         var exportLines = [
             "export LANG=zh_CN.UTF-8",
             "export LC_ALL=zh_CN.UTF-8",
@@ -460,6 +479,7 @@ struct ContentView: View {
         embeddedInitialCommands[anchorId] =
             preclear + "\n" + cd + "\n" + exports + "\n" + command + "\n"
         runningSessionIDs.insert(anchorId)
+        selectedTerminalKey = anchorId
         // Record pending rekey so that when the new session appears, we can move this PTY to the real id
         pendingEmbeddedRekeys.append(
             PendingEmbeddedRekey(
@@ -528,7 +548,7 @@ struct ContentView: View {
             }
         }
         let cd = "cd " + shellEscapeForCD(dir)
-        let injectedPATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:${PATH}"
+        let injectedPATH = CLIEnvironment.buildInjectedPATH()
         let exportLines = [
             "export LANG=zh_CN.UTF-8",
             "export LC_ALL=zh_CN.UTF-8",
@@ -545,6 +565,7 @@ struct ContentView: View {
         let anchorId = "new-anchor:project:\(project.id):\(Int(Date().timeIntervalSince1970)))"
         embeddedInitialCommands[anchorId] = preclear + "\n" + cd + "\n" + exports + "\n" + command + "\n"
         runningSessionIDs.insert(anchorId)
+        selectedTerminalKey = anchorId
         // Pending rekey: when the new session lands under this cwd, move PTY to the real id
         pendingEmbeddedRekeys.append(
             PendingEmbeddedRekey(
@@ -841,6 +862,9 @@ extension ContentView {
                     runningSessionIDs.remove(pending.anchorId)
                     runningSessionIDs.insert(winner.id)
                 }
+                if selectedTerminalKey == pending.anchorId {
+                    selectedTerminalKey = winner.id
+                }
                 if pending.selectOnSuccess || selection.contains(pending.anchorId) {
                     selection = [winner.id]
                 }
@@ -854,6 +878,9 @@ extension ContentView {
                     #endif
                     runningSessionIDs.remove(pending.anchorId)
                     embeddedInitialCommands.removeValue(forKey: pending.anchorId)
+                    if selectedTerminalKey == pending.anchorId {
+                        selectedTerminalKey = runningSessionIDs.first
+                    }
                 }
             }
         }

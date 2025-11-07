@@ -18,6 +18,11 @@ extension ContentView {
         }
         .onChange(of: focusedSummary?.id) { _, _ in
             if selectedDetailTab == .review { ensureRepoAccessForReview() }
+            normalizeDetailTabForTerminalAvailability()
+        }
+        .onChange(of: runningSessionIDs) { _, _ in
+            normalizeDetailTabForTerminalAvailability()
+            synchronizeSelectedTerminalKey()
         }
     }
 }
