@@ -112,21 +112,13 @@ struct ContentView: View {
         let selectOnSuccess: Bool
     }
     @State private var pendingEmbeddedRekeys: [PendingEmbeddedRekey] = []
-    // Provide a simple font chooser that prefers CJK-capable monospace
-    func makeTerminalFont(size: CGFloat) -> NSFont {
-        #if canImport(SwiftTerm)
-            let candidates = [
-                "Sarasa Mono SC", "Sarasa Term SC",
-                "LXGW WenKai Mono",
-                "Noto Sans Mono CJK SC", "NotoSansMonoCJKsc-Regular",
-                "JetBrains Mono", "JetBrainsMono-Regular", "JetBrains Mono NL",
-                "JetBrainsMonoNL Nerd Font Mono", "JetBrainsMono Nerd Font Mono",
-                "SF Mono", "Menlo",
-            ]
-            for name in candidates { if let f = NSFont(name: name, size: size) { return f } }
-        #endif
-        return NSFont.monospacedSystemFont(ofSize: size, weight: .regular)
+    func makeTerminalFont() -> NSFont {
+        TerminalFontResolver.resolvedFont(
+            name: viewModel.preferences.terminalFontName,
+            size: viewModel.preferences.clampedTerminalFontSize
+        )
     }
+
 
     init(viewModel: SessionListViewModel) {
         self.viewModel = viewModel

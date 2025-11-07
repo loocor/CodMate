@@ -434,6 +434,51 @@ struct SettingsView: View {
 
                             gridDivider
 
+                            // Row: Font family & size (system font panel)
+                            GridRow {
+                                VStack(alignment: .leading, spacing: 0) {
+                                    Text("Font & size")
+                                        .font(.subheadline).fontWeight(.medium)
+                                    Text("Opens the macOS font panel to pick a monospaced font.")
+                                        .font(.caption).foregroundColor(.secondary)
+                                }
+                                FontPickerButton(
+                                    fontName: $preferences.terminalFontName,
+                                    fontSize: $preferences.terminalFontSize
+                                )
+                                .frame(maxWidth: .infinity, alignment: .trailing)
+                                .gridColumnAlignment(.trailing)
+                            }
+
+                            gridDivider
+
+                            // Row: Cursor style only
+                            GridRow {
+                                VStack(alignment: .leading, spacing: 0) {
+                                    Text("Cursor style")
+                                        .font(.subheadline).fontWeight(.medium)
+                                    Text("Choose the caret shape shown inside the terminal.")
+                                        .font(.caption).foregroundColor(.secondary)
+                                }
+                                Picker(
+                                    "",
+                                    selection: Binding(
+                                        get: { preferences.terminalCursorStyleOption },
+                                        set: { preferences.terminalCursorStyleOption = $0 }
+                                    )
+                                ) {
+                                    ForEach(TerminalCursorStyleOption.allCases) { option in
+                                        Text(option.title).tag(option)
+                                    }
+                                }
+                                .labelsHidden()
+                                .pickerStyle(.menu)
+                                .frame(maxWidth: .infinity, alignment: .trailing)
+                                .gridColumnAlignment(.trailing)
+                            }
+
+                            gridDivider
+
                             // Row: Copy to clipboard
                             GridRow {
                                 VStack(alignment: .leading, spacing: 0) {

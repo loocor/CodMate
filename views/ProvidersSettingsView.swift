@@ -618,13 +618,14 @@ final class ProvidersVM: ObservableObject {
             )
         }
         
-        let defined = providerDefaultModel(from: p)
-        let matchingRow = rows.first(where: { $0.modelId == defined })
+        let matchingRow = providerDefaultModel(from: p).flatMap { model in
+            rows.first(where: { $0.modelId == model })
+        }
         let firstNonEmpty = rows.first(where: { !$0.modelId.isEmpty })
-        
+
         DispatchQueue.main.async {
             self.modelRows = rows
-            if let defined = defined, let match = matchingRow {
+            if let match = matchingRow {
                 self.defaultModelRowID = match.id
                 self.defaultModelId = match.modelId
             } else if let first = firstNonEmpty {

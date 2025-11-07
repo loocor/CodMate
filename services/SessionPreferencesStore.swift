@@ -1,6 +1,5 @@
 import Foundation
-
-import Foundation
+import CoreGraphics
 #if canImport(Darwin)
 import Darwin
 #endif
@@ -61,6 +60,9 @@ final class SessionPreferencesStore: ObservableObject {
         static let commitModelId = "git.review.commitModelId" // optional model id tied to provider
         // Terminal mode (DEV): use CLI console instead of shell
         static let terminalUseCLIConsole = "terminal.useCliConsole"
+        static let terminalFontName = "terminal.fontName"
+        static let terminalFontSize = "terminal.fontSize"
+        static let terminalCursorStyle = "terminal.cursorStyle"
     }
 
     init(
@@ -159,6 +161,11 @@ final class SessionPreferencesStore: ObservableObject {
             cliConsole = console
         #endif
         self.useEmbeddedCLIConsole = cliConsole
+        self.terminalFontName = defaults.string(forKey: Keys.terminalFontName) ?? ""
+        let storedFontSize = defaults.object(forKey: Keys.terminalFontSize) as? Double ?? 12.0
+        self.terminalFontSize = SessionPreferencesStore.clampFontSize(storedFontSize)
+        let storedCursor = defaults.string(forKey: Keys.terminalCursorStyle) ?? TerminalCursorStyleOption.blinkBlock.rawValue
+        self.terminalCursorStyleRaw = storedCursor
 
         // CLI policy defaults (with legacy value coercion)
         if let s = defaults.string(forKey: Keys.resumeSandboxMode), let val = SessionPreferencesStore.coerceSandboxMode(s) {
@@ -216,6 +223,10 @@ final class SessionPreferencesStore: ObservableObject {
 
     convenience init(defaults: UserDefaults = .standard) {
         self.init(defaults: defaults, fileManager: .default)
+    }
+
+    private static func clampFontSize(_ value: Double) -> Double {
+        return min(max(value, 8.0), 32.0)
     }
 
     static func defaultSessionsRoot(for homeDirectory: URL) -> URL {
@@ -392,5 +403,37 @@ final class SessionPreferencesStore: ObservableObject {
             }
             defaults.set(useEmbeddedCLIConsole, forKey: Keys.terminalUseCLIConsole)
         }
+    }
+
+    @Published var terminalFontName: String {
+        didSet {
+            defaults.set(terminalFontName, forKey: Keys.terminalFontName)
+        }
+    }
+
+    @Published var terminalFontSize: Double {
+        didSet {
+            let clamped = SessionPreferencesStore.clampFontSize(terminalFontSize)
+            if clamped != terminalFontSize {
+                terminalFontSize = clamped
+                return
+            }
+            defaults.set(terminalFontSize, forKey: Keys.terminalFontSize)
+        }
+    }
+
+    @Published var terminalCursorStyleRaw: String {
+        didSet {
+            defaults.set(terminalCursorStyleRaw, forKey: Keys.terminalCursorStyle)
+        }
+    }
+
+    var terminalCursorStyleOption: TerminalCursorStyleOption {
+        get { TerminalCursorStyleOption(rawValue: terminalCursorStyleRaw) ?? .blinkBlock }
+        set { terminalCursorStyleRaw = newValue.rawValue }
+    }
+
+    var clampedTerminalFontSize: CGFloat {
+        CGFloat(SessionPreferencesStore.clampFontSize(terminalFontSize))
     }
 }

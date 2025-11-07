@@ -27,7 +27,8 @@ extension ContentView {
                         terminalKey: anchorId,
                         initialCommands: embeddedInitialCommands[anchorId] ?? "",
                         consoleSpec: isConsole ? consoleSpecForAnchor(anchorId) : nil,
-                        font: makeTerminalFont(size: 12),
+                        font: makeTerminalFont(),
+                        cursorStyleOption: viewModel.preferences.terminalCursorStyleOption,
                         isDark: colorScheme == .dark
                     )
                     host
@@ -41,7 +42,8 @@ extension ContentView {
                         initialCommands: embeddedInitialCommands[focused.id]
                             ?? viewModel.buildResumeCommands(session: focused),
                         consoleSpec: isConsole ? consoleSpecForResume(focused) : nil,
-                        font: makeTerminalFont(size: 12),
+                        font: makeTerminalFont(),
+                        cursorStyleOption: viewModel.preferences.terminalCursorStyleOption,
                         isDark: colorScheme == .dark
                     )
                     host

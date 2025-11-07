@@ -7,7 +7,7 @@ import Foundation
     @MainActor
     /// A thin subclass to add image-paste support without modifying SwiftTerm.
     /// Behavior:
-    /// - If the pasteboard contains an image (and no plain string), paste as iTerm2 inline image (OSC 1337).
+    /// - If the pasteboard contains an image reference (and no plain string), simulate Ctrl+V so the CLI can handle it.
     /// - Otherwise, fall back to SwiftTerm's default text paste.
     final class CodMateTerminalView: LocalProcessTerminalView {
         private var keyMonitor: Any?
@@ -34,7 +34,7 @@ import Foundation
         override func paste(_ sender: Any) {
             let pb = NSPasteboard.general
 
-            let hasImage = (readImageData(from: pb) != nil)
+            let hasImage = pasteboardHasImage(pb)
             let pastedString = pb.string(forType: .string)
 
             // If clipboard contains an image, prefer image paste for Codex (simulate Ctrl+V)
@@ -182,63 +182,27 @@ import Foundation
 
         private static func looksLikeCompletion(title: String, body: String) -> Bool { true }
 
-        private func readImageData(from pb: NSPasteboard) -> Data? {
-            // 1) Direct NSImage objects
-            if let images = pb.readObjects(forClasses: [NSImage.self], options: nil) as? [NSImage],
-                let img = images.first,
-                let data = pngData(from: img)
-            {
-                return data
+        private func pasteboardHasImage(_ pb: NSPasteboard) -> Bool {
+            if pb.canReadObject(forClasses: [NSImage.self], options: nil) {
+                return true
             }
-
-            // 2) Raw image data on pasteboard (TIFF/PNG)
-            if let tiff = pb.data(forType: .tiff), let rep = NSBitmapImageRep(data: tiff),
-                let png = rep.representation(using: .png, properties: [:])
-            {
-                return png
-            }
-            if let png = pb.data(forType: .png) { return png }
-
-            // 3) File URLs that point to image files
-            if let urls = pb.readObjects(
-                forClasses: [NSURL.self],
-                options: [
-                    .urlReadingFileURLsOnly: true
-                ]) as? [URL]
-            {
-                for url in urls {
-                    if url.isFileURL, isImageFile(url), let data = try? Data(contentsOf: url) {
-                        return data
-                    }
+            if let types = pb.types {
+                if types.contains(.png) || types.contains(.tiff) || types.contains(.pdf) {
+                    return true
                 }
             }
-
-            return nil
-        }
-
-        private func pngData(from image: NSImage) -> Data? {
-            guard let tiff = image.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff) else {
-                return nil
+            if let urls = pb.readObjects(
+                forClasses: [NSURL.self],
+                options: [.urlReadingFileURLsOnly: true]
+            ) as? [URL] {
+                return urls.contains(where: { isImageFile($0) })
             }
-            return rep.representation(using: .png, properties: [:])
+            return false
         }
 
         private func isImageFile(_ url: URL) -> Bool {
             let exts = ["png", "jpg", "jpeg", "gif", "bmp", "tiff", "tif", "heic", "webp"]
             return exts.contains(url.pathExtension.lowercased())
-        }
-
-        private func pasteInlineImage(data: Data) {
-            // Encode as iTerm2 inline image (OSC 1337)
-            // ESC ] 1337 ; File=;inline=1;preserveAspectRatio=1;width=auto;height=auto : <base64> ST
-            let base64 = data.base64EncodedString()
-            let oscStart = "\u{001B}]"  // ESC ]
-            let st = "\u{001B}\\"  // ESC \
-            let payload =
-                "\(oscStart)1337;File=;inline=1;preserveAspectRatio=1;width=auto;height=auto:\(base64)\(st)"
-
-            // Feed into the emulator so it renders without sending junk to the child process
-            self.feed(text: payload)
         }
 
         // No-op for now: path injection fallback removed in favor of Ctrl+V simulation.

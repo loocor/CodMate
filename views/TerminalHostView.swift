@@ -13,6 +13,7 @@ import SwiftUI
         struct ConsoleSpec { let executable: String; let args: [String]; let cwd: String; let env: [String:String] }
         var consoleSpec: ConsoleSpec? = nil
         let font: NSFont
+        let cursorStyleOption: TerminalCursorStyleOption
         let isDark: Bool
 
         func makeCoordinator() -> Coordinator { Coordinator() }
@@ -43,6 +44,10 @@ import SwiftUI
                 v.nativeBackgroundColor = .clear
                 v.selectedTextBackgroundColor = NSColor(white: 0.7, alpha: 0.4)
             }
+        }
+
+        private func applyCursorStyle(_ v: LocalProcessTerminalView) {
+            v.getTerminal().setCursorStyle(cursorStyleOption.cursorStyleValue)
         }
 
         @MainActor
@@ -145,6 +150,7 @@ import SwiftUI
                     existing.font = font
                 }
                 applyTheme(existing)
+                applyCursorStyle(existing)
                 coordinator.scheduleRelayout(existing)
                 return
             }
@@ -160,6 +166,7 @@ import SwiftUI
                 }
             )
             applyTheme(v)
+            applyCursorStyle(v)
             v.disableBuiltInScroller()
             // Freeze grid reflow during live-resize; reflow once at the end to avoid duplicate/garbled text
             v.deferReflowDuringLiveResize = true
