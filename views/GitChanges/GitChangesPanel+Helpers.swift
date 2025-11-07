@@ -39,25 +39,6 @@ extension GitChangesPanel {
         return filter(nodes)
     }
 
-    func explorerSort(_ nodes: [FileNode]) -> [FileNode] {
-        func category(for node: FileNode) -> Int {
-            let isDot = node.name.hasPrefix(".")
-            if node.isDirectory {
-                return isDot ? 1 : 0
-            } else {
-                return isDot ? 3 : 2
-            }
-        }
-        return nodes.sorted {
-            let lhsCategory = category(for: $0)
-            let rhsCategory = category(for: $1)
-            if lhsCategory != rhsCategory {
-                return lhsCategory < rhsCategory
-            }
-            return $0.name.localizedStandardCompare($1.name) == .orderedAscending
-        }
-    }
-
     func isImagePath(_ path: String) -> Bool {
         let ext = URL(fileURLWithPath: path).pathExtension.lowercased()
         return ["png", "jpg", "jpeg", "gif", "bmp", "tiff", "tif", "heic", "heif", "webp"].contains(ext)
@@ -80,11 +61,8 @@ extension GitChangesPanel {
     }
 
     func rebuildNodes() {
-        let staged = vm.changes.filter { $0.staged != nil }
-        // Include MM files in the Unstaged view as well, to mirror Cursor/VS Code behavior
-        let unstaged = vm.changes.filter { $0.worktree != nil }
-        cachedNodesStaged = makeTree(from: staged)
-        cachedNodesUnstaged = makeTree(from: unstaged)
+        cachedNodesStaged = vm.treeSnapshot.staged
+        cachedNodesUnstaged = vm.treeSnapshot.unstaged
         rebuildDisplayed()
     }
 

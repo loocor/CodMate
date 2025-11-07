@@ -1,6 +1,6 @@
 import Foundation
 
-enum DateDimension: String, CaseIterable, Identifiable {
+enum DateDimension: String, CaseIterable, Identifiable, Sendable {
     case created
     case updated
 
@@ -13,4 +13,3 @@ enum DateDimension: String, CaseIterable, Identifiable {
         }
     }
 }
-

@@ -385,7 +385,7 @@ extension GitChangesPanel {
                     browserTotalEntries = 0
                 } else {
                     browserTreeError = nil
-                    browserNodes = explorerSort(loadResult.nodes)
+                    browserNodes = GitReviewTreeBuilder.explorerSort(loadResult.nodes)
                     browserTreeTruncated = loadResult.truncated
                     browserTotalEntries = loadResult.total
                     rebuildBrowserDisplayed()
@@ -412,7 +412,7 @@ extension GitChangesPanel {
             rows.append(row)
             if node.isDirectory, let key = node.dirPath ?? (depth == 0 ? node.name : nil) {
                 if forceExpand || expandedDirsBrowser.contains(key) {
-                    let children = explorerSort(node.children ?? [])
+                    let children = GitReviewTreeBuilder.explorerSort(node.children ?? [])
                     rows.append(contentsOf: flattenBrowserNodes(children, depth: depth + 1, forceExpand: forceExpand))
                 }
             }
@@ -461,10 +461,10 @@ extension GitChangesPanel {
                     nodes.append(FileNode(name: name, fullPath: filePath, dirPath: nil, children: nil))
                 } else {
                     let childrenNodes = convert(child, prefix: fullPath)
-                    nodes.append(FileNode(name: name, fullPath: nil, dirPath: fullPath, children: explorerSort(childrenNodes)))
+                    nodes.append(FileNode(name: name, fullPath: nil, dirPath: fullPath, children: GitReviewTreeBuilder.explorerSort(childrenNodes)))
                 }
             }
-            return explorerSort(nodes)
+            return GitReviewTreeBuilder.explorerSort(nodes)
         }
         return convert(root, prefix: nil)
     }

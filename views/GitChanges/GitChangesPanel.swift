@@ -19,8 +19,6 @@ struct GitChangesPanel: View {
     @State var expandedDirsUnstaged: Set<String> = []
     @State var treeQuery: String = ""
     // Cached trees for performance
-    @State var cachedNodes: [FileNode] = [] // legacy (all)
-    @State var displayedNodes: [FileNode] = [] // legacy (all)
     @State var cachedNodesStaged: [FileNode] = []
     @State var cachedNodesUnstaged: [FileNode] = []
     @State var displayedStaged: [FileNode] = []
@@ -279,53 +277,9 @@ struct GitChangesPanel: View {
     }
 
     // MARK: - File tree (grouped by directories)
-    struct FileNode: Identifiable {
-        let id = UUID()
-        var name: String
-        var fullPath: String? // non-nil for files
-        var dirPath: String? = nil // non-nil for directories
-        var children: [FileNode]? = nil
-        var isDirectory: Bool { dirPath != nil }
-    }
+    typealias FileNode = GitReviewNode
 
     // MARK: - TreeScope enum
     enum TreeScope { case unstaged, staged }
 
-    func makeTree(from changes: [GitService.Change]) -> [FileNode] {
-        // Build a recursive tree of directories → files
-        struct BuilderNode {
-            var children: [String: BuilderNode] = [:]
-            var filePath: String? = nil
-        }
-        var root = BuilderNode()
-        for c in changes {
-            let comps = c.path.split(separator: "/").map(String.init)
-            func insert(_ idx: Int, _ current: inout BuilderNode) {
-                if idx == comps.count - 1 {
-                    var leaf = current.children[comps[idx], default: BuilderNode()]
-                    leaf.filePath = c.path
-                    current.children[comps[idx]] = leaf
-                    return
-                }
-                var next = current.children[comps[idx], default: BuilderNode()]
-                insert(idx + 1, &next)
-                current.children[comps[idx]] = next
-            }
-            insert(0, &root)
-        }
-        func convert(_ b: BuilderNode, name: String? = nil) -> [FileNode] {
-            var nodes: [FileNode] = []
-            for (k, v) in b.children {
-                if let p = v.filePath, v.children.isEmpty {
-                    nodes.append(FileNode(name: k, fullPath: p, dirPath: nil, children: nil))
-                } else {
-                    let key = (name == nil) ? k : (name! + "/" + k)
-                    let children = explorerSort(convert(v, name: key))
-                    nodes.append(FileNode(name: k, fullPath: nil, dirPath: key, children: children))
-                }
-            }
-            return explorerSort(nodes)
-        }
-        return convert(root)
-    }
 }

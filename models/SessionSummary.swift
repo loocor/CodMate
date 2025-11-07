@@ -176,7 +176,7 @@ extension SessionSummary {
     }
 }
 
-enum SessionSortOrder: String, CaseIterable, Identifiable {
+enum SessionSortOrder: String, CaseIterable, Identifiable, Sendable {
     case mostRecent
     case longestDuration
     case mostActivity
@@ -247,7 +247,7 @@ enum SessionSortOrder: String, CaseIterable, Identifiable {
     }
 }
 
-struct SessionDaySection: Identifiable, Hashable {
+struct SessionDaySection: Identifiable, Hashable, Sendable {
     let id: Date
     let title: String
     let totalDuration: TimeInterval

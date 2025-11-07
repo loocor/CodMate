@@ -29,7 +29,7 @@ extension GitChangesPanel {
             )
 
             view = AnyView(
-                view.onChange(of: vm.changes) { _, _ in
+                view.onChange(of: vm.treeSnapshot) { _, _ in
                     onRebuildNodes()
                     onEnsureExpandAll()
                     if mode == .browser { onRefreshBrowserTree() }

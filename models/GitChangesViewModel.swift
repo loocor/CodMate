@@ -18,6 +18,7 @@ final class GitChangesViewModel: ObservableObject {
     @Published var isGenerating: Bool = false
     @Published private(set) var generatingRepoPath: String? = nil
     @Published private(set) var isResolvingRepo: Bool = true
+    @Published private(set) var treeSnapshot: GitReviewTreeSnapshot = .empty
 
     private let service = GitService()
     private var monitorWorktree: DirectoryMonitor?
@@ -25,6 +26,9 @@ final class GitChangesViewModel: ObservableObject {
     private var refreshTask: Task<Void, Never>? = nil
     private var repo: GitService.Repo? = nil
     private var generatingTask: Task<Void, Never>? = nil
+    private var treeBuildTask: Task<Void, Never>? = nil
+    private var diffTask: Task<Void, Never>? = nil
+    private var treeSnapshotGeneration: UInt64 = 0
 
     func attach(to directory: URL) {
         isResolvingRepo = true
@@ -40,12 +44,15 @@ final class GitChangesViewModel: ObservableObject {
     func detach() {
         monitorWorktree?.cancel(); monitorWorktree = nil
         monitorIndex?.cancel(); monitorIndex = nil
+        treeBuildTask?.cancel(); treeBuildTask = nil
+        diffTask?.cancel(); diffTask = nil
         repo = nil
         repoRoot = nil
         changes = []
         selectedPath = nil
         diffText = ""
         isResolvingRepo = false
+        treeSnapshot = .empty
     }
 
     private func resolveRepoRoot(from directory: URL) async {
@@ -134,6 +141,23 @@ final class GitChangesViewModel: ObservableObject {
         }
     }
 
+    private func scheduleTreeSnapshotRefresh() {
+        treeBuildTask?.cancel()
+        treeSnapshotGeneration &+= 1
+        let generation = treeSnapshotGeneration
+        let snapshotInput = self.changes
+        treeBuildTask = Task { [weak self] in
+            guard let self else { return }
+            let built = await Task.detached(priority: .userInitiated) {
+                GitReviewTreeBuilder.buildSnapshot(from: snapshotInput)
+            }.value
+            guard !Task.isCancelled else { return }
+            if self.treeSnapshotGeneration == generation {
+                self.treeSnapshot = built
+            }
+        }
+    }
+
     func refreshStatus() async {
         guard let repo = self.repo else {
             changes = []; selectedPath = nil; diffText = ""; return
@@ -169,6 +193,7 @@ final class GitChangesViewModel: ObservableObject {
         }
 
         changes = list
+        scheduleTreeSnapshotRefresh()
         // Maintain selection when possible
         if let sel = selectedPath, !list.contains(where: { $0.path == sel }) {
             selectedPath = nil
@@ -178,6 +203,7 @@ final class GitChangesViewModel: ObservableObject {
     }
 
     func refreshDetail() async {
+        diffTask?.cancel()
         guard let repo = self.repo, let path = selectedPath else { diffText = ""; return }
 
         // Ensure access before reading files
@@ -185,28 +211,58 @@ final class GitChangesViewModel: ObservableObject {
             _ = SecurityScopedBookmarks.shared.startAccessDynamic(for: repo.root)
         }
 
-        if showPreviewInsteadOfDiff {
-            let text = await service.readFile(in: repo, path: path)
-            diffText = text
-        } else {
-            // VS Code-like rule: staged selection shows index vs HEAD; unstaged shows worktree vs index.
-            // Fallbacks: if staged diff is empty but unstaged exists, show unstaged; if untracked and unstaged, synthesize.
-            let isStagedSide = (selectedSide == .staged)
-            var text = await service.diff(in: repo, path: path, staged: isStagedSide)
-            if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                // If we're on staged view but diff is empty, try unstaged view as a fallback
-                if isStagedSide {
-                    text = await service.diff(in: repo, path: path, staged: false)
-                }
-                // If still empty and the file is untracked in worktree, synthesize full-add diff
-                if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                   let kind = changes.first(where: { $0.path == path })?.worktree, kind == .untracked {
-                    let content = await service.readFile(in: repo, path: path)
-                    text = Self.syntheticDiff(forPath: path, content: content)
-                }
+        let showPreview = showPreviewInsteadOfDiff
+        let selectedSide = self.selectedSide
+        let changesSnapshot = self.changes
+        let service = self.service
+
+        diffTask = Task { [weak self] in
+            guard let self else { return }
+            let text = await Task.detached(priority: .userInitiated) {
+                await Self.computeDiffText(
+                    service: service,
+                    repo: repo,
+                    path: path,
+                    showPreview: showPreview,
+                    selectedSide: selectedSide,
+                    changes: changesSnapshot
+                )
+            }.value
+            guard !Task.isCancelled else { return }
+            if self.selectedPath == path,
+               self.selectedSide == selectedSide,
+               self.showPreviewInsteadOfDiff == showPreview {
+                self.diffText = text
             }
-            diffText = text
         }
+    }
+
+    private static func computeDiffText(
+        service: GitService,
+        repo: GitService.Repo,
+        path: String,
+        showPreview: Bool,
+        selectedSide: CompareSide,
+        changes: [GitService.Change]
+    ) async -> String {
+        if showPreview {
+            return await service.readFile(in: repo, path: path)
+        }
+
+        let isStagedSide = (selectedSide == .staged)
+        var text = await service.diff(in: repo, path: path, staged: isStagedSide)
+        if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            if isStagedSide {
+                text = await service.diff(in: repo, path: path, staged: false)
+            }
+            if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+               let kind = changes.first(where: { $0.path == path })?.worktree,
+               kind == .untracked {
+                let content = await service.readFile(in: repo, path: path)
+                text = syntheticDiff(forPath: path, content: content)
+            }
+        }
+        return text
     }
 
     private static func syntheticDiff(forPath path: String, content: String) -> String {
