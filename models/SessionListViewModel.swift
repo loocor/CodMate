@@ -11,7 +11,7 @@ final class SessionListViewModel: ObservableObject {
         didSet { scheduleFulltextSearchIfNeeded() }
     }
     @Published var sortOrder: SessionSortOrder = .mostRecent {
-        didSet { applyFilters() }
+        didSet { scheduleFiltersUpdate() }
     }
     @Published var isLoading = false
     @Published var isEnriching = false
@@ -21,14 +21,14 @@ final class SessionListViewModel: ObservableObject {
 
     // Title/Comment quick search for the middle list only
     @Published var quickSearchText: String = "" {
-        didSet { applyFilters() }
+        didSet { scheduleFiltersUpdate() }
     }
 
     // New filter state: supports combined filters
     @Published var selectedPath: String? = nil {
         didSet {
             guard !suppressFilterNotifications, oldValue != selectedPath else { return }
-            applyFilters()
+            scheduleFiltersUpdate()
             scheduleFilterRefresh(force: false)
         }
     }
@@ -42,8 +42,7 @@ final class SessionListViewModel: ObservableObject {
         didSet {
             guard !suppressFilterNotifications, oldValue != dateDimension else { return }
             enrichmentSnapshots.removeAll()
-            // Update UI immediately with current dataset under new dimension.
-            applyFilters()
+            scheduleFiltersUpdate()
             scheduleFilterRefresh(force: true)
         }
     }
@@ -73,6 +72,13 @@ final class SessionListViewModel: ObservableObject {
     private var enrichmentSnapshots: [String: Set<String>] = [:]
     private var suppressFilterNotifications = false
     private var scheduledFilterRefresh: Task<Void, Never>?
+    private var filterTask: Task<Void, Never>?
+    private var filterGeneration: UInt64 = 0
+    private var codexUsageTask: Task<Void, Never>?
+    private var claudeUsageTask: Task<Void, Never>?
+    private var pathTreeRefreshTask: Task<Void, Never>?
+    private var calendarRefreshTasks: [String: Task<Void, Never>] = [:]
+    private let sidebarStatsDebounceNanoseconds: UInt64 = 150_000_000
     private var currentMonthKey: String?
     private var currentMonthDimension: DateDimension = .updated
     // Quick pulse (cheap file mtime scan) state
@@ -85,6 +91,8 @@ final class SessionListViewModel: ObservableObject {
     @Published var globalSessionCount: Int = 0
     @Published private(set) var pathTreeRootPublished: PathTreeNode?
     @Published private var monthCountsCache: [String: [Int: Int]] = [:]  // key: "dim|yyyy-MM"
+    @Published private(set) var codexUsageStatus: CodexUsageStatus?
+    @Published private(set) var usageSnapshots: [UsageProviderKind: UsageProviderSnapshot] = [:]
     // Live activity indicators
     @Published private(set) var activeUpdatingIDs: Set<String> = []
     @Published private(set) var awaitingFollowupIDs: Set<String> = []
@@ -127,9 +135,8 @@ final class SessionListViewModel: ObservableObject {
     @Published var selectedProjectId: String? = nil {
         didSet {
             guard !suppressFilterNotifications, oldValue != selectedProjectId else { return }
-            // Switch off directory filter when a project is selected
             if selectedProjectId != nil { selectedPath = nil }
-            applyFilters()
+            scheduleFiltersUpdate()
         }
     }
     // Sidebar → Project-level New request when using embedded terminal
@@ -176,6 +183,10 @@ final class SessionListViewModel: ObservableObject {
         }
         startActivityPruneTicker()
         startIntentsCleanupTicker()
+        usageSnapshots[.claude] = UsageProviderSnapshot.placeholder(
+            .claude,
+            message: "Claude Code usage parsing will arrive in a future update."
+        )
     }
 
     // Immediate apply from UI (e.g., pressing Return in search field)
@@ -247,23 +258,14 @@ final class SessionListViewModel: ObservableObject {
             rebuildCanonicalCwdCache()
             invalidateCalendarCaches()
             await computeCalendarCaches()
-            applyFilters()
+            scheduleFiltersUpdate()
             startBackgroundEnrichment()
             currentMonthDimension = dateDimension
             currentMonthKey = monthKey(for: selectedDay, dimension: dateDimension)
             Task { await self.refreshGlobalCount() }
-            // Refresh path tree to ensure newly created files appear via refresh
-            Task {
-                async let codex = indexer.collectCWDCounts(root: preferences.sessionsRoot)
-                async let claude = claudeProvider.collectCWDCounts()
-                var counts = await codex
-                let claudeCounts = await claude
-                for (key, value) in claudeCounts {
-                    counts[key, default: 0] += value
-                }
-                let tree = counts.buildPathTreeFromCounts()
-                await MainActor.run { self.pathTreeRootPublished = tree }
-            }
+            refreshCodexUsageStatus()
+            refreshClaudeUsageStatus()
+            schedulePathTreeRefresh()
         } catch {
             if token == activeRefreshToken {
                 errorMessage = error.localizedDescription
@@ -332,6 +334,12 @@ final class SessionListViewModel: ObservableObject {
         directoryRefreshTask = nil
         quickPulseTask?.cancel()
         quickPulseTask = nil
+        codexUsageTask?.cancel()
+        codexUsageTask = nil
+        pathTreeRefreshTask?.cancel()
+        pathTreeRefreshTask = nil
+        for task in calendarRefreshTasks.values { task.cancel() }
+        calendarRefreshTasks.removeAll()
         isEnriching = false
         isLoading = false
     }
@@ -408,32 +416,13 @@ final class SessionListViewModel: ObservableObject {
             let currentKey = currentMonthKey,
             currentKey == key
         {
-            let counts = countsForLoadedMonth(dimension: dimension)
-            // Defer cache update to avoid publishing changes during view updates
-            Task { @MainActor in
-                self.monthCountsCache[key] = counts
-            }
-            // In Created mode, the currently loaded dataset may only contain a
-            // single day (scope = .day). Schedule a background full-month scan
-            // to replace the approximation so other days populate correctly.
-            if dimension == .created {
-                Task { [monthStart, dimension] in
-                    let precise = await indexer.computeCalendarCounts(
-                        root: preferences.sessionsRoot, monthStart: monthStart, dimension: dimension)
-                    Task { @MainActor in
-                        self.monthCountsCache[self.cacheKey(monthStart, dimension)] = precise
-                    }
-                }
-            }
+            let snapshot = allSessions
+            let counts = Self.computeMonthCounts(
+                sessions: snapshot, monthStart: monthStart, dimension: dimension)
+            scheduleCalendarCountsRefresh(monthStart: monthStart, dimension: dimension, skipDebounce: true)
             return counts
         }
-        Task { [monthStart, dimension] in
-            let counts = await indexer.computeCalendarCounts(
-                root: preferences.sessionsRoot, monthStart: monthStart, dimension: dimension)
-            await MainActor.run {
-                self.monthCountsCache[self.cacheKey(monthStart, dimension)] = counts
-            }
-        }
+        scheduleCalendarCountsRefresh(monthStart: monthStart, dimension: dimension, skipDebounce: false)
         return [:]
     }
 
@@ -447,16 +436,49 @@ final class SessionListViewModel: ObservableObject {
 
     func ensurePathTree() {
         if pathTreeRootPublished != nil { return }
-        Task {
-            async let codex = indexer.collectCWDCounts(root: preferences.sessionsRoot)
+        schedulePathTreeRefresh()
+    }
+
+    private func schedulePathTreeRefresh() {
+        pathTreeRefreshTask?.cancel()
+        let root = preferences.sessionsRoot
+        pathTreeRefreshTask = Task { [weak self] in
+            guard let self else { return }
+            defer { self.pathTreeRefreshTask = nil }
+            try? await Task.sleep(nanoseconds: sidebarStatsDebounceNanoseconds)
+            async let codex = indexer.collectCWDCounts(root: root)
             async let claude = claudeProvider.collectCWDCounts()
             var counts = await codex
             let claudeCounts = await claude
             for (key, value) in claudeCounts {
                 counts[key, default: 0] += value
             }
+            guard !Task.isCancelled else { return }
             let tree = counts.buildPathTreeFromCounts()
             await MainActor.run { self.pathTreeRootPublished = tree }
+        }
+    }
+
+    private func scheduleCalendarCountsRefresh(
+        monthStart: Date,
+        dimension: DateDimension,
+        skipDebounce: Bool
+    ) {
+        let key = cacheKey(monthStart, dimension)
+        calendarRefreshTasks[key]?.cancel()
+        calendarRefreshTasks[key] = Task { [weak self] in
+            guard let self else { return }
+            defer { self.calendarRefreshTasks.removeValue(forKey: key) }
+            if !skipDebounce {
+                try? await Task.sleep(nanoseconds: sidebarStatsDebounceNanoseconds)
+            }
+            let counts = await indexer.computeCalendarCounts(
+                root: preferences.sessionsRoot,
+                monthStart: monthStart,
+                dimension: dimension
+            )
+            guard !Task.isCancelled else { return }
+            await MainActor.run { self.monthCountsCache[key] = counts }
         }
     }
 
@@ -523,74 +545,144 @@ final class SessionListViewModel: ObservableObject {
         scheduleFilterRefresh(force: true)
     }
 
+    private func scheduleFiltersUpdate() {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            self.applyFilters()
+        }
+    }
+
     func applyFilters() {
+        filterTask?.cancel()
+
         guard !allSessions.isEmpty else {
+            filterTask = nil
             sections = []
             return
         }
 
-        var filtered = allSessions
+        filterGeneration &+= 1
+        let generation = filterGeneration
+        let snapshot = makeFilterSnapshot()
 
-        // 1. Directory filter
-        if let path = selectedPath {
-            let canonicalSelected = Self.canonicalPath(path)
-            let prefix = canonicalSelected == "/" ? "/" : canonicalSelected + "/"
-            filtered = filtered.filter { summary in
+        filterTask = Task { [weak self] in
+            guard let self else { return }
+            let computeTask = Task.detached(priority: .userInitiated) {
+                Self.computeFilteredSections(using: snapshot)
+            }
+            defer { computeTask.cancel() }
+            let result = await computeTask.value
+            guard !Task.isCancelled else { return }
+            guard self.filterGeneration == generation else { return }
+            if !result.newCanonicalEntries.isEmpty {
+                self.canonicalCwdCache.merge(result.newCanonicalEntries) { _, new in new }
+            }
+            self.sections = result.sections
+            self.filterTask = nil
+        }
+    }
+
+    private func makeFilterSnapshot() -> FilterSnapshot {
+        let pathFilter: FilterSnapshot.PathFilter? = {
+            guard let path = selectedPath else { return nil }
+            let canonical = Self.canonicalPath(path)
+            let prefix = canonical == "/" ? "/" : canonical + "/"
+            return .init(canonicalPath: canonical, prefix: prefix)
+        }()
+
+        let trimmedSearch = quickSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let quickNeedle = trimmedSearch.isEmpty ? nil : trimmedSearch.lowercased()
+
+        let projectFilter: FilterSnapshot.ProjectFilter? = {
+            guard let pid = selectedProjectId else { return nil }
+            var allowedProjects = Set(collectDescendants(of: pid, in: projects))
+            allowedProjects.insert(pid)
+            let allowedSources = projects.reduce(into: [String: Set<ProjectSessionSource>]()) {
+                $0[$1.id] = $1.sources
+            }
+            return .init(
+                memberships: projectMemberships,
+                allowedProjects: allowedProjects,
+                allowedSourcesByProject: allowedSources
+            )
+        }()
+
+        return FilterSnapshot(
+            sessions: allSessions,
+            pathFilter: pathFilter,
+            projectFilter: projectFilter,
+            selectedDays: selectedDays,
+            singleDay: selectedDay,
+            dateDimension: dateDimension,
+            quickSearchNeedle: quickNeedle,
+            sortOrder: sortOrder,
+            canonicalCache: canonicalCwdCache
+        )
+    }
+
+    nonisolated private static func computeFilteredSections(using snapshot: FilterSnapshot)
+        -> FilterComputationResult
+    {
+        var filtered = snapshot.sessions
+        var canonicalCache = snapshot.canonicalCache
+        var newCanonicalEntries: [String: String] = [:]
+
+        if let pathFilter = snapshot.pathFilter {
+            var matches: [SessionSummary] = []
+            matches.reserveCapacity(filtered.count)
+            for summary in filtered {
                 let canonical: String
-                if let cached = canonicalCwdCache[summary.id] {
+                if let cached = canonicalCache[summary.id] {
                     canonical = cached
                 } else {
                     let value = Self.canonicalPath(summary.cwd)
-                    canonicalCwdCache[summary.id] = value
+                    canonicalCache[summary.id] = value
+                    newCanonicalEntries[summary.id] = value
                     canonical = value
                 }
-                if canonical == canonicalSelected { return true }
-                return canonical.hasPrefix(prefix)
-            }
-        }
-
-        // 2. Project filter (based on ProjectsStore explicit mapping)
-        if let pid = selectedProjectId {
-            let memberships = projectMemberships
-            // include descendants of selected project
-            let descendants = Set(self.collectDescendants(of: pid, in: self.projects))
-            let allowedSourcesByProject = projects.reduce(into: [String: Set<ProjectSessionSource>]()) {
-                $0[$1.id] = $1.sources
-            }
-            filtered = filtered.filter { summary in
-                guard let assigned = memberships[summary.id] else { return false }
-                guard assigned == pid || descendants.contains(assigned) else { return false }
-                let allowed = allowedSourcesByProject[assigned] ?? ProjectSessionSource.allSet
-                return allowed.contains(summary.source.projectSource)
-            }
-        }
-
-        // 3. Date filter (supports multiple selected days)
-        let cal = Calendar.current
-        if !selectedDays.isEmpty {
-            filtered = filtered.filter { sess in
-                let ref: Date =
-                    (dateDimension == .created)
-                    ? sess.startedAt : (sess.lastUpdatedAt ?? sess.startedAt)
-                for d in selectedDays { if cal.isDate(ref, inSameDayAs: d) { return true } }
-                return false
-            }
-        } else if let day = selectedDay {
-            filtered = filtered.filter { sess in
-                switch dateDimension {
-                case .created:
-                    return cal.isDate(sess.startedAt, inSameDayAs: day)
-                case .updated:
-                    if let end = sess.lastUpdatedAt { return cal.isDate(end, inSameDayAs: day) }
-                    return cal.isDate(sess.startedAt, inSameDayAs: day)
+                if canonical == pathFilter.canonicalPath || canonical.hasPrefix(pathFilter.prefix) {
+                    matches.append(summary)
                 }
             }
+            filtered = matches
         }
 
-        // 4. Quick search (title/comment only, lightweight)
-        let q = quickSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !q.isEmpty {
-            let needle = q.lowercased()
+        if let projectFilter = snapshot.projectFilter {
+            let memberships = projectFilter.memberships
+            let allowedProjects = projectFilter.allowedProjects
+            let allowedSources = projectFilter.allowedSourcesByProject
+            var matches: [SessionSummary] = []
+            matches.reserveCapacity(filtered.count)
+            for summary in filtered {
+                guard let assigned = memberships[summary.id], allowedProjects.contains(assigned) else {
+                    continue
+                }
+                let allowedSet = allowedSources[assigned] ?? ProjectSessionSource.allSet
+                if allowedSet.contains(summary.source.projectSource) {
+                    matches.append(summary)
+                }
+            }
+            filtered = matches
+        }
+
+        let calendar = Calendar.current
+        if !snapshot.selectedDays.isEmpty {
+            let days = snapshot.selectedDays
+            filtered = filtered.filter { sess in
+                let ref = referenceDate(for: sess, dimension: snapshot.dateDimension)
+                for day in days {
+                    if calendar.isDate(ref, inSameDayAs: day) { return true }
+                }
+                return false
+            }
+        } else if let day = snapshot.singleDay {
+            filtered = filtered.filter { sess in
+                let ref = referenceDate(for: sess, dimension: snapshot.dateDimension)
+                return calendar.isDate(ref, inSameDayAs: day)
+            }
+        }
+
+        if let needle = snapshot.quickSearchNeedle {
             filtered = filtered.filter { s in
                 if s.effectiveTitle.lowercased().contains(needle) { return true }
                 if let c = s.userComment?.lowercased(), c.contains(needle) { return true }
@@ -598,14 +690,53 @@ final class SessionListViewModel: ObservableObject {
             }
         }
 
-        // 5. Sorting (dimension-aware for Recent)
-        filtered = sortOrder.sort(filtered, dimension: dateDimension)
+        filtered = snapshot.sortOrder.sort(filtered, dimension: snapshot.dateDimension)
+        let sections = groupSessions(filtered, dimension: snapshot.dateDimension)
 
-        // 6. Grouping
-        sections = Self.groupSessions(filtered, dimension: dateDimension)
+        return FilterComputationResult(
+            sections: sections,
+            newCanonicalEntries: newCanonicalEntries
+        )
     }
 
-    private static func groupSessions(_ sessions: [SessionSummary], dimension: DateDimension)
+    nonisolated private static func referenceDate(for session: SessionSummary, dimension: DateDimension)
+        -> Date
+    {
+        switch dimension {
+        case .created: return session.startedAt
+        case .updated: return session.lastUpdatedAt ?? session.startedAt
+        }
+    }
+
+    private struct FilterSnapshot: Sendable {
+        struct PathFilter: Sendable {
+            let canonicalPath: String
+            let prefix: String
+        }
+
+        struct ProjectFilter: Sendable {
+            let memberships: [String: String]
+            let allowedProjects: Set<String>
+            let allowedSourcesByProject: [String: Set<ProjectSessionSource>]
+        }
+
+        let sessions: [SessionSummary]
+        let pathFilter: PathFilter?
+        let projectFilter: ProjectFilter?
+        let selectedDays: Set<Date>
+        let singleDay: Date?
+        let dateDimension: DateDimension
+        let quickSearchNeedle: String?
+        let sortOrder: SessionSortOrder
+        let canonicalCache: [String: String]
+    }
+
+    private struct FilterComputationResult: Sendable {
+        let sections: [SessionDaySection]
+        let newCanonicalEntries: [String: String]
+    }
+
+    nonisolated private static func groupSessions(_ sessions: [SessionSummary], dimension: DateDimension)
         -> [SessionDaySection]
     {
         let calendar = Calendar.current
@@ -656,7 +787,7 @@ final class SessionListViewModel: ObservableObject {
     // MARK: - Fulltext search
 
     private func scheduleFulltextSearchIfNeeded() {
-        applyFilters()  // still update with metadata-only matches quickly
+        scheduleFiltersUpdate()  // update metadata-only matches quickly
         fulltextTask?.cancel()
         let term = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !term.isEmpty else {
@@ -828,7 +959,7 @@ final class SessionListViewModel: ObservableObject {
             })
     }
 
-    static func canonicalPath(_ path: String) -> String {
+    nonisolated static func canonicalPath(_ path: String) -> String {
         let expanded = (path as NSString).expandingTildeInPath
         var standardized = URL(fileURLWithPath: expanded).standardizedFileURL.path
         if standardized.count > 1 && standardized.hasSuffix("/") {
@@ -1070,23 +1201,16 @@ final class SessionListViewModel: ObservableObject {
         }
     }
 
-    private func countsForLoadedMonth(dimension: DateDimension) -> [Int: Int] {
+    nonisolated private static func computeMonthCounts(
+        sessions: [SessionSummary],
+        monthStart: Date,
+        dimension: DateDimension
+    ) -> [Int: Int] {
         var counts: [Int: Int] = [:]
         let calendar = Calendar.current
-        // Get the currently selected month (prefer single selectedDay; otherwise empty)
-        guard let selectedDay = selectedDay else { return [:] }
-        let monthStart = calendar.date(
-            from: calendar.dateComponents([.year, .month], from: selectedDay))!
-
-        for session in allSessions {
-            let referenceDate: Date
-            switch dimension {
-            case .created:
-                referenceDate = session.startedAt
-            case .updated:
-                referenceDate = session.lastUpdatedAt ?? session.startedAt
-            }
-            // Verify the date is within the current month
+        for session in sessions {
+            let referenceDate: Date =
+                (dimension == .created) ? session.startedAt : (session.lastUpdatedAt ?? session.startedAt)
             guard calendar.isDate(referenceDate, equalTo: monthStart, toGranularity: .month) else {
                 continue
             }
@@ -1114,6 +1238,109 @@ extension SessionListViewModel {
         async let claude = claudeProvider.countAllSessions()
         let total = await codex + claude
         await MainActor.run { self.globalSessionCount = total }
+    }
+
+    /// User-driven refresh for usage status (status capsule tap / Command+R fallback).
+    func requestUsageStatusRefresh(for provider: UsageProviderKind) {
+        switch provider {
+        case .codex:
+            refreshCodexUsageStatus()
+        case .claude:
+            refreshClaudeUsageStatus()
+        }
+    }
+
+    private func refreshCodexUsageStatus() {
+        codexUsageTask?.cancel()
+        let candidates = latestCodexSessions(limit: 12)
+        guard !candidates.isEmpty else {
+            codexUsageStatus = nil
+            return
+        }
+
+        codexUsageTask = Task { [weak self] in
+            let snapshot = await Task.detached(priority: .utility) { () -> TokenUsageSnapshot? in
+                let loader = SessionTimelineLoader()
+                for session in candidates {
+                    if let snapshot = loader.loadLatestTokenUsageWithFallback(url: session.fileURL) {
+                        return snapshot
+                    }
+                }
+                return nil
+            }.value
+
+            await MainActor.run {
+                guard let self else { return }
+                let codexStatus = snapshot.map { CodexUsageStatus(snapshot: $0) }
+                self.codexUsageStatus = codexStatus
+                if let codex = codexStatus {
+                    self.usageSnapshots[.codex] = codex.asProviderSnapshot()
+                } else {
+                    self.usageSnapshots[.codex] = UsageProviderSnapshot(
+                        provider: .codex,
+                        title: UsageProviderKind.codex.displayName,
+                        availability: .empty,
+                        metrics: [],
+                        updatedAt: nil,
+                        statusMessage: "No Codex sessions found yet."
+                    )
+                }
+            }
+        }
+    }
+
+    private func latestCodexSessions(limit: Int) -> [SessionSummary] {
+        let sorted = allSessions
+            .filter { $0.source == .codex }
+            .sorted { ($0.lastUpdatedAt ?? $0.startedAt) > ($1.lastUpdatedAt ?? $1.startedAt) }
+        guard !sorted.isEmpty else { return [] }
+        return Array(sorted.prefix(limit))
+    }
+
+    private func refreshClaudeUsageStatus() {
+        claudeUsageTask?.cancel()
+        let candidates = latestClaudeSessions(limit: 36)
+        guard !candidates.isEmpty else {
+            usageSnapshots[.claude] = UsageProviderSnapshot(
+                provider: .claude,
+                title: UsageProviderKind.claude.displayName,
+                availability: .empty,
+                metrics: [],
+                updatedAt: nil,
+                statusMessage: "No Claude sessions found yet."
+            )
+            return
+        }
+
+        claudeUsageTask = Task { [weak self] in
+            let status = await Task.detached(priority: .utility) { () -> ClaudeUsageStatus? in
+                ClaudeUsageAnalyzer().buildStatus(from: candidates)
+            }.value
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                guard let self else { return }
+                if let status {
+                    self.usageSnapshots[.claude] = status.asProviderSnapshot()
+                } else {
+                    self.usageSnapshots[.claude] = UsageProviderSnapshot(
+                        provider: .claude,
+                        title: UsageProviderKind.claude.displayName,
+                        availability: .empty,
+                        metrics: [],
+                        updatedAt: nil,
+                        statusMessage: "Claude usage data is unavailable."
+                    )
+                }
+            }
+        }
+    }
+
+    private func latestClaudeSessions(limit: Int) -> [SessionSummary] {
+        let sorted = allSessions
+            .filter { $0.source == .claude }
+            .sorted { ($0.lastUpdatedAt ?? $0.startedAt) > ($1.lastUpdatedAt ?? $1.startedAt) }
+        guard !sorted.isEmpty else { return [] }
+        return Array(sorted.prefix(limit))
     }
 
     // MARK: - Sandbox Permission Helpers

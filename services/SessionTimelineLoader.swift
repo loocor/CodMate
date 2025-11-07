@@ -378,4 +378,272 @@ struct SessionTimelineLoader {
             rawText: event.text
         )
     }
+
+    func loadLatestTokenUsage(url: URL) throws -> TokenUsageSnapshot? {
+        let data = try Data(contentsOf: url, options: [.mappedIfSafe])
+        guard !data.isEmpty else { return nil }
+        let newline: UInt8 = 0x0A
+        let carriageReturn: UInt8 = 0x0D
+        var latest: TokenUsageSnapshot?
+
+        for var slice in data.split(separator: newline, omittingEmptySubsequences: true) {
+            if slice.last == carriageReturn { slice = slice.dropLast() }
+            guard !slice.isEmpty else { continue }
+            guard let row = try? decoder.decode(SessionRow.self, from: Data(slice)) else { continue }
+            guard case let .eventMessage(payload) = row.kind else { continue }
+            if payload.type.lowercased() == "token_count",
+               let snapshot = makeTokenUsageSnapshot(timestamp: row.timestamp, payload: payload)
+            {
+                latest = snapshot
+            }
+        }
+
+        return latest
+    }
+
+    private func makeTokenUsageSnapshot(timestamp: Date, payload: EventMessagePayload) -> TokenUsageSnapshot? {
+        let info = payload.info
+        let totalTokens = info?.value(forKeyPath: ["last_token_usage", "total_tokens"])?.intValue
+            ?? info?.value(forKeyPath: ["total_token_usage", "total_tokens"])?.intValue
+        let contextWindow = info?.value(forKeyPath: ["model_context_window"])?.intValue
+
+        let primaryRate = RateWindowSnapshot(json: payload.rateLimits, prefix: "primary", timestamp: timestamp)
+        let secondaryRate = RateWindowSnapshot(json: payload.rateLimits, prefix: "secondary", timestamp: timestamp)
+
+        if totalTokens == nil,
+           contextWindow == nil,
+           primaryRate.isEmpty,
+           secondaryRate.isEmpty
+        {
+            return nil
+        }
+
+        return TokenUsageSnapshot(
+            timestamp: timestamp,
+            totalTokens: totalTokens,
+            contextWindow: contextWindow,
+            primaryPercent: primaryRate.usedPercent,
+            primaryWindowMinutes: primaryRate.windowMinutes,
+            primaryResetAt: primaryRate.resetDate,
+            secondaryPercent: secondaryRate.usedPercent,
+            secondaryWindowMinutes: secondaryRate.windowMinutes,
+            secondaryResetAt: secondaryRate.resetDate
+        )
+    }
+}
+
+struct TokenUsageSnapshot: Equatable {
+    let timestamp: Date
+    let totalTokens: Int?
+    let contextWindow: Int?
+    let primaryPercent: Double?
+    let primaryWindowMinutes: Int?
+    let primaryResetAt: Date?
+    let secondaryPercent: Double?
+    let secondaryWindowMinutes: Int?
+    let secondaryResetAt: Date?
+}
+
+fileprivate struct TokenUsageFallbackParser {
+    private let isoFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+
+    func loadLatest(url: URL) -> TokenUsageSnapshot? {
+        guard let data = try? Data(contentsOf: url, options: [.mappedIfSafe]), !data.isEmpty else { return nil }
+        let newline: UInt8 = 0x0A
+        let carriageReturn: UInt8 = 0x0D
+        var latest: TokenUsageSnapshot?
+
+        for var slice in data.split(separator: newline, omittingEmptySubsequences: true) {
+            if slice.last == carriageReturn { slice = slice.dropLast() }
+            guard let snapshot = parseLine(Data(slice)) else { continue }
+            latest = snapshot
+        }
+
+        return latest
+    }
+
+    private func parseLine(_ data: Data) -> TokenUsageSnapshot? {
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let payload = json["payload"] as? [String: Any],
+              let type = (payload["type"] as? String)?.lowercased(),
+              type == "token_count",
+              let timestampString = json["timestamp"] as? String,
+              let timestamp = isoFormatter.date(from: timestampString) ?? ISO8601DateFormatter().date(from: timestampString)
+        else {
+            return nil
+        }
+
+        let info = payload["info"] as? [String: Any]
+        let rateLimits = payload["rate_limits"] as? [String: Any]
+        let totalTokens = TokenUsageValueParser.int(TokenUsageValueParser.value(in: info, keyPath: ["total_token_usage", "total_tokens"]))
+        let contextWindow = TokenUsageValueParser.int(info?["model_context_window"])
+        let primary = RateLimitComponents(json: rateLimits, prefix: "primary", timestamp: timestamp)
+        let secondary = RateLimitComponents(json: rateLimits, prefix: "secondary", timestamp: timestamp)
+
+        if totalTokens == nil,
+           contextWindow == nil,
+           primary.isEmpty,
+           secondary.isEmpty
+        {
+            return nil
+        }
+
+        return TokenUsageSnapshot(
+            timestamp: timestamp,
+            totalTokens: totalTokens,
+            contextWindow: contextWindow,
+            primaryPercent: primary.usedPercent,
+            primaryWindowMinutes: primary.windowMinutes,
+            primaryResetAt: primary.resetDate,
+            secondaryPercent: secondary.usedPercent,
+            secondaryWindowMinutes: secondary.windowMinutes,
+            secondaryResetAt: secondary.resetDate
+        )
+    }
+}
+
+extension SessionTimelineLoader {
+    func loadLatestTokenUsageWithFallback(url: URL) -> TokenUsageSnapshot? {
+        if let snapshot = try? loadLatestTokenUsage(url: url) {
+            return snapshot
+        }
+        return TokenUsageFallbackParser().loadLatest(url: url)
+    }
+}
+
+private struct RateLimitComponents {
+    var usedPercent: Double?
+    var windowMinutes: Int?
+    var resetDate: Date?
+
+    var isEmpty: Bool { usedPercent == nil && windowMinutes == nil && resetDate == nil }
+
+    init(json: [String: Any]?, prefix: String, timestamp: Date) {
+        if let nested = json?[prefix] as? [String: Any] {
+            parse(values: nested, timestamp: timestamp)
+            return
+        }
+
+        guard let json else { return }
+        var extracted: [String: Any] = [:]
+        extracted["used_percent"] = json["\(prefix)_used_percent"]
+        extracted["window_minutes"] = json["\(prefix)_window_minutes"]
+        extracted["resets_in_seconds"] = json["\(prefix)_resets_in_seconds"]
+        extracted["resets_at"] = json["\(prefix)_resets_at"]
+        parse(values: extracted, timestamp: timestamp)
+    }
+
+    private mutating func parse(values: [String: Any], timestamp: Date) {
+        usedPercent = TokenUsageValueParser.double(values["used_percent"])
+        windowMinutes = TokenUsageValueParser.int(values["window_minutes"])
+        if let resetsAt = TokenUsageValueParser.double(values["resets_at"]) {
+            resetDate = Date(timeIntervalSince1970: resetsAt)
+        } else if let resetsInSeconds = TokenUsageValueParser.double(values["resets_in_seconds"]) {
+            resetDate = timestamp.addingTimeInterval(resetsInSeconds)
+        }
+    }
+}
+
+private enum TokenUsageValueParser {
+    static func value(in root: Any?, keyPath: [String]) -> Any? {
+        var current = root
+        for key in keyPath {
+            guard let dict = current as? [String: Any] else { return nil }
+            current = dict[key]
+        }
+        return current
+    }
+
+    static func double(_ value: Any?) -> Double? {
+        switch value {
+        case let number as NSNumber:
+            return number.doubleValue
+        case let string as String:
+            return Double(string)
+        default:
+            return nil
+        }
+    }
+
+    static func int(_ value: Any?) -> Int? {
+        switch value {
+        case let number as NSNumber:
+            return number.intValue
+        case let string as String:
+            return Int(string)
+        default:
+            return nil
+        }
+    }
+}
+
+private struct RateWindowSnapshot {
+    var usedPercent: Double?
+    var windowMinutes: Int?
+    var resetsInSeconds: Double?
+    var resetDate: Date? {
+        guard let resetsInSeconds, let referenceTimestamp else { return nil }
+        return referenceTimestamp.addingTimeInterval(resetsInSeconds)
+    }
+
+    private let referenceTimestamp: Date?
+
+    init(json: JSONValue?, prefix: String, timestamp: Date) {
+        referenceTimestamp = timestamp
+        guard let json else { return }
+        guard case let .object(dict) = json else { return }
+
+        if let nested = dict[prefix] {
+            usedPercent = nested.value(forKeyPath: ["used_percent"])?.doubleValue
+            windowMinutes = nested.value(forKeyPath: ["window_minutes"])?.intValue
+            resetsInSeconds = nested.value(forKeyPath: ["resets_in_seconds"])?.doubleValue
+        } else {
+            usedPercent = dict["\(prefix)_used_percent"]?.doubleValue
+            windowMinutes = dict["\(prefix)_window_minutes"]?.intValue
+            resetsInSeconds = dict["\(prefix)_resets_in_seconds"]?.doubleValue
+        }
+    }
+
+    var isEmpty: Bool {
+        usedPercent == nil && windowMinutes == nil && resetsInSeconds == nil
+    }
+}
+
+private extension JSONValue {
+    func value(forKeyPath path: [String]) -> JSONValue? {
+        guard !path.isEmpty else { return self }
+        var current: JSONValue = self
+        for key in path {
+            guard case let .object(dict) = current, let next = dict[key] else { return nil }
+            current = next
+        }
+        return current
+    }
+
+    var doubleValue: Double? {
+        switch self {
+        case .number(let value):
+            return value
+        case .string(let string):
+            return Double(string)
+        case .bool(let bool):
+            return bool ? 1 : 0
+        default:
+            return nil
+        }
+    }
+
+    var intValue: Int? {
+        if case let .number(value) = self {
+            return Int(value)
+        }
+        if case let .string(string) = self {
+            return Int(string)
+        }
+        return nil
+    }
 }
