@@ -1,0 +1,211 @@
+import Foundation
+
+struct CodexUsageStatus: Equatable {
+    let updatedAt: Date
+    let contextUsedTokens: Int?
+    let contextLimitTokens: Int?
+    let primaryWindowUsedPercent: Double?
+    let primaryWindowMinutes: Int?
+    let primaryResetAt: Date?
+    let secondaryWindowUsedPercent: Double?
+    let secondaryWindowMinutes: Int?
+    let secondaryResetAt: Date?
+
+    var contextUsedPercent: Double? {
+        guard
+            let used = contextUsedTokens,
+            let limit = contextLimitTokens,
+            limit > 0
+        else { return nil }
+        return Double(used) / Double(limit)
+    }
+
+    init(
+        updatedAt: Date,
+        contextUsedTokens: Int?,
+        contextLimitTokens: Int?,
+        primaryWindowUsedPercent: Double?,
+        primaryWindowMinutes: Int?,
+        primaryResetAt: Date?,
+        secondaryWindowUsedPercent: Double?,
+        secondaryWindowMinutes: Int?,
+        secondaryResetAt: Date?
+    ) {
+        self.updatedAt = updatedAt
+        self.contextUsedTokens = contextUsedTokens
+        self.contextLimitTokens = contextLimitTokens
+        self.primaryWindowUsedPercent = primaryWindowUsedPercent
+        self.primaryWindowMinutes = primaryWindowMinutes
+        self.primaryResetAt = primaryResetAt
+        self.secondaryWindowUsedPercent = secondaryWindowUsedPercent
+        self.secondaryWindowMinutes = secondaryWindowMinutes
+        self.secondaryResetAt = secondaryResetAt
+    }
+}
+
+extension CodexUsageStatus {
+    var contextUsageText: String? {
+        guard let used = contextUsedTokens, let limit = contextLimitTokens else { return nil }
+        return "\(TokenFormatter.string(from: used)) used / \(TokenFormatter.string(from: limit)) total"
+    }
+
+    var contextPercentText: String? {
+        guard let percent = contextUsedPercent else { return nil }
+        return NumberFormatter.compactPercentFormatter.string(from: NSNumber(value: percent))
+            ?? String(format: "%.0f%%", percent * 100)
+    }
+
+    var primaryPercentText: String? {
+        guard let percent = primaryWindowUsedPercent else { return nil }
+        return NumberFormatter.compactPercentFormatter.string(from: NSNumber(value: percent / 100.0))
+            ?? String(format: "%.0f%%", percent)
+    }
+
+    var secondaryPercentText: String? {
+        guard let percent = secondaryWindowUsedPercent else { return nil }
+        return NumberFormatter.compactPercentFormatter.string(from: NSNumber(value: percent / 100.0))
+            ?? String(format: "%.0f%%", percent)
+    }
+
+    var primaryUsageText: String? {
+        guard let percent = primaryWindowUsedPercent, let minutes = primaryWindowMinutes else { return nil }
+        let usedMinutes = percent / 100.0 * Double(minutes)
+        return "Used \(UsageDurationFormatter.string(minutes: usedMinutes))"
+    }
+
+    var secondaryUsageText: String? {
+        guard let percent = secondaryWindowUsedPercent, let minutes = secondaryWindowMinutes else { return nil }
+        let usedMinutes = percent / 100.0 * Double(minutes)
+        return "Used \(UsageDurationFormatter.string(minutes: usedMinutes))"
+    }
+
+    var contextProgress: Double? { contextUsedPercent }
+
+    var primaryProgress: Double? {
+        guard let percent = primaryWindowUsedPercent else { return nil }
+        return percent / 100.0
+    }
+
+    var secondaryProgress: Double? {
+        guard let percent = secondaryWindowUsedPercent else { return nil }
+        return percent / 100.0
+    }
+
+    func asProviderSnapshot() -> UsageProviderSnapshot {
+        var metrics: [UsageMetricSnapshot] = []
+
+        metrics.append(
+            UsageMetricSnapshot(
+                kind: .context,
+                label: "Context",
+                usageText: contextUsageText,
+                percentText: contextPercentText,
+                progress: contextProgress,
+                resetDate: nil,
+                fallbackWindowMinutes: nil
+            )
+        )
+
+        metrics.append(
+            UsageMetricSnapshot(
+                kind: .fiveHour,
+                label: "5h limit",
+                usageText: primaryUsageText,
+                percentText: primaryPercentText,
+                progress: primaryProgress,
+                resetDate: primaryResetAt,
+                fallbackWindowMinutes: primaryWindowMinutes
+            )
+        )
+
+        metrics.append(
+            UsageMetricSnapshot(
+                kind: .weekly,
+                label: "Weekly limit",
+                usageText: secondaryUsageText,
+                percentText: secondaryPercentText,
+                progress: secondaryProgress,
+                resetDate: secondaryResetAt,
+                fallbackWindowMinutes: secondaryWindowMinutes
+            )
+        )
+
+        return UsageProviderSnapshot(
+            provider: .codex,
+            title: UsageProviderKind.codex.displayName,
+            availability: .ready,
+            metrics: metrics,
+            updatedAt: updatedAt,
+            statusMessage: nil
+        )
+    }
+
+    init(snapshot: TokenUsageSnapshot) {
+        self.init(
+            updatedAt: snapshot.timestamp,
+            contextUsedTokens: snapshot.totalTokens,
+            contextLimitTokens: snapshot.contextWindow,
+            primaryWindowUsedPercent: snapshot.primaryPercent,
+            primaryWindowMinutes: snapshot.primaryWindowMinutes,
+            primaryResetAt: snapshot.primaryResetAt,
+            secondaryWindowUsedPercent: snapshot.secondaryPercent,
+            secondaryWindowMinutes: snapshot.secondaryWindowMinutes,
+            secondaryResetAt: snapshot.secondaryResetAt
+        )
+    }
+}
+
+enum TokenFormatter {
+    static func string(from value: Int) -> String {
+        let absValue = abs(value)
+        switch absValue {
+        case 1_000_000...:
+            return format(value, divisor: 1_000_000, suffix: "M")
+        case 1_000...:
+            return format(value, divisor: 1_000, suffix: "K")
+        default:
+            return NumberFormatter.decimalFormatter.string(from: NSNumber(value: value)) ?? "\(value)"
+        }
+    }
+
+    private static func format(_ value: Int, divisor: Double, suffix: String) -> String {
+        let scaled = Double(value) / divisor
+        let formatter = NumberFormatter()
+        formatter.maximumFractionDigits = scaled < 10 ? 1 : 0
+        formatter.minimumFractionDigits = 0
+        formatter.numberStyle = .decimal
+        let body = formatter.string(from: NSNumber(value: scaled)) ?? "\(scaled)"
+        return body + suffix
+    }
+}
+
+enum UsageDurationFormatter {
+    static func string(minutes: Double) -> String {
+        if minutes >= 1440 {
+            let days = minutes / 1440.0
+            return days >= 10 ? String(format: "%.0fd", days) : String(format: "%.1fd", days)
+        }
+        if minutes >= 60 {
+            let hours = minutes / 60.0
+            return hours >= 10 ? String(format: "%.0fh", hours) : String(format: "%.1fh", hours)
+        }
+        return String(format: "%.0fm", minutes)
+    }
+}
+
+extension NumberFormatter {
+    static let decimalFormatter: NumberFormatter = {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.maximumFractionDigits = 0
+        return formatter
+    }()
+
+    static let compactPercentFormatter: NumberFormatter = {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .percent
+        formatter.minimumFractionDigits = 0
+        formatter.maximumFractionDigits = 0
+        return formatter
+    }()
+}
