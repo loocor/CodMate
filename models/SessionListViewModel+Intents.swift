@@ -76,7 +76,7 @@ extension SessionListViewModel {
             let memberships = await projectsStore.membershipsSnapshot()
             await MainActor.run {
                 self.projectCounts = counts
-                self.projectMemberships = memberships
+                self.setProjectMemberships(memberships)
                 self.recomputeProjectCounts()
                 self.applyFilters()
             }

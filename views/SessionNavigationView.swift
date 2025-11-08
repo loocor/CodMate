@@ -3,26 +3,18 @@ import SwiftUI
 import AppKit
 #endif
 
-struct SessionNavigationView: View {
-    let totalCount: Int
-    let isLoading: Bool
-    @EnvironmentObject private var viewModel: SessionListViewModel
-
-    @State private var monthStart: Date = Calendar.current.date(
-        from: Calendar.current.dateComponents([.year, .month], from: Date()))!
-    @State private var dimension: DateDimension = .updated
-    @State private var showNewProject = false
+struct SessionNavigationView<ProjectsContent: View>: View {
+    let state: SidebarState
+    let actions: SidebarActions
+    @ViewBuilder var projectsContent: () -> ProjectsContent
 
     var body: some View {
         VStack(spacing: 0) {
-            // Projects list only (clean, simplified)
             VStack(spacing: 8) {
                 HStack(spacing: 8) {
                     Text("Projects").font(.caption).foregroundStyle(.secondary)
                     Spacer(minLength: 4)
-                    Button {
-                        showNewProject = true
-                    } label: {
+                    Button(action: actions.requestNewProject) {
                         Image(systemName: "plus")
                     }
                     .buttonStyle(.bordered)
@@ -31,45 +23,33 @@ struct SessionNavigationView: View {
                 }
 
                 VStack(spacing: 8) {
-                    let visibleAll = viewModel.visibleAllCountForDateScope()
-                    let totalAll = viewModel.totalSessionCount
                     scopeAllRow(
                         title: "All",
-                        isSelected: viewModel.selectedProjectIDs.isEmpty,
+                        isSelected: state.selectedProjectIDs.isEmpty,
                         icon: "rectangle.stack",
-                        count: (visibleAll, totalAll),
-                        action: { viewModel.setSelectedProject(nil) }
+                        count: (state.visibleAllCount, state.totalSessionCount),
+                        action: actions.selectAllProjects
                     )
-                    ProjectsListView()
+                    projectsContent()
                 }
             }
             .padding(.horizontal, 8)
             .padding(.top, 8)
             .frame(maxHeight: .infinity)
 
-            // Bottom (fixed): calendar section (8pt spacing from middle)
             calendarSection
                 .padding(.top, 8)
         }
         .frame(idealWidth: 240)
-        .task {
-            _ = viewModel.calendarCounts(for: monthStart, dimension: dimension)
-            // Ensure dimension is synced on startup
-            viewModel.dateDimension = dimension
-        }
-        .onChange(of: monthStart) { _, m in
-            _ = viewModel.calendarCounts(for: m, dimension: dimension)
-        }
-        .onChange(of: dimension) { _, d in
-            _ = viewModel.calendarCounts(for: monthStart, dimension: d)
-        }
-        .sheet(isPresented: $showNewProject) {
-            ProjectEditorSheet(isPresented: $showNewProject, mode: .new)
-                .environmentObject(viewModel)
-        }
     }
 
-    private func scopeAllRow(title: String, isSelected: Bool, icon: String, count: (visible: Int, total: Int)? = nil, action: @escaping () -> Void) -> some View {
+    private func scopeAllRow(
+        title: String,
+        isSelected: Bool,
+        icon: String,
+        count: (visible: Int, total: Int)? = nil,
+        action: @escaping () -> Void
+    ) -> some View {
         HStack(spacing: 8) {
             Image(systemName: icon)
                 .foregroundStyle(isSelected ? Color.white : Color.secondary)
@@ -93,10 +73,10 @@ struct SessionNavigationView: View {
     }
 
     private var calendarSection: some View {
-        return VStack(spacing: 4) {
+        VStack(spacing: 4) {
             calendarHeader
 
-            Picker("", selection: $dimension) {
+            Picker("", selection: dimensionBinding) {
                 ForEach(DateDimension.allCases) { dim in
                     Text(dim.title).tag(dim)
                 }
@@ -104,35 +84,24 @@ struct SessionNavigationView: View {
             .labelsHidden()
             .pickerStyle(.segmented)
             .controlSize(.small)
-            .onChange(of: dimension) { _, newDim in
-                viewModel.dateDimension = newDim
-            }
 
             CalendarMonthView(
-                monthStart: monthStart,
-                counts: viewModel.calendarCounts(for: monthStart, dimension: dimension),
-                selectedDays: viewModel.selectedDays,
-                enabledDays: viewModel.calendarEnabledDaysForSelectedProject(monthStart: monthStart, dimension: dimension)
+                monthStart: state.monthStart,
+                counts: state.calendarCounts,
+                selectedDays: state.selectedDays,
+                enabledDays: state.enabledProjectDays
             ) { picked in
-                // Cmd-click toggles selection; plain click selects single day / clears when same
-                #if os(macOS)
-                let useToggle = (NSApp.currentEvent?.modifierFlags.contains(.command) ?? false)
-                #else
-                let useToggle = false
-                #endif
-                if useToggle {
-                    viewModel.toggleSelectedDay(picked)
-                } else {
-                    if let current = viewModel.selectedDay,
-                       Calendar.current.isDate(current, inSameDayAs: picked) {
-                        viewModel.setSelectedDay(nil)
-                    } else {
-                        viewModel.setSelectedDay(picked)
-                    }
-                }
+                handleDaySelection(picked)
             }
         }
         .padding(8)
+    }
+
+    private var dimensionBinding: Binding<DateDimension> {
+        Binding(
+            get: { state.dateDimension },
+            set: { actions.setDateDimension($0) }
+        )
     }
 
     private var calendarHeader: some View {
@@ -140,13 +109,15 @@ struct SessionNavigationView: View {
         let monthTitle: String = {
             let df = DateFormatter()
             df.dateFormat = "MMM yyyy"
-            return df.string(from: monthStart)
+            return df.string(from: state.monthStart)
         }()
         return GeometryReader { geometry in
             let columnWidth = geometry.size.width / 16
             HStack(spacing: 0) {
                 Button {
-                    monthStart = cal.date(byAdding: .month, value: -1, to: monthStart)!
+                    if let next = cal.date(byAdding: .month, value: -1, to: state.monthStart) {
+                        actions.setMonthStart(next)
+                    }
                 } label: {
                     Image(systemName: "chevron.left")
                         .frame(width: columnWidth, height: 24)
@@ -167,7 +138,9 @@ struct SessionNavigationView: View {
                 Spacer(minLength: 0)
 
                 Button {
-                    monthStart = cal.date(byAdding: .month, value: 1, to: monthStart)!
+                    if let next = cal.date(byAdding: .month, value: 1, to: state.monthStart) {
+                        actions.setMonthStart(next)
+                    }
                 } label: {
                     Image(systemName: "chevron.right")
                         .frame(width: columnWidth, height: 24)
@@ -181,63 +154,146 @@ struct SessionNavigationView: View {
 
     private func jumpToToday() {
         let cal = Calendar.current
-        let today = Date()
-        monthStart = cal.date(from: cal.dateComponents([.year, .month], from: today))!
-        let start = cal.startOfDay(for: today)
-        viewModel.setSelectedDay(start)
-        viewModel.dateDimension = dimension
+        let today = cal.startOfDay(for: Date())
+        if let month = cal.date(from: cal.dateComponents([.year, .month], from: today)) {
+            actions.setMonthStart(month)
+        } else {
+            actions.setMonthStart(today)
+        }
+        actions.setSelectedDay(today)
+    }
+
+    private func handleDaySelection(_ picked: Date) {
+        #if os(macOS)
+        let useToggle = (NSApp.currentEvent?.modifierFlags.contains(.command) ?? false)
+        #else
+        let useToggle = false
+        #endif
+        if useToggle {
+            actions.toggleSelectedDay(picked)
+        } else {
+            if let current = state.selectedDay,
+               Calendar.current.isDate(current, inSameDayAs: picked) {
+                actions.setSelectedDay(nil)
+            } else {
+                actions.setSelectedDay(picked)
+            }
+        }
     }
 }
 
 private enum SidebarMode: Hashable { case directories, projects }
 
 #Preview {
-    // Mock ViewModel for preview
-    let mockPreferences = SessionPreferencesStore()
-    let mockViewModel = SessionListViewModel(preferences: mockPreferences)
-
-    return SessionNavigationView(
-        totalCount: 15,
-        isLoading: false
+    let cal = Calendar.current
+    let monthStart = cal.date(from: DateComponents(year: 2024, month: 12, day: 1))!
+    let state = SidebarState(
+        totalSessionCount: 15,
+        isLoading: false,
+        visibleAllCount: 12,
+        selectedProjectIDs: [],
+        selectedDay: nil,
+        selectedDays: [],
+        dateDimension: .updated,
+        monthStart: monthStart,
+        calendarCounts: [1: 2, 3: 4],
+        enabledProjectDays: nil
     )
-    .environmentObject(mockViewModel)
+    let actions = SidebarActions(
+        selectAllProjects: {},
+        requestNewProject: {},
+        setDateDimension: { _ in },
+        setMonthStart: { _ in },
+        setSelectedDay: { _ in },
+        toggleSelectedDay: { _ in }
+    )
+
+    return SessionNavigationView(state: state, actions: actions) {
+        EmptyView()
+    }
     .frame(width: 280, height: 600)
 }
 
 #Preview("Loading State") {
-    let mockPreferences = SessionPreferencesStore()
-    let mockViewModel = SessionListViewModel(preferences: mockPreferences)
-
-    return SessionNavigationView(
-        totalCount: 0,
-        isLoading: true
+    let cal = Calendar.current
+    let monthStart = cal.date(from: DateComponents(year: 2024, month: 12, day: 1))!
+    let state = SidebarState(
+        totalSessionCount: 0,
+        isLoading: true,
+        visibleAllCount: 0,
+        selectedProjectIDs: [],
+        selectedDay: nil,
+        selectedDays: [],
+        dateDimension: .created,
+        monthStart: monthStart,
+        calendarCounts: [:],
+        enabledProjectDays: nil
     )
-    .environmentObject(mockViewModel)
-    .frame(width: 280, height: 600)
+    let actions = SidebarActions(
+        selectAllProjects: {},
+        requestNewProject: {},
+        setDateDimension: { _ in },
+        setMonthStart: { _ in },
+        setSelectedDay: { _ in },
+        toggleSelectedDay: { _ in }
+    )
+
+    return SessionNavigationView(state: state, actions: actions) { EmptyView() }
+        .frame(width: 280, height: 600)
 }
 
 #Preview("Calendar Day Selected") {
-    let mockPreferences = SessionPreferencesStore()
-    let mockViewModel = SessionListViewModel(preferences: mockPreferences)
-    mockViewModel.setSelectedDay(Date())
-
-    return SessionNavigationView(
-        totalCount: 8,
-        isLoading: false
+    let cal = Calendar.current
+    let today = cal.startOfDay(for: Date())
+    let start = cal.date(from: DateComponents(year: 2024, month: 11, day: 1))!
+    let state = SidebarState(
+        totalSessionCount: 8,
+        isLoading: false,
+        visibleAllCount: 4,
+        selectedProjectIDs: [],
+        selectedDay: today,
+        selectedDays: [today],
+        dateDimension: .updated,
+        monthStart: start,
+        calendarCounts: [cal.component(.day, from: today): 3],
+        enabledProjectDays: nil
     )
-    .environmentObject(mockViewModel)
-    .frame(width: 280, height: 600)
+    let actions = SidebarActions(
+        selectAllProjects: {},
+        requestNewProject: {},
+        setDateDimension: { _ in },
+        setMonthStart: { _ in },
+        setSelectedDay: { _ in },
+        toggleSelectedDay: { _ in }
+    )
+
+    return SessionNavigationView(state: state, actions: actions) { EmptyView() }
+        .frame(width: 280, height: 600)
 }
 
 #Preview("Path Selected") {
-    let mockPreferences = SessionPreferencesStore()
-    let mockViewModel = SessionListViewModel(preferences: mockPreferences)
-    mockViewModel.setSelectedPath("/Users/developer/projects")
-
-    return SessionNavigationView(
-        totalCount: 5,
-        isLoading: false
+    let cal = Calendar.current
+    let state = SidebarState(
+        totalSessionCount: 5,
+        isLoading: false,
+        visibleAllCount: 5,
+        selectedProjectIDs: ["demo"],
+        selectedDay: nil,
+        selectedDays: [],
+        dateDimension: .updated,
+        monthStart: cal.startOfDay(for: Date()),
+        calendarCounts: [:],
+        enabledProjectDays: [1, 3, 5]
     )
-    .environmentObject(mockViewModel)
-    .frame(width: 280, height: 600)
+    let actions = SidebarActions(
+        selectAllProjects: {},
+        requestNewProject: {},
+        setDateDimension: { _ in },
+        setMonthStart: { _ in },
+        setSelectedDay: { _ in },
+        toggleSelectedDay: { _ in }
+    )
+
+    return SessionNavigationView(state: state, actions: actions) { EmptyView() }
+        .frame(width: 280, height: 600)
 }

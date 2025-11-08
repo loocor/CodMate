@@ -186,6 +186,38 @@ struct SessionListRowView: View {
     }
 }
 
+struct EquatableSessionListRow: View, Equatable {
+    let summary: SessionSummary
+    let isRunning: Bool
+    let isSelected: Bool
+    let isUpdating: Bool
+    let awaitingFollowup: Bool
+    let inProject: Bool
+    let projectTip: String?
+
+    static func == (lhs: EquatableSessionListRow, rhs: EquatableSessionListRow) -> Bool {
+        lhs.summary == rhs.summary
+            && lhs.isRunning == rhs.isRunning
+            && lhs.isSelected == rhs.isSelected
+            && lhs.isUpdating == rhs.isUpdating
+            && lhs.awaitingFollowup == rhs.awaitingFollowup
+            && lhs.inProject == rhs.inProject
+            && lhs.projectTip == rhs.projectTip
+    }
+
+    var body: some View {
+        SessionListRowView(
+            summary: summary,
+            isRunning: isRunning,
+            isSelected: isSelected,
+            isUpdating: isUpdating,
+            awaitingFollowup: awaitingFollowup,
+            inProject: inProject,
+            projectTip: projectTip
+        )
+    }
+}
+
 private func metric(icon: String, value: Int) -> some View {
     HStack(spacing: 4) {
         Image(systemName: icon)

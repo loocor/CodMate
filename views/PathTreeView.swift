@@ -22,8 +22,12 @@ struct PathTreeView: View {
     }
 }
 
-private struct PathTreeRowView: View {
+private struct PathTreeRowView: View, Equatable {
     let node: PathTreeNode
+
+    static func == (lhs: PathTreeRowView, rhs: PathTreeRowView) -> Bool {
+        lhs.node == rhs.node
+    }
 
     var body: some View {
         HStack(spacing: 8) {

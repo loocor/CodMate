@@ -16,7 +16,13 @@ import SwiftUI
         let cursorStyleOption: TerminalCursorStyleOption
         let isDark: Bool
 
-        func makeCoordinator() -> Coordinator { Coordinator() }
+        func makeCoordinator() -> Coordinator {
+            let coordinator = Coordinator()
+            coordinator.configureCursorStyles(
+                preferred: cursorStyleOption.cursorStyleValue,
+                inactive: cursorStyleOption.steadyCursorStyleValue)
+            return coordinator
+        }
 
         func makeNSView(context: Context) -> NSView {
             let container = NSView(frame: .zero)
@@ -57,6 +63,13 @@ import SwiftUI
             private let debounceInterval: TimeInterval = 0.12
             weak var container: NSView?
             var overlay: OverlayBar?
+            private var lastOverlayPosition: Double?
+            private var lastOverlayThumb: CGFloat?
+            private let overlayDeltaThreshold: Double = 0.002
+            private let overlayThumbThreshold: CGFloat = 0.01
+            var preferredCursorStyle: CursorStyle = .blinkBlock
+            var inactiveCursorStyle: CursorStyle = .steadyBlock
+            private var isActiveTerminal = false
 
             func attach(to view: LocalProcessTerminalView) {
                 self.terminal = view
@@ -113,14 +126,44 @@ import SwiftUI
                 DispatchQueue.main.asyncAfter(deadline: .now() + debounceInterval, execute: work)
             }
 
+            func configureCursorStyles(preferred: CursorStyle, inactive: CursorStyle) {
+                preferredCursorStyle = preferred
+                inactiveCursorStyle = inactive
+            }
+
+            func handleFocusChange(isActive: Bool) {
+                isActiveTerminal = isActive
+                guard let terminal else { return }
+                let targetStyle = isActive ? preferredCursorStyle : inactiveCursorStyle
+                terminal.getTerminal().setCursorStyle(targetStyle)
+                if let codmate = terminal as? CodMateTerminalView {
+                    codmate.setOverlaySuppressed(!isActive)
+                }
+                if !isActive {
+                    overlay?.isHidden = true
+                }
+            }
+
             func updateOverlay(position: Double? = nil, thumb: CGFloat? = nil) {
                 guard let container, let overlay else { return }
+                guard isActiveTerminal else {
+                    overlay.isHidden = true
+                    return
+                }
                 if let v = terminal, v.canScroll == false {
                     overlay.isHidden = true
                     return
                 }
                 let pos = position ?? overlay.position
                 let th = max(thumb ?? overlay.thumbProportion, 0.01)
+                if let lastPos = lastOverlayPosition,
+                   abs(lastPos - pos) < overlayDeltaThreshold,
+                   let lastThumb = lastOverlayThumb,
+                   abs(lastThumb - th) < overlayThumbThreshold {
+                    return
+                }
+                lastOverlayPosition = pos
+                lastOverlayThumb = th
                 overlay.position = pos
                 overlay.thumbProportion = th
                 overlay.isHidden = false
@@ -139,6 +182,9 @@ import SwiftUI
 
         private func attachTerminalIfNeeded(in container: NSView, coordinator: Coordinator) {
             coordinator.container = container
+            coordinator.configureCursorStyles(
+                preferred: cursorStyleOption.cursorStyleValue,
+                inactive: cursorStyleOption.steadyCursorStyleValue)
 
             // Fast-path: if we're already showing this terminal, just refresh theme and return
             if let existing = coordinator.terminal,
@@ -152,6 +198,8 @@ import SwiftUI
                 applyTheme(existing)
                 applyCursorStyle(existing)
                 coordinator.scheduleRelayout(existing)
+                let isActive = container.window?.firstResponder === existing
+                coordinator.handleFocusChange(isActive: isActive)
                 return
             }
 
@@ -202,7 +250,12 @@ import SwiftUI
                         coordinator?.updateOverlay(position: pos, thumb: thumb)
                     }
                 }
+                ctv.onFocusChanged = { [weak coordinator] isActive in
+                    coordinator?.handleFocusChange(isActive: isActive)
+                }
             }
+            let isActive = container.window?.firstResponder === v
+            coordinator.handleFocusChange(isActive: isActive)
         }
 
         // Minimal overlay scrollbar view that never intercepts events

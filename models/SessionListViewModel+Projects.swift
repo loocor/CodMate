@@ -16,8 +16,9 @@ extension SessionListViewModel {
         await MainActor.run {
             self.projects = list
             self.projectCounts = counts
-            self.projectMemberships = memberships
+            self.setProjectMemberships(memberships)
             self.recomputeProjectCounts()
+            self.invalidateProjectVisibleCountsCache()
             self.applyFilters()
         }
     }
@@ -48,7 +49,7 @@ extension SessionListViewModel {
         let memberships = await projectsStore.membershipsSnapshot()
         await MainActor.run {
             self.projectCounts = counts
-            self.projectMemberships = memberships
+            self.setProjectMemberships(memberships)
             self.recomputeProjectCounts()
         }
         applyFilters()
@@ -57,32 +58,44 @@ extension SessionListViewModel {
     func projectCountsFromStore() -> [String: Int] { projectCounts }
 
     func visibleProjectCountsForDateScope() -> [String: Int] {
+        let key = ProjectVisibleKey(
+            dimension: dateDimension,
+            selectedDay: selectedDay,
+            selectedDays: selectedDays,
+            sessionCount: allSessions.count,
+            membershipVersion: projectMembershipsVersion
+        )
+        if let cached = cachedProjectVisibleCounts, cached.key == key {
+            return cached.value
+        }
         var visible: [String: Int] = [:]
-        let cal = Calendar.current
         let allowed = projects.reduce(into: [String: Set<ProjectSessionSource>]()) {
             $0[$1.id] = $1.sources
         }
-        for s in allSessions {
-            let refDate: Date =
-                (dateDimension == .created) ? s.startedAt : (s.lastUpdatedAt ?? s.startedAt)
-            if !selectedDays.isEmpty {
-                var match = false
-                for d in selectedDays {
-                    if cal.isDate(refDate, inSameDayAs: d) {
-                        match = true
-                        break
-                    }
-                }
-                if !match { continue }
-            } else if let day = selectedDay {
-                if !cal.isDate(refDate, inSameDayAs: day) { continue }
+        let dayTargets: Set<Date>
+        if !selectedDays.isEmpty {
+            dayTargets = selectedDays
+        } else if let single = selectedDay {
+            dayTargets = [single]
+        } else {
+            dayTargets = []
+        }
+        let filterByDay = !dayTargets.isEmpty
+
+        for session in allSessions {
+            var passesDayFilter = true
+            if filterByDay {
+                let bucket = dayStart(for: session, dimension: dateDimension)
+                passesDayFilter = dayTargets.contains(bucket)
             }
-            if let pid = projectMemberships[s.id] {
+            if !passesDayFilter { continue }
+            if let pid = projectMemberships[session.id] {
                 let allowedSources = allowed[pid] ?? ProjectSessionSource.allSet
-                if !allowedSources.contains(s.source.projectSource) { continue }
+                if !allowedSources.contains(session.source.projectSource) { continue }
                 visible[pid, default: 0] += 1
             }
         }
+        cachedProjectVisibleCounts = (key, visible)
         return visible
     }
 
@@ -115,26 +128,40 @@ extension SessionListViewModel {
     }
 
     func visibleAllCountForDateScope() -> Int {
-        let cal = Calendar.current
-        var count = 0
-        for s in allSessions {
-            let ref: Date =
-                (dateDimension == .created) ? s.startedAt : (s.lastUpdatedAt ?? s.startedAt)
-            if !selectedDays.isEmpty {
-                var match = false
-                for d in selectedDays {
-                    if cal.isDate(ref, inSameDayAs: d) {
-                        match = true
-                        break
-                    }
-                }
-                if !match { continue }
-            } else if let day = selectedDay {
-                if !cal.isDate(ref, inSameDayAs: day) { continue }
-            }
-            count += 1
+        let key = SessionListViewModel.VisibleCountKey(
+            dimension: dateDimension,
+            selectedDay: selectedDay,
+            selectedDays: selectedDays,
+            sessionCount: allSessions.count
+        )
+        if let cached = cachedVisibleCount, cached.key == key {
+            return cached.value
         }
-        return count
+
+        let value: Int
+        if selectedDay == nil && selectedDays.isEmpty {
+            value = allSessions.count
+        } else {
+            let targets: Set<Date>
+            if !selectedDays.isEmpty {
+                targets = selectedDays
+            } else if let single = selectedDay {
+                targets = [single]
+            } else {
+                targets = []
+            }
+            if targets.isEmpty {
+                value = allSessions.count
+            } else {
+                let matched = allSessions.lazy.filter { [weak self] session in
+                    guard let self else { return false }
+                    return targets.contains(self.dayStart(for: session, dimension: self.dateDimension))
+                }
+                value = matched.count
+            }
+        }
+        cachedVisibleCount = (key, value)
+        return value
     }
 
     // Calendar helper: days within the given month that have at least one session
@@ -142,7 +169,7 @@ extension SessionListViewModel {
     // each project's allowed sources. Returns nil when no project is selected.
     func calendarEnabledDaysForSelectedProject(monthStart: Date, dimension: DateDimension) -> Set<Int>? {
         guard !selectedProjectIDs.isEmpty else { return nil }
-        let cal = Calendar.current
+        let monthKey = monthKey(for: monthStart)
 
         // Build allowed project set: include descendants of each selected project
         var allowedProjects = Set<String>()
@@ -157,13 +184,19 @@ extension SessionListViewModel {
         }
 
         var days: Set<Int> = []
-        for s in allSessions {
-            guard let assigned = projectMemberships[s.id], allowedProjects.contains(assigned) else { continue }
+        for session in allSessions {
+            guard let assigned = projectMemberships[session.id], allowedProjects.contains(assigned) else { continue }
             let allowed = allowedSourcesByProject[assigned] ?? ProjectSessionSource.allSet
-            if !allowed.contains(s.source.projectSource) { continue }
-            let ref: Date = (dimension == .created) ? s.startedAt : (s.lastUpdatedAt ?? s.startedAt)
-            guard cal.isDate(ref, equalTo: monthStart, toGranularity: .month) else { continue }
-            days.insert(cal.component(.day, from: ref))
+            if !allowed.contains(session.source.projectSource) { continue }
+            let bucket = dayIndex(for: session)
+            switch dimension {
+            case .created:
+                guard bucket.createdMonthKey == monthKey else { continue }
+                days.insert(bucket.createdDay)
+            case .updated:
+                guard bucket.updatedMonthKey == monthKey else { continue }
+                days.insert(bucket.updatedDay)
+            }
         }
         return days
     }
@@ -241,7 +274,7 @@ extension SessionListViewModel {
         let memberships = await projectsStore.membershipsSnapshot()
         await MainActor.run {
             self.projectCounts = counts
-            self.projectMemberships = memberships
+            self.setProjectMemberships(memberships)
             self.recomputeProjectCounts()
         }
     }

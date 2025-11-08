@@ -2,12 +2,22 @@ import SwiftUI
 
 extension ContentView {
   func sidebarContent(sidebarMaxWidth: CGFloat) -> some View {
-    SessionNavigationView(
-      totalCount: viewModel.totalSessionCount,
-      isLoading: viewModel.isLoading
-    )
-    .environmentObject(viewModel)
-    .navigationSplitViewColumnWidth(min: 260, ideal: 260, max: 260)
+    let state = viewModel.sidebarStateSnapshot
+    let digest = makeSidebarDigest(for: state)
+    return EquatableSidebarContainer(key: digest) {
+      SessionNavigationView(
+        state: state,
+        actions: makeSidebarActions()
+      ) {
+        ProjectsListView()
+          .environmentObject(viewModel)
+      }
+      .navigationSplitViewColumnWidth(min: 260, ideal: 260, max: 260)
+    }
+    .sheet(isPresented: $showSidebarNewProjectSheet) {
+      ProjectEditorSheet(isPresented: $showSidebarNewProjectSheet, mode: .new)
+        .environmentObject(viewModel)
+    }
   }
 
   var listContent: some View {
@@ -47,6 +57,48 @@ extension ContentView {
     }
   }
 
+  private func makeSidebarDigest(for state: SidebarState) -> SidebarDigest {
+    func hashInt<S: Sequence>(_ seq: S) -> Int where S.Element == String {
+      var h = Hasher()
+      for s in seq { h.combine(s) }
+      return h.finalize()
+    }
+    func hashIntDates<S: Sequence>(_ seq: S) -> Int where S.Element == Date {
+      var h = Hasher()
+      for d in seq { h.combine(d.timeIntervalSinceReferenceDate.bitPattern) }
+      return h.finalize()
+    }
+    let projectsIdsHash = hashInt(viewModel.projects.map { $0.id + ("|" + ($0.parentId ?? "")) })
+    func hashCounts(_ counts: [Int: Int]) -> Int {
+      var h = Hasher()
+      for key in counts.keys.sorted() {
+        h.combine(key)
+        h.combine(counts[key] ?? 0)
+      }
+      return h.finalize()
+    }
+    func hashEnabled(_ set: Set<Int>?) -> Int {
+      guard let set else { return -1 }
+      var h = Hasher()
+      for value in set.sorted() { h.combine(value) }
+      return h.finalize()
+    }
+    let selectedProjectsHash = hashInt(state.selectedProjectIDs.sorted())
+    let selectedDaysHash = hashIntDates(state.selectedDays.sorted())
+    return SidebarDigest(
+      projectsCount: viewModel.projects.count,
+      projectsIdsHash: projectsIdsHash,
+      totalSessionCount: state.totalSessionCount,
+      selectedProjectsHash: selectedProjectsHash,
+      selectedDaysHash: selectedDaysHash,
+      dateDimensionRaw: state.dateDimension == .created ? 1 : 2,
+      monthStartInterval: state.monthStart.timeIntervalSinceReferenceDate,
+      calendarCountsHash: hashCounts(state.calendarCounts),
+      enabledDaysHash: hashEnabled(state.enabledProjectDays),
+      visibleAllCount: state.visibleAllCount
+    )
+  }
+
   var refreshToolbarContent: some View {
     HStack(spacing: 12) {
       if permissionsManager.needsAuthorization {
@@ -66,7 +118,7 @@ extension ContentView {
         .help("Some directories need authorization to access sessions data")
       }
 
-      UsageStatusControl(
+      EquatableUsageContainer(
         snapshots: viewModel.usageSnapshots,
         selectedProvider: $usageProviderSelection,
         onRequestRefresh: { viewModel.requestUsageStatusRefresh(for: $0) }

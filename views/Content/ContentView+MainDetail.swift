@@ -6,15 +6,21 @@ extension ContentView {
         Group {
             // Priority 1: explicit Git Review tab
             if selectedDetailTab == .review, let focused = focusedSummary, let ws = focusedSummary.map({ workingDirectory(for: $0) }) {
-                GitChangesPanel(
-                    workingDirectory: URL(fileURLWithPath: ws, isDirectory: true),
-                    presentation: .full,
-                    preferences: viewModel.preferences,
-                    onRequestAuthorization: { ensureRepoAccessForReview() },
-                    savedState: Binding<ReviewPanelState>(
-                        get: { viewModel.reviewPanelStates[focused.id] ?? ReviewPanelState() },
-                        set: { viewModel.reviewPanelStates[focused.id] = $0 }
-                    )
+                // Wrap Git Review in an Equatable container to minimize diffs when unrelated state changes
+                let stateBinding = Binding<ReviewPanelState>(
+                  get: { viewModel.reviewPanelStates[focused.id] ?? ReviewPanelState() },
+                  set: { viewModel.reviewPanelStates[focused.id] = $0 }
+                )
+                EquatableGitChangesContainer(
+                  key: .init(
+                    workingDirectoryPath: ws,
+                    state: stateBinding.wrappedValue
+                  ),
+                  workingDirectory: URL(fileURLWithPath: ws, isDirectory: true),
+                  presentation: .full,
+                  preferences: viewModel.preferences,
+                  onRequestAuthorization: { ensureRepoAccessForReview() },
+                  savedState: stateBinding
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .padding(16)

@@ -24,6 +24,7 @@ struct ContentView: View {
   @SceneStorage("cm.sidebarHidden") var storeSidebarHidden: Bool = false
   @SceneStorage("cm.listHidden") var storeListHidden: Bool = false
   @State var showNewWithContext = false
+  @State var showSidebarNewProjectSheet = false
   // When starting embedded sessions, record the initial command lines per-session
   @State var embeddedInitialCommands: [SessionSummary.ID: String] = [:]
   // Soft-return flag: when true, stopping embedded terminal should not change
@@ -35,6 +36,11 @@ struct ContentView: View {
     let sessionId: String
   }
   @State var confirmStopState: ConfirmStopState? = nil
+  struct PendingTerminalLaunch: Identifiable {
+    let id = UUID()
+    let session: SessionSummary
+  }
+  @State var pendingTerminalLaunch: PendingTerminalLaunch? = nil
   // Prompt picker state for embedded terminal quick-insert
   @State var showPromptPicker = false
   @State var promptQuery = ""
@@ -108,6 +114,16 @@ struct ContentView: View {
       .init(label: "swift build", command: "swift build"),
       .init(label: "swift test", command: "swift test"),
     ]
+  }
+  func makeSidebarActions() -> SidebarActions {
+    SidebarActions(
+      selectAllProjects: { viewModel.setSelectedProject(nil) },
+      requestNewProject: { showSidebarNewProjectSheet = true },
+      setDateDimension: { viewModel.dateDimension = $0 },
+      setMonthStart: { viewModel.setSidebarMonthStart($0) },
+      setSelectedDay: { viewModel.setSelectedDay($0) },
+      toggleSelectedDay: { viewModel.toggleSelectedDay($0) }
+    )
   }
   enum DetailTab: Hashable { case timeline, review, terminal }
   // Per-session detail tab state: tracks which tab (timeline/review/terminal) each session is viewing
@@ -255,9 +271,12 @@ struct ContentView: View {
       sessionDetailTabs[session.id] = .terminal
       // User has taken over: clear awaiting follow-up highlight
       viewModel.clearAwaitingFollowup(session.id)
-      // Nudge Codex to redraw cleanly once it starts, by sending "/" then backspace
+      // Nudge Codex to redraw only when running in CLI console mode to avoid
+      // visual artifacts from injecting characters into the shell bootstrap.
       #if canImport(SwiftTerm) && !APPSTORE
-        TerminalSessionManager.shared.scheduleSlashNudge(forKey: session.id, delay: 1.0)
+        if viewModel.preferences.useEmbeddedCLIConsole {
+          TerminalSessionManager.shared.scheduleSlashNudge(forKey: session.id, delay: 1.0)
+        }
       #endif
     #endif
   }

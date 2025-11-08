@@ -14,7 +14,6 @@ extension ContentView {
     }
     .frame(minWidth: 640)
     .onChange(of: selectedDetailTab) { _, newVal in
-      // Save current session's tab state
       if let focused = focusedSummary {
         sessionDetailTabs[focused.id] = newVal
       }
@@ -23,9 +22,10 @@ extension ContentView {
       }
     }
     .onChange(of: focusedSummary?.id) { _, newId in
-      // Restore new session's tab state
       if let newId = newId {
         selectedDetailTab = sessionDetailTabs[newId] ?? .timeline
+      } else {
+        selectedDetailTab = .timeline
       }
       if selectedDetailTab == .review { ensureRepoAccessForReview() }
       normalizeDetailTabForTerminalAvailability()

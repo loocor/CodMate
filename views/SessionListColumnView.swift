@@ -77,7 +77,7 @@ struct SessionListColumnView: View {
           ForEach(sections) { section in
             Section {
               ForEach(section.sessions, id: \.id) { session in
-                SessionListRowView(
+                EquatableSessionListRow(
                   summary: session,
                   isRunning: isRunning?(session) ?? false,
                   isSelected: selectionContains(session.id),
@@ -172,6 +172,7 @@ struct SessionListColumnView: View {
             }
           }
         }
+        .padding(.horizontal, -2)
         .listStyle(.inset)
       }
     }

@@ -36,5 +36,13 @@ extension TerminalCursorStyleOption {
         case .steadyBar: return .steadyBar
         }
     }
+
+    var steadyCursorStyleValue: CursorStyle {
+        switch self {
+        case .blinkBlock, .steadyBlock: return .steadyBlock
+        case .blinkUnderline, .steadyUnderline: return .steadyUnderline
+        case .blinkBar, .steadyBar: return .steadyBar
+        }
+    }
 }
 #endif
