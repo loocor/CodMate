@@ -28,8 +28,9 @@ UI Rules (macOS specific)
 - Toolbars: place refresh as the last ToolbarItem to pin it at the far right. Keep destructive actions in the detail pane, not in the main toolbar. Command+R and the refresh button also invalidate and recompute global sidebar statistics (projects/path tree and calendar day counts) to reflect new sessions immediately.
 - Sidebar (left):
   - Top (fixed): "All Sessions" row showing total count and selection state.
-  - Middle (scrollable): path tree built from `cwd` counts. Rows are compact: default min row height 18, small control size, reduced insets. Single‑click selects/expands; double‑click applies filter (enter the directory).
-  - Bottom (fixed): calendar month view (240pt height) with per‑day counts (created/last‑updated switch). Always pinned to the bottom with 8pt spacing above. Supports multi‑select via Command‑click to toggle multiple days; plain click selects a single day (click the same day to clear).
+  - Middle (scrollable): path tree built from `cwd` counts. Rows are compact: default min row height 18, small control size, reduced insets. Single-click selects/expands; double-click applies filter (enter the directory).
+  - Projects mode mirrors the compact list style; Cmd-click toggles multi-selection so users can filter sessions by several projects simultaneously (descendants remain included).
+  - Bottom (fixed): calendar month view (240pt height) with per-day counts (created/last-updated switch). Always pinned to the bottom with 8pt spacing above. Supports multi-select via Command-click to toggle multiple days; plain click selects a single day (click the same day to clear).
   - Only the middle path tree scrolls; top "All Sessions" and bottom calendar remain fixed.
   - Sidebar width: min 220pt, max 25% of window width, ideal 260pt.
 - Content (middle):

@@ -132,10 +132,10 @@ final class SessionListViewModel: ObservableObject {
     @Published var projects: [Project] = []
     var projectCounts: [String: Int] = [:]
     var projectMemberships: [String: String] = [:]
-    @Published var selectedProjectId: String? = nil {
+    @Published var selectedProjectIDs: Set<String> = [] {
         didSet {
-            guard !suppressFilterNotifications, oldValue != selectedProjectId else { return }
-            if selectedProjectId != nil { selectedPath = nil }
+            guard !suppressFilterNotifications, oldValue != selectedProjectIDs else { return }
+            if !selectedProjectIDs.isEmpty { selectedPath = nil }
             scheduleFiltersUpdate()
         }
     }
@@ -530,7 +530,7 @@ final class SessionListViewModel: ObservableObject {
         suppressFilterNotifications = true
         selectedPath = nil
         selectedDay = nil
-        selectedProjectId = nil
+        selectedProjectIDs.removeAll()
         suppressFilterNotifications = false
         scheduleFilterRefresh(force: true)
         // Keep searchText unchanged to allow consecutive searches
@@ -540,7 +540,7 @@ final class SessionListViewModel: ObservableObject {
     func clearScopeFilters() {
         suppressFilterNotifications = true
         selectedPath = nil
-        selectedProjectId = nil
+        selectedProjectIDs.removeAll()
         suppressFilterNotifications = false
         scheduleFilterRefresh(force: true)
     }
@@ -594,9 +594,12 @@ final class SessionListViewModel: ObservableObject {
         let quickNeedle = trimmedSearch.isEmpty ? nil : trimmedSearch.lowercased()
 
         let projectFilter: FilterSnapshot.ProjectFilter? = {
-            guard let pid = selectedProjectId else { return nil }
-            var allowedProjects = Set(collectDescendants(of: pid, in: projects))
-            allowedProjects.insert(pid)
+            guard !selectedProjectIDs.isEmpty else { return nil }
+            var allowedProjects = Set<String>()
+            for pid in selectedProjectIDs {
+                allowedProjects.insert(pid)
+                allowedProjects.formUnion(collectDescendants(of: pid, in: projects))
+            }
             let allowedSources = projects.reduce(into: [String: Set<ProjectSessionSource>]()) {
                 $0[$1.id] = $1.sources
             }

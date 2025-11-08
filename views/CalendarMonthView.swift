@@ -13,13 +13,15 @@ struct CalendarMonthView: View {
         let cal = Calendar.current
         let weekdaySymbols = cal.shortStandaloneWeekdaySymbols
         let grid = monthGrid()
-        let spacing: CGFloat = 2
+        let spacing: CGFloat = CalendarMonthLayout.columnSpacing
+        let rowCount = grid.count
+        let contentHeight = CalendarMonthLayout.contentHeight(forRowCount: rowCount)
 
         GeometryReader { geometry in
             let totalWidth = geometry.size.width
             let columnWidth = (totalWidth - spacing * 6) / 7
 
-            VStack(spacing: 8) {
+            VStack(spacing: CalendarMonthLayout.sectionSpacing) {
                 weekdayHeader(
                     weekdaySymbols: weekdaySymbols, columnWidth: columnWidth, spacing: spacing)
 
@@ -30,7 +32,9 @@ struct CalendarMonthView: View {
                     spacing: spacing
                 )
             }
+            .frame(width: totalWidth, height: contentHeight, alignment: .top)
         }
+        .frame(height: contentHeight)
     }
 
     private func weekdayHeader(weekdaySymbols: [String], columnWidth: CGFloat, spacing: CGFloat)
@@ -44,6 +48,7 @@ struct CalendarMonthView: View {
                     .font(.caption)
             }
         }
+        .frame(height: CalendarMonthLayout.weekdayHeaderHeight)
     }
 
     private func calendarGrid(
@@ -73,27 +78,34 @@ struct CalendarMonthView: View {
 
     private func dayCell(day: Int, calendar: Calendar, columnWidth: CGFloat) -> some View {
         let isSelected = isSelectedDay(day: day, calendar: calendar)
-
+        let today = calendar.startOfDay(for: Date())
+        let cellDate = calendar.date(bySetting: .day, value: max(day, 1), of: monthStart).map {
+            calendar.startOfDay(for: $0)
+        }
+        let isSelectable = (day > 0) && (cellDate ?? today) <= today
         return Button {
-            if day > 0 {
-                let date = calendar.date(bySetting: .day, value: day, of: monthStart)!
-                onSelectDay(calendar.startOfDay(for: date))
+            if day > 0, isSelectable, let date = cellDate {
+                onSelectDay(date)
             }
         } label: {
-            dayCellContent(day: day, isSelected: isSelected)
+            dayCellContent(day: day, isSelected: isSelected, isDisabled: !isSelectable)
         }
         .buttonStyle(.plain)
         .frame(width: columnWidth, height: 38)
-        .help(day > 0 ? helpText(for: day, isSelected: isSelected) : "")
+        .allowsHitTesting(isSelectable && day > 0)
+        .help(
+            day > 0
+                ? helpText(for: day, isSelected: isSelected, isDisabled: !isSelectable) : ""
+        )
     }
 
-    private func dayCellContent(day: Int, isSelected: Bool) -> some View {
+    private func dayCellContent(day: Int, isSelected: Bool, isDisabled: Bool) -> some View {
         ZStack(alignment: .topLeading) {
             RoundedRectangle(cornerRadius: 6)
-                .fill(day > 0 ? Color.secondary.opacity(0.06) : Color.clear)
+                .fill(day > 0 ? Color.secondary.opacity(isDisabled ? 0.03 : 0.06) : Color.clear)
 
             if day > 0 {
-                dayNumber(day: day)
+                dayNumber(day: day, isDisabled: isDisabled)
             }
 
             if day > 0, let count = counts[day], count > 0 {
@@ -108,12 +120,13 @@ struct CalendarMonthView: View {
             RoundedRectangle(cornerRadius: 6)
                 .strokeBorder(Color.accentColor, lineWidth: isSelected ? 2 : 0)
         )
+        .opacity(isDisabled ? 0.45 : 1)
     }
 
-    private func dayNumber(day: Int) -> some View {
+    private func dayNumber(day: Int, isDisabled: Bool) -> some View {
         Text("\(day)")
             .font(.caption)
-            .foregroundStyle(.secondary.opacity(0.5))
+            .foregroundStyle(.secondary.opacity(isDisabled ? 0.2 : 0.5))
             .padding(4)
     }
 
@@ -138,7 +151,10 @@ struct CalendarMonthView: View {
         return false
     }
 
-    private func helpText(for day: Int, isSelected: Bool) -> String {
+    private func helpText(for day: Int, isSelected: Bool, isDisabled: Bool) -> String {
+        if isDisabled {
+            return "Future days cannot be filtered yet"
+        }
         let count = counts[day] ?? 0
         if isSelected {
             return "\(count) sessions • Click again to clear day filter"
@@ -155,6 +171,20 @@ struct CalendarMonthView: View {
         var days = Array(repeating: 0, count: leading) + Array(range)
         while days.count % 7 != 0 { days.append(0) }
         return stride(from: 0, to: days.count, by: 7).map { Array(days[$0..<$0 + 7]) }
+    }
+}
+
+private enum CalendarMonthLayout {
+    static let dayCellHeight: CGFloat = 38
+    static let columnSpacing: CGFloat = 2
+    static let sectionSpacing: CGFloat = 8
+    static let weekdayHeaderHeight: CGFloat = 18
+
+    static func contentHeight(forRowCount rowCount: Int) -> CGFloat {
+        weekdayHeaderHeight
+            + sectionSpacing
+            + CGFloat(rowCount) * dayCellHeight
+            + CGFloat(max(0, rowCount - 1)) * columnSpacing
     }
 }
 

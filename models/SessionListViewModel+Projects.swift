@@ -23,7 +23,23 @@ extension SessionListViewModel {
     }
 
     func setSelectedProject(_ id: String?) {
-        selectedProjectId = id
+        if let id {
+            selectedProjectIDs = Set([id])
+        } else {
+            selectedProjectIDs.removeAll()
+        }
+    }
+
+    func setSelectedProjects(_ ids: Set<String>) {
+        selectedProjectIDs = ids
+    }
+
+    func toggleProjectSelection(_ id: String) {
+        if selectedProjectIDs.contains(id) {
+            selectedProjectIDs.remove(id)
+        } else {
+            selectedProjectIDs.insert(id)
+        }
     }
 
     func assignSessions(to projectId: String?, ids: [String]) async {
@@ -122,15 +138,18 @@ extension SessionListViewModel {
     }
 
     // Calendar helper: days within the given month that have at least one session
-    // belonging to the currently selected project (including descendants), respecting
+    // belonging to any of the currently selected projects (including descendants), respecting
     // each project's allowed sources. Returns nil when no project is selected.
     func calendarEnabledDaysForSelectedProject(monthStart: Date, dimension: DateDimension) -> Set<Int>? {
-        guard let pid = selectedProjectId else { return nil }
+        guard !selectedProjectIDs.isEmpty else { return nil }
         let cal = Calendar.current
 
-        // Build allowed project set: include descendants of selected project
-        let descendants = Set(self.collectDescendants(of: pid, in: self.projects))
-        let allowedProjects: Set<String> = Set([pid] + Array(descendants))
+        // Build allowed project set: include descendants of each selected project
+        var allowedProjects = Set<String>()
+        for pid in selectedProjectIDs {
+            allowedProjects.insert(pid)
+            allowedProjects.formUnion(collectDescendants(of: pid, in: projects))
+        }
 
         // Resolve allowed sources per project
         let allowedSourcesByProject = projects.reduce(into: [String: Set<ProjectSessionSource>]()) {
@@ -167,7 +186,9 @@ extension SessionListViewModel {
     func deleteProject(id: String) async {
         await projectsStore.deleteProject(id: id)
         await loadProjects()
-        if selectedProjectId == id { selectedProjectId = nil }
+        if selectedProjectIDs.contains(id) {
+            selectedProjectIDs.remove(id)
+        }
         applyFilters()
     }
 
@@ -176,7 +197,9 @@ extension SessionListViewModel {
         let ids = collectDescendants(of: id, in: list) + [id]
         for pid in ids { await projectsStore.deleteProject(id: pid) }
         await loadProjects()
-        if let sel = selectedProjectId, ids.contains(sel) { selectedProjectId = nil }
+        if !selectedProjectIDs.isDisjoint(with: ids) {
+            selectedProjectIDs.subtract(ids)
+        }
         applyFilters()
     }
 
@@ -189,7 +212,9 @@ extension SessionListViewModel {
         }
         await projectsStore.deleteProject(id: id)
         await loadProjects()
-        if selectedProjectId == id { selectedProjectId = nil }
+        if selectedProjectIDs.contains(id) {
+            selectedProjectIDs.remove(id)
+        }
         applyFilters()
     }
 

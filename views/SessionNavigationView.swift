@@ -35,8 +35,8 @@ struct SessionNavigationView: View {
                     let totalAll = viewModel.totalSessionCount
                     scopeAllRow(
                         title: "All",
-                        isSelected: viewModel.selectedProjectId == nil,
-                        icon: "square.grid.2x2",
+                        isSelected: viewModel.selectedProjectIDs.isEmpty,
+                        icon: "rectangle.stack",
                         count: (visibleAll, totalAll),
                         action: { viewModel.setSelectedProject(nil) }
                     )
@@ -103,6 +103,7 @@ struct SessionNavigationView: View {
             }
             .labelsHidden()
             .pickerStyle(.segmented)
+            .controlSize(.small)
             .onChange(of: dimension) { _, newDim in
                 viewModel.dateDimension = newDim
             }
@@ -131,7 +132,6 @@ struct SessionNavigationView: View {
                 }
             }
         }
-        .frame(height: 280)
         .padding(8)
     }
 

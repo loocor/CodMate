@@ -13,9 +13,9 @@ struct ProjectsListView: View {
     var body: some View {
         let countsDisplay = viewModel.projectCountsDisplay()
         let tree = buildProjectTree(viewModel.projects)
-        let selectionBinding: Binding<String?> = Binding<String?>(
-            get: { viewModel.selectedProjectId },
-            set: { viewModel.setSelectedProject($0) }
+        let selectionBinding: Binding<Set<String>> = Binding(
+            get: { viewModel.selectedProjectIDs },
+            set: { viewModel.setSelectedProjects($0) }
         )
 
         return List(selection: selectionBinding) {
@@ -34,11 +34,13 @@ struct ProjectsListView: View {
                         onEdit: { editingProject = p; showEdit = true },
                         onDelete: { pendingDelete = p; showDeleteConfirm = true }
                     )
-                    .tag(Optional.some(p.id))
+                    .tag(p.id)
                     .listRowInsets(EdgeInsets())
                     .contentShape(Rectangle())
+                    .onTapGesture {
+                        handleSelection(for: p)
+                    }
                     .onTapGesture(count: 2) { editingProject = p; showEdit = true }
-                    .onTapGesture { viewModel.setSelectedProject(p.id) }
                     .contextMenu {
                         Button { viewModel.newSession(project: p) } label: {
                             Label("New Session", systemImage: "plus")
@@ -152,6 +154,19 @@ struct ProjectsListView: View {
             }
         } message: { prj in
             Text("Sessions remain intact. This only removes the project record. This action cannot be undone.")
+        }
+    }
+
+    private func handleSelection(for project: Project) {
+        #if os(macOS)
+        let commandDown = NSApp.currentEvent?.modifierFlags.contains(.command) ?? false
+        #else
+        let commandDown = false
+        #endif
+        if commandDown {
+            viewModel.toggleProjectSelection(project.id)
+        } else {
+            viewModel.setSelectedProject(project.id)
         }
     }
 

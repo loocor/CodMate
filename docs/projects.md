@@ -41,7 +41,7 @@ Persistence
 
 View Model Changes
 - `SessionListViewModel`
-  - New state: `projects: [Project]`, `selectedProjectId: String?`.
+  - New state: `projects: [Project]`, `selectedProjectIDs: Set<String>` (Cmd-click enables multi-select filters).
   - Loads projects on startup and when config changes.
   - Filters sessions by selected project (matches notes.projectId; directory matching is a future enhancement).
   - New APIs: `assignSessions(to projectId: String, ids: [String])`, `loadProjects()`, `setSelectedProject(_:)`, `clearAllFilters()` resets both path and project.
@@ -56,7 +56,7 @@ UI/UX
   - Only the middle area scrolls. Width rules unchanged.
 
 - Projects list interactions:
-  - Click selects project → filters sessions.
+  - Click selects project → filters sessions. Cmd-click toggles multi-selection across projects; the filter matches any selected project (including descendants).
   - Context menu on session rows (middle column): “Assign to Project…” flyout that lists projects.
   - “New Project” opens a sheet to input: Name, Directory (choose…), Trust Level, Overview, Instructions, Profile (optional).
 
