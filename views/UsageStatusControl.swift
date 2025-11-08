@@ -8,24 +8,27 @@ struct UsageStatusControl: View {
   @State private var showPopover = false
   @State private var isHovering = false
 
-  private let relativeFormatter: RelativeDateTimeFormatter = {
-    let formatter = RelativeDateTimeFormatter()
+  private static let countdownFormatter: DateComponentsFormatter = {
+    let formatter = DateComponentsFormatter()
+    formatter.allowedUnits = [.day, .hour, .minute]
     formatter.unitsStyle = .abbreviated
+    formatter.maximumUnitCount = 2
+    formatter.includesTimeRemainingPhrase = false
     return formatter
   }()
 
+  private var countdownFormatter: DateComponentsFormatter { Self.countdownFormatter }
+
   var body: some View {
+    let referenceDate = Date()
     HStack(spacing: 8) {
-      let rows = providerRows()
-      let outerProgress = progress(for: .claude)
-      let innerProgress = progress(for: .codex)
+      let rows = providerRows(at: referenceDate)
+      let outerProgress = progress(for: .claude, relativeTo: referenceDate)
+      let innerProgress = progress(for: .codex, relativeTo: referenceDate)
       let snapshotForButton = snapshots[selectedProvider] ?? snapshots.values.first
       let providerForButton = snapshotForButton?.provider ?? selectedProvider
 
       Button {
-        if snapshotForButton?.availability != .ready {
-          onRequestRefresh(providerForButton)
-        }
         showPopover.toggle()
       } label: {
         HStack(spacing: isHovering ? 8 : 0) {
@@ -66,8 +69,9 @@ struct UsageStatusControl: View {
       .help("View Codex and Claude Code usage snapshots")
       .focusable(false)
       .onHover { hovering in
-        withAnimation(.easeInOut(duration: 0.2)) {
-          isHovering = hovering
+        withAnimation(.easeInOut(duration: 0.2)) { isHovering = hovering }
+        if hovering, (snapshotForButton?.availability != .ready) {
+          onRequestRefresh(providerForButton)
         }
       }
       .popover(isPresented: $showPopover, arrowEdge: .top) {
@@ -78,19 +82,25 @@ struct UsageStatusControl: View {
         )
         .frame(width: 340)
       }
+      .onChange(of: showPopover) { _, open in
+        if open, (snapshotForButton?.availability != .ready) {
+          onRequestRefresh(providerForButton)
+        }
+      }
     }
   }
 
-  private func providerRows() -> [(provider: UsageProviderKind, text: String)] {
+  private func providerRows(at date: Date) -> [(provider: UsageProviderKind, text: String)] {
     UsageProviderKind.allCases.compactMap { provider in
       guard let snapshot = snapshots[provider] else { return nil }
+      let urgent = snapshot.urgentMetric(relativeTo: date)
       switch snapshot.availability {
       case .ready:
-        let percent = snapshot.urgentMetric?.percentText ?? "—"
+        let percent = urgent?.percentText ?? "—"
         let info: String
-        if let reset = snapshot.urgentMetric?.resetDate {
-          info = resetFormatter.string(from: reset)
-        } else if let minutes = snapshot.urgentMetric?.fallbackWindowMinutes {
+        if let reset = urgent?.resetDate {
+          info = resetCountdown(from: reset) ?? resetFormatter.string(from: reset)
+        } else if let minutes = urgent?.fallbackWindowMinutes {
           info = "\(minutes)m window"
         } else {
           info = "—"
@@ -104,9 +114,9 @@ struct UsageStatusControl: View {
     }
   }
 
-  private func progress(for provider: UsageProviderKind) -> Double? {
+  private func progress(for provider: UsageProviderKind, relativeTo date: Date) -> Double? {
     guard let snapshot = snapshots[provider], snapshot.availability == .ready else { return nil }
-    return snapshot.urgentMetric?.progress
+    return snapshot.urgentMetric(relativeTo: date)?.progress
   }
 
   private func providerColor(_ provider: UsageProviderKind) -> Color {
@@ -125,6 +135,15 @@ struct UsageStatusControl: View {
   }()
 
   private var resetFormatter: DateFormatter { Self.resetFormatter }
+
+  private func resetCountdown(from date: Date) -> String? {
+    let interval = date.timeIntervalSinceNow
+    guard interval > 0 else { return "reset" }
+    if let formatted = countdownFormatter.string(from: interval) {
+      return "resets in \(formatted)"
+    }
+    return nil
+  }
 }
 
 private struct DualUsageDonutView: View {

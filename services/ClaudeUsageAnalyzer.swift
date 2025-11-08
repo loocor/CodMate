@@ -98,9 +98,8 @@ struct ClaudeUsageAnalyzer {
             return nil
         }
 
-        guard let message = json["message"] as? [String: Any],
-              let usage = message["usage"] as? [String: Any]
-        else { return nil }
+        let message = json["message"] as? [String: Any]
+        guard let usage = extractUsageDictionary(from: json, message: message) else { return nil }
 
         let dedupKey = makeDedupKey(message: message, root: json)
         if let dedupKey {
@@ -108,13 +107,16 @@ struct ClaudeUsageAnalyzer {
             seenKeys.insert(dedupKey)
         }
 
-        let input = (usage["input_tokens"] as? NSNumber)?.intValue ?? 0
-        let cacheCreation = (usage["cache_creation_input_tokens"] as? NSNumber)?.intValue ?? 0
-        let cacheRead = (usage["cache_read_input_tokens"] as? NSNumber)?.intValue ?? 0
-        let tokens = input + cacheCreation + cacheRead
+        let input = numberValue(in: usage, keys: ["input_tokens", "inputTokens"])
+        let cacheCreation = numberValue(in: usage, keys: ["cache_creation_input_tokens", "cacheCreationInputTokens"])
+        let cacheRead = numberValue(in: usage, keys: ["cache_read_input_tokens", "cacheReadInputTokens"])
+        let output = numberValue(in: usage, keys: ["output_tokens", "outputTokens"])
+        let tokens = input + cacheCreation + cacheRead + output
         guard tokens > 0 else { return nil }
 
-        let model = message["model"] as? String
+        let model = (message?["model"] as? String)
+            ?? (json["model"] as? String)
+            ?? ((json["metadata"] as? [String: Any])?["model"] as? String)
         let resetDate = parseResetDate(from: json, timestamp: timestamp)
 
         return UsageEntry(
@@ -125,14 +127,40 @@ struct ClaudeUsageAnalyzer {
         )
     }
 
-    private func makeDedupKey(message: [String: Any], root: [String: Any]) -> String? {
-        if let messageID = message["id"] as? String, !messageID.isEmpty {
+    private func makeDedupKey(message: [String: Any]?, root: [String: Any]) -> String? {
+        if let message, let messageID = message["id"] as? String, !messageID.isEmpty {
             return "msg:\(messageID)"
         }
         if let requestID = root["requestId"] as? String, !requestID.isEmpty {
             return "req:\(requestID)"
         }
         return nil
+    }
+
+    private func extractUsageDictionary(from root: [String: Any], message: [String: Any]?) -> [String: Any]? {
+        if let usage = message?["usage"] as? [String: Any] { return usage }
+        if let usage = root["usage"] as? [String: Any] { return usage }
+        if
+            let metadata = root["metadata"] as? [String: Any],
+            let usage = metadata["usage"] as? [String: Any]
+        {
+            return usage
+        }
+        if
+            let info = root["info"] as? [String: Any],
+            let usage = info["usage"] as? [String: Any]
+        {
+            return usage
+        }
+        return nil
+    }
+
+    private func numberValue(in dict: [String: Any], keys: [String]) -> Int {
+        for key in keys {
+            if let number = dict[key] as? NSNumber { return number.intValue }
+            if let string = dict[key] as? String, let value = Int(string) { return value }
+        }
+        return 0
     }
 
     private func parseResetDate(from json: [String: Any], timestamp: Date) -> Date? {
