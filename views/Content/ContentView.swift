@@ -47,6 +47,10 @@ struct ContentView: View {
   // Debounced query to keep filtering cheap on main thread
   @State var throttledPromptQuery = ""
   @State var promptDebounceTask: Task<Void, Never>? = nil
+  @StateObject var globalSearchViewModel: GlobalSearchViewModel
+  @State var selectedUsageProvider: UsageProviderKind = .codex
+  @State var pendingSelectionID: String? = nil
+  @State var pendingConversationFilter: (id: String, term: String)? = nil
   struct SourcedPrompt: Identifiable, Hashable {
     let id = UUID()
     enum Source: Hashable { case project, user, builtin }
@@ -138,7 +142,6 @@ struct ContentView: View {
     let selectOnSuccess: Bool
   }
   @State private var pendingEmbeddedRekeys: [PendingEmbeddedRekey] = []
-  @State var usageProviderSelection: UsageProviderKind = .codex
   func makeTerminalFont() -> NSFont {
     TerminalFontResolver.resolvedFont(
       name: viewModel.preferences.terminalFontName,
@@ -148,6 +151,12 @@ struct ContentView: View {
 
   init(viewModel: SessionListViewModel) {
     self.viewModel = viewModel
+    _globalSearchViewModel = StateObject(
+      wrappedValue: GlobalSearchViewModel(
+        preferences: viewModel.preferences,
+        sessionListViewModel: viewModel
+      )
+    )
   }
 
   var body: some View {
@@ -354,6 +363,19 @@ struct ContentView: View {
       return session.cwd
     }
     return session.fileURL.deletingLastPathComponent().path
+  }
+
+  func projectDirectory(for session: SessionSummary) -> String? {
+    guard
+      let pid = viewModel.projectIdForSession(session.id),
+      let project = viewModel.projects.first(where: { $0.id == pid }),
+      let directory = project.directory,
+      !directory.isEmpty
+    else { return nil }
+    if FileManager.default.fileExists(atPath: directory) {
+      return directory
+    }
+    return directory
   }
 
   func ensureRepoAccessForReview() {

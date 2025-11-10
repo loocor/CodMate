@@ -120,40 +120,86 @@ extension ContentView {
 
       EquatableUsageContainer(
         snapshots: viewModel.usageSnapshots,
-        selectedProvider: $usageProviderSelection,
+        selectedProvider: $selectedUsageProvider,
         onRequestRefresh: { viewModel.requestUsageStatusRefresh(for: $0) }
       )
 
-      Button {
+      searchToolbarButton
+
+      ToolbarCircleButton(
+        systemImage: "arrow.clockwise",
+        isActive: viewModel.isEnriching,
+        help: "Refresh session index"
+      ) {
         Task { await viewModel.refreshSessions(force: true) }
-      } label: {
-        Group {
-          if viewModel.isEnriching {
-            ProgressView()
-              .progressViewStyle(.circular)
-              .controlSize(.small)
-          } else {
-            Image(systemName: "arrow.clockwise")
-              .font(.system(size: 16, weight: .medium))
-          }
-        }
-        .frame(width: 14, height: 14)
-        .padding(8)
-        .background(
-          Circle()
-            .fill(Color(nsColor: .separatorColor).opacity(0.25))
-        )
-        .overlay(
-          Circle()
-            .stroke(Color(nsColor: .separatorColor).opacity(0.55), lineWidth: 1)
-        )
-        .contentShape(Circle())
       }
-      .buttonStyle(.plain)
-      .help("Refresh session index")
       .disabled(viewModel.isEnriching || viewModel.isLoading)
     }
     .padding(.horizontal, 3)
     .padding(.vertical, 2)
+  }
+
+  private var searchToolbarButton: some View {
+    ToolbarCircleButton(
+      systemImage: "magnifyingglass",
+      isActive: globalSearchViewModel.shouldShowPanel,
+      activeColor: Color.primary.opacity(0.8),
+      help: "Open global search (⌘F)"
+    ) {
+      focusGlobalSearchPanel()
+    }
+  }
+}
+
+private struct ToolbarCircleButton: View {
+  let systemImage: String
+  var isActive: Bool = false
+  var activeColor: Color? = nil
+  var help: String?
+  var action: () -> Void
+  @State private var hovering = false
+
+  var body: some View {
+    Button(action: action) {
+      Image(systemName: systemImage)
+        .font(.system(size: 16, weight: .medium))
+        .foregroundStyle(iconColor)
+        .frame(width: 14, height: 14)
+        .padding(8)
+        .background(
+          Circle()
+            .fill(backgroundColor)
+        )
+        .overlay(
+          Circle()
+            .stroke(borderColor, lineWidth: 1)
+        )
+        .contentShape(Circle())
+    }
+    .buttonStyle(.plain)
+    .help(help ?? "")
+    .onHover { hover in
+      withAnimation(.easeInOut(duration: 0.15)) {
+        hovering = hover
+      }
+    }
+  }
+
+  private var iconColor: Color {
+    if isActive, let activeColor {
+      return activeColor
+    }
+    return hovering ? Color.primary : Color.primary.opacity(0.55)
+  }
+
+  private var backgroundColor: Color {
+    if isActive {
+      return Color.primary.opacity(0.08)
+    }
+    return (hovering ? Color.primary.opacity(0.12) : Color(nsColor: .separatorColor).opacity(0.18))
+  }
+
+  private var borderColor: Color {
+    return Color(nsColor: .separatorColor).opacity(hovering ? 0.65 : 0.45)
   }
 }

@@ -11,12 +11,15 @@ extension ContentView {
                   get: { viewModel.reviewPanelStates[focused.id] ?? ReviewPanelState() },
                   set: { viewModel.reviewPanelStates[focused.id] = $0 }
                 )
+                let projectPath = projectDirectory(for: focused)
                 EquatableGitChangesContainer(
                   key: .init(
                     workingDirectoryPath: ws,
+                    projectDirectoryPath: projectPath,
                     state: stateBinding.wrappedValue
                   ),
                   workingDirectory: URL(fileURLWithPath: ws, isDirectory: true),
+                  projectDirectory: projectPath.map { URL(fileURLWithPath: $0, isDirectory: true) },
                   presentation: .full,
                   preferences: viewModel.preferences,
                   onRequestAuthorization: { ensureRepoAccessForReview() },

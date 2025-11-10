@@ -76,11 +76,11 @@ struct UsageStatusControl: View {
       }
       .popover(isPresented: $showPopover, arrowEdge: .top) {
         UsageStatusPopover(
+          referenceDate: referenceDate,
           snapshots: snapshots,
           selectedProvider: $selectedProvider,
           onRequestRefresh: onRequestRefresh
         )
-        .frame(width: 340)
       }
       .onChange(of: showPopover) { _, open in
         if open, (snapshotForButton?.availability != .ready) {
@@ -181,42 +181,89 @@ private struct DualUsageDonutView: View {
 }
 
 private struct UsageStatusPopover: View {
+  var referenceDate: Date
   var snapshots: [UsageProviderKind: UsageProviderSnapshot]
   @Binding var selectedProvider: UsageProviderKind
   var onRequestRefresh: (UsageProviderKind) -> Void
 
-  var body: some View {
-    VStack(alignment: .leading, spacing: 14) {
-      Picker("", selection: $selectedProvider) {
-        ForEach(UsageProviderKind.allCases) { kind in
-          Text(kind.displayName).tag(kind)
-        }
-      }
-      .pickerStyle(.segmented)
-      .controlSize(.small)
-      .frame(maxWidth: .infinity, minHeight: 24)
-      .focusable(false)
+  @Environment(\.colorScheme) private var colorScheme
 
-      if let snapshot = snapshots[selectedProvider] {
-        UsageSnapshotView(
-          snapshot: snapshot,
-          provider: selectedProvider,
-          onRequestRefresh: onRequestRefresh
-        )
-      } else {
-        Text("No usage data available")
-          .foregroundStyle(.secondary)
+  var body: some View {
+    let providers = UsageProviderKind.allCases
+    VStack(alignment: .leading, spacing: 12) {
+      ForEach(Array(providers.enumerated()), id: \.element.id) { index, provider in
+        VStack(alignment: .leading, spacing: 8) {
+          HStack(spacing: 6) {
+            providerIcon(for: provider)
+            Text(provider.displayName)
+              .font(.subheadline.weight(.semibold))
+            Spacer()
+          }
+
+          if let snapshot = snapshots[provider] {
+            UsageSnapshotView(
+              referenceDate: referenceDate,
+              snapshot: snapshot,
+              provider: provider,
+              onRequestRefresh: onRequestRefresh
+            )
+          } else {
+            Text("No usage data available")
+              .font(.footnote)
+              .foregroundStyle(.secondary)
+          }
+        }
+
+        if index < providers.count - 1 {
+          Divider()
+            .padding(.vertical, 6)
+        }
       }
     }
     .padding(16)
+    .frame(width: 300)
     .focusable(false)
+  }
+
+  @ViewBuilder
+  private func providerIcon(for provider: UsageProviderKind) -> some View {
+    if let name = iconName(for: provider) {
+      Image(name)
+        .resizable()
+        .interpolation(.high)
+        .aspectRatio(contentMode: .fit)
+        .frame(width: 12, height: 12)
+        .clipShape(RoundedRectangle(cornerRadius: 2))
+        .modifier(DarkModeInvertModifier(active: provider == .codex && colorScheme == .dark))
+    } else {
+      Circle()
+        .fill(accent(for: provider))
+        .frame(width: 9, height: 9)
+    }
+  }
+
+  private func iconName(for provider: UsageProviderKind) -> String? {
+    switch provider {
+    case .codex: return "ChatGPTIcon"
+    case .claude: return "ClaudeIcon"
+    }
+  }
+
+  private func accent(for provider: UsageProviderKind) -> Color {
+    switch provider {
+    case .codex: return Color.accentColor
+    case .claude: return Color(nsColor: .systemPurple)
+    }
   }
 }
 
 private struct UsageSnapshotView: View {
+  var referenceDate: Date
   var snapshot: UsageProviderSnapshot
   var provider: UsageProviderKind
   var onRequestRefresh: (UsageProviderKind) -> Void
+
+  @State private var showReauthAlert = false
 
   private static let relativeFormatter: RelativeDateTimeFormatter = {
     let formatter = RelativeDateTimeFormatter()
@@ -228,22 +275,16 @@ private struct UsageSnapshotView: View {
     VStack(alignment: .leading, spacing: 12) {
       if snapshot.availability == .ready {
         ForEach(snapshot.metrics.filter { $0.kind != .snapshot && $0.kind != .context }) { metric in
-          UsageMetricRowView(metric: metric)
+          let state = MetricDisplayState(metric: metric, referenceDate: referenceDate)
+          UsageMetricRowView(metric: metric, state: state)
         }
 
         HStack {
-          if let updated = snapshot.updatedAt {
-            Text(
-              "Updated " + Self.relativeFormatter.localizedString(for: updated, relativeTo: Date())
-            )
+          Spacer(minLength: 0)
+          Label(updatedLabel(reference: referenceDate), systemImage: "clock.arrow.circlepath")
+            .labelStyle(.titleAndIcon)
             .font(.caption)
             .foregroundStyle(.secondary)
-          }
-          Spacer()
-          Button("Refresh") { onRequestRefresh(provider) }
-            .buttonStyle(.borderless)
-            .font(.caption.weight(.semibold))
-            .focusable(false)
         }
       } else if snapshot.availability == .comingSoon {
         VStack(alignment: .leading, spacing: 8) {
@@ -253,58 +294,75 @@ private struct UsageSnapshotView: View {
             .foregroundStyle(.secondary)
         }
       } else {
-        Text(snapshot.statusMessage ?? "No usage data yet.")
-          .foregroundStyle(.secondary)
+        // Error state: show re-auth button if needed
+        if snapshot.requiresReauth {
+          VStack(alignment: .leading, spacing: 10) {
+            Text(snapshot.statusMessage ?? "Authentication required.")
+              .font(.footnote)
+              .foregroundStyle(.secondary)
+
+            Button {
+              showReauthAlert = true
+            } label: {
+              Label("Re-authenticate", systemImage: "lock.shield")
+                .font(.subheadline)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+          }
+          .alert("Re-authenticate Claude Code", isPresented: $showReauthAlert) {
+            Button("OK") {}
+          } message: {
+            Text("To re-authenticate:\n\n1. Open Terminal or CodMate's embedded terminal\n2. Run: claude auth login\n3. Complete the sign-in flow\n4. Refresh usage status")
+          }
+        } else {
+          Text(snapshot.statusMessage ?? "No usage data yet.")
+            .foregroundStyle(.secondary)
+        }
       }
     }
     .focusable(false)
   }
+
+  private func updatedLabel(reference: Date) -> String {
+    if let updated = snapshot.updatedAt {
+      let relative = Self.relativeFormatter.localizedString(for: updated, relativeTo: reference)
+      return "Updated " + relative
+    }
+    return "Waiting for usage data"
+  }
 }
 
-private struct UsageMetricRowView: View {
-  var metric: UsageMetricSnapshot
+private struct MetricDisplayState {
+  var progress: Double?
+  var usageText: String?
+  var percentText: String?
+  var resetText: String
 
-  private static let resetFormatter: DateFormatter = {
-    let formatter = DateFormatter()
-    formatter.setLocalizedDateFormatFromTemplate("MMM d, HH:mm")
-    return formatter
-  }()
-
-  private static let relativeFormatter: RelativeDateTimeFormatter = {
-    let formatter = RelativeDateTimeFormatter()
-    formatter.unitsStyle = .short
-    return formatter
-  }()
-
-  var body: some View {
-    VStack(alignment: .leading, spacing: 4) {
-      HStack(alignment: .firstTextBaseline) {
-        Text(metric.label)
-          .font(.subheadline.weight(.semibold))
-        Spacer()
-        Text(resetText)
-          .font(.subheadline)
-          .foregroundStyle(.secondary)
+  init(metric: UsageMetricSnapshot, referenceDate: Date) {
+    let expired = metric.resetDate.map { $0 <= referenceDate } ?? false
+    if expired {
+      progress = metric.progress != nil ? 0 : nil
+      percentText = metric.percentText != nil ? "0%" : nil
+      if metric.kind == .fiveHour {
+        usageText = "No usage since reset"
+      } else {
+        usageText = metric.usageText
       }
-
-      if let progress = metric.progress {
-        UsageProgressBar(progress: progress)
-          .frame(height: 4)
+      if metric.kind == .fiveHour {
+        resetText = "Reset"
+      } else {
+        resetText = ""
       }
-
-      HStack {
-        Text(metric.usageText ?? "")
-          .font(.caption)
-          .foregroundStyle(.secondary)
-        Spacer()
-        Text(metric.percentText ?? "")
-          .font(.caption)
-          .foregroundStyle(.secondary)
-      }
+    } else {
+      progress = metric.progress
+      percentText = metric.percentText
+      usageText = metric.usageText
+      resetText = Self.resetDescription(for: metric)
     }
   }
 
-  private var resetText: String {
+  private static func resetDescription(for metric: UsageMetricSnapshot) -> String {
     if let date = metric.resetDate {
       return "Resets " + Self.resetFormatter.string(from: date)
     }
@@ -315,6 +373,45 @@ private struct UsageMetricRowView: View {
       return "\(minutes) min window"
     }
     return ""
+  }
+
+  private static let resetFormatter: DateFormatter = {
+    let formatter = DateFormatter()
+    formatter.setLocalizedDateFormatFromTemplate("MMM d, HH:mm")
+    return formatter
+  }()
+}
+
+private struct UsageMetricRowView: View {
+  var metric: UsageMetricSnapshot
+  var state: MetricDisplayState
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 4) {
+      HStack(alignment: .firstTextBaseline) {
+        Text(metric.label)
+          .font(.subheadline.weight(.semibold))
+        Spacer()
+        Text(state.resetText)
+          .font(.subheadline)
+          .foregroundStyle(.secondary)
+      }
+
+      if let progress = state.progress {
+        UsageProgressBar(progress: progress)
+          .frame(height: 4)
+      }
+
+      HStack {
+        Text(state.usageText ?? "")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+        Spacer()
+        Text(state.percentText ?? "")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+      }
+    }
   }
 }
 
@@ -337,6 +434,18 @@ private struct UsageProgressBar: View {
             .frame(width: max(6, geo.size.width * CGFloat(clamped)))
         }
       }
+    }
+  }
+}
+
+private struct DarkModeInvertModifier: ViewModifier {
+  var active: Bool
+
+  func body(content: Content) -> some View {
+    if active {
+      content.colorInvert()
+    } else {
+      content
     }
   }
 }

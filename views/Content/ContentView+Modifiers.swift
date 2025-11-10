@@ -22,12 +22,14 @@ extension ContentView {
     }
     let viewWithTasks = applyTaskAndChangeModifiers(to: baseView)
     let viewWithNotifications = applyNotificationModifiers(to: viewWithTasks)
-    return applyDialogsAndAlerts(to: viewWithNotifications)
+    let viewWithDialogs = applyDialogsAndAlerts(to: viewWithNotifications)
+    return applyGlobalSearchOverlay(to: viewWithDialogs, geometry: geometry)
   }
 
   func applyTaskAndChangeModifiers<V: View>(to view: V) -> some View {
     let v1 = view.task { await viewModel.refreshSessions(force: true) }
     let v2 = v1.onChange(of: viewModel.sections) { _, _ in
+      applyPendingSelectionIfNeeded()
       normalizeSelection()
       reconcilePendingEmbeddedRekeys()
     }
@@ -50,7 +52,9 @@ extension ContentView {
       startEmbeddedNewForProject(project)
       viewModel.pendingEmbeddedProjectNew = nil
     }
-    let v6 = v5.toolbar { ToolbarItem(placement: .primaryAction) { refreshToolbarContent } }
+    let v6 = v5.toolbar {
+      ToolbarItem(placement: .primaryAction) { refreshToolbarContent }
+    }
     return AnyView(v6)
   }
 
@@ -69,6 +73,9 @@ extension ContentView {
       }
       .onReceive(NotificationCenter.default.publisher(for: .codMateToggleList)) { _ in
         toggleListVisibility()
+      }
+      .onReceive(NotificationCenter.default.publisher(for: .codMateFocusGlobalSearch)) { _ in
+        focusGlobalSearchPanel()
       }
   }
 

@@ -39,6 +39,12 @@ struct CodMateApp: App {
                 Button("Settings…") { presentSettings(for: .general) }
                     .keyboardShortcut(",", modifiers: [.command])
             }
+            CommandGroup(after: .appSettings) {
+                Button("Global Search…") {
+                    NotificationCenter.default.post(name: .codMateFocusGlobalSearch, object: nil)
+                }
+                .keyboardShortcut("f", modifiers: [.command])
+            }
             // Integrate actions into the system View menu
             CommandGroup(after: .sidebar) {
                 Button("Refresh Sessions") {

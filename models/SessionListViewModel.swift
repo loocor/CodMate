@@ -43,6 +43,7 @@ final class SessionListViewModel: ObservableObject {
         didSet {
             guard !suppressFilterNotifications, oldValue != dateDimension else { return }
             invalidateVisibleCountCache()
+            invalidateCalendarCaches()
             enrichmentSnapshots.removeAll()
             scheduleFiltersUpdate()
             scheduleFilterRefresh(force: true)
@@ -65,6 +66,7 @@ final class SessionListViewModel: ObservableObject {
     var allSessions: [SessionSummary] = [] {
         didSet {
             invalidateVisibleCountCache()
+            invalidateCalendarCaches()
             pruneDayCache()
             for session in allSessions {
                 _ = dayIndex(for: session)
@@ -210,6 +212,7 @@ final class SessionListViewModel: ObservableObject {
     let configService = CodexConfigService()
     var projectsStore: ProjectsStore
     let claudeProvider = ClaudeSessionProvider()
+    private let claudeUsageClient = ClaudeUsageAPIClient()
     @Published var projects: [Project] = []
     var projectCounts: [String: Int] = [:]
     var projectMemberships: [String: String] = [:]
@@ -295,6 +298,12 @@ final class SessionListViewModel: ObservableObject {
         if normalized == sidebarMonthStart { return }
         sidebarMonthStart = normalized
         _ = calendarCounts(for: normalized, dimension: dateDimension)
+
+        // In Created mode, changing the viewed month requires reloading data
+        // since we only load the current month's sessions for efficiency
+        if dateDimension == .created {
+            scheduleFilterRefresh(force: true)
+        }
     }
 
     var sidebarStateSnapshot: SidebarState {
@@ -426,10 +435,9 @@ final class SessionListViewModel: ObservableObject {
                 for s in newlyAppeared { self.handleAutoAssignIfMatches(s) }
             }
             registerActivityHeartbeat(previous: allSessions, current: sessions)
-            allSessions = sessions
+            allSessions = sessions  // didSet will call invalidateCalendarCaches()
             recomputeProjectCounts()
             rebuildCanonicalCwdCache()
-            invalidateCalendarCaches()
             await computeCalendarCaches()
             scheduleFiltersUpdate()
             startBackgroundEnrichment()
@@ -596,12 +604,10 @@ final class SessionListViewModel: ObservableObject {
             monthKey: monthKey,
             dimension: dimension,
             dayIndex: sessionDayCache)
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            self.monthCountsCache[key] = counts
-            self.currentMonthKey = key
-            self.currentMonthDimension = dimension
-        }
+        // Update cache synchronously to avoid race conditions
+        monthCountsCache[key] = counts
+        currentMonthKey = key
+        currentMonthDimension = dimension
         return counts
     }
 
@@ -676,11 +682,21 @@ final class SessionListViewModel: ObservableObject {
         suppressFilterNotifications = true
         selectedDay = normalized
         if let d = normalized { selectedDays = [d] } else { selectedDays.removeAll() }
+
+        // In Created mode, when selecting a day, ensure the calendar sidebar shows that month
+        // so we only need to load one month's data
+        if dateDimension == .created, let d = normalized {
+            let newMonthStart = Self.normalizeMonthStart(d)
+            if newMonthStart != sidebarMonthStart {
+                sidebarMonthStart = newMonthStart
+            }
+        }
+
         suppressFilterNotifications = false
         // Update UI using next-runloop to avoid publishing during view updates
         Task { @MainActor in self.applyFilters() }
         // After coordinated update of selectedDay/selectedDays, trigger a refresh once.
-        // Use force=true to ensure scope reload (created uses .day; updated uses .all).
+        // Use force=true to ensure scope reload
         scheduleFilterRefresh(force: true)
     }
 
@@ -920,6 +936,9 @@ final class SessionListViewModel: ObservableObject {
             hasher.combine((session.lastUpdatedAt ?? session.startedAt).timeIntervalSinceReferenceDate.bitPattern)
             hasher.combine(session.duration.bitPattern)
             hasher.combine(session.eventCount)
+            // Include user-editable fields to invalidate cache when they change
+            hasher.combine(session.userTitle)
+            hasher.combine(session.userComment)
         }
         return GroupSessionsDigest(
             count: sessions.count,
@@ -1200,19 +1219,18 @@ final class SessionListViewModel: ObservableObject {
     }
 
     private func currentScope() -> SessionLoadScope {
-        // If a specific date is selected, decide load scope by dimension
-        if let day = selectedDay {
-            switch dateDimension {
-            case .created:
-                // Created dimension: only load files of the given day
-                return .day(day)
-            case .updated:
-                // Updated dimension: load everything and then filter to match calendar stats
-                return .all
-            }
+        switch dateDimension {
+        case .created:
+            // In Created mode, load the month currently being viewed in the calendar sidebar.
+            // This ensures calendar stats show correct counts for the visible month.
+            // Day filtering for the middle list happens in applyFilters().
+            return .month(sidebarMonthStart)
+        case .updated:
+            // Updated dimension: load everything since updates can cross month boundaries.
+            // Files are organized by creation date on disk, so we need all files to compute
+            // updated-time stats correctly.
+            return .all
         }
-        // No date filter: load all
-        return .all
     }
 
     private func configureDirectoryMonitor() {
@@ -1546,29 +1564,19 @@ extension SessionListViewModel {
 
     private func refreshClaudeUsageStatus() {
         claudeUsageTask?.cancel()
-        let candidates = latestClaudeSessions(limit: 36)
-        guard !candidates.isEmpty else {
-            usageSnapshots[.claude] = UsageProviderSnapshot(
-                provider: .claude,
-                title: UsageProviderKind.claude.displayName,
-                availability: .empty,
-                metrics: [],
-                updatedAt: nil,
-                statusMessage: "No Claude sessions found yet."
-            )
-            return
-        }
-
         claudeUsageTask = Task { [weak self] in
-            let status = await Task.detached(priority: .utility) { () -> ClaudeUsageStatus? in
-                ClaudeUsageAnalyzer().buildStatus(from: candidates)
-            }.value
-            guard !Task.isCancelled else { return }
-            await MainActor.run {
-                guard let self else { return }
-                if let status {
+            guard let self else { return }
+            let client = self.claudeUsageClient
+            do {
+                let status = try await client.fetchUsageStatus()
+                guard !Task.isCancelled else { return }
+                await MainActor.run {
                     self.setUsageSnapshot(.claude, status.asProviderSnapshot())
-                } else {
+                }
+            } catch {
+                NSLog("[ClaudeUsage] API fetch failed: \(error)")
+                guard !Task.isCancelled else { return }
+                await MainActor.run {
                     self.setUsageSnapshot(
                         .claude,
                         UsageProviderSnapshot(
@@ -1577,12 +1585,52 @@ extension SessionListViewModel {
                             availability: .empty,
                             metrics: [],
                             updatedAt: nil,
-                            statusMessage: "Claude usage data is unavailable."
+                            statusMessage: Self.claudeUsageErrorMessage(from: error),
+                            requiresReauth: Self.claudeUsageRequiresReauth(error: error)
                         )
                     )
                 }
             }
         }
+    }
+
+    private static func claudeUsageRequiresReauth(error: Error) -> Bool {
+        guard let clientError = error as? ClaudeUsageAPIClient.ClientError else {
+            return false
+        }
+        switch clientError {
+        case .credentialNotFound, .credentialExpired, .malformedCredential, .missingAccessToken:
+            return true
+        case .requestFailed(let code):
+            return code == 401
+        case .keychainAccessRestricted:
+            return true
+        case .emptyResponse, .decodingFailed:
+            return false
+        }
+    }
+
+    private static func claudeUsageErrorMessage(from error: Error) -> String {
+        if let clientError = error as? ClaudeUsageAPIClient.ClientError {
+            switch clientError {
+            case .credentialNotFound:
+                return "Sign in to Claude Code once to enable usage data."
+            case .keychainAccessRestricted(let status):
+                return "Allow CodMate to access \"Claude Code-credentials\" in Keychain (status \(status))."
+            case .malformedCredential, .missingAccessToken:
+                return "Claude Code credential looks invalid. Try signing out/in again."
+            case .credentialExpired:
+                return "Claude Code credential expired. Please sign in again."
+            case .requestFailed(let code):
+                if code == 401 {
+                    return "Claude usage request failed (HTTP 401). Allow CodMate to access the \"Claude Code…-credentials\" entry in Keychain, then refresh."
+                }
+                return "Claude usage request failed (HTTP \(code))."
+            case .emptyResponse, .decodingFailed:
+                return "Claude usage data could not be decoded."
+            }
+        }
+        return "Claude usage data is unavailable."
     }
 
     private func setUsageSnapshot(_ provider: UsageProviderKind, _ new: UsageProviderSnapshot) {
@@ -1599,15 +1647,10 @@ extension SessionListViewModel {
         if au != bu { return false }
         let ap = a.urgentMetric()?.progress
         let bp = b.urgentMetric()?.progress
-        return ap == bp
-    }
-
-    private func latestClaudeSessions(limit: Int) -> [SessionSummary] {
-        let sorted = allSessions
-            .filter { $0.source == .claude }
-            .sorted { ($0.lastUpdatedAt ?? $0.startedAt) > ($1.lastUpdatedAt ?? $1.startedAt) }
-        guard !sorted.isEmpty else { return [] }
-        return Array(sorted.prefix(limit))
+        if ap != bp { return false }
+        let ar = a.urgentMetric()?.resetDate?.timeIntervalSinceReferenceDate
+        let br = b.urgentMetric()?.resetDate?.timeIntervalSinceReferenceDate
+        return ar == br
     }
 
     // MARK: - Sandbox Permission Helpers

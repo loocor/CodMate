@@ -17,6 +17,7 @@ struct SessionDetailView: View {
     @State private var isConversationExpanded = false
     @State private var expandedTurnIDs: Set<String> = []
     @State private var searchText: String = ""
+    @State private var expandAllOnSearch = false
     @State private var sortAscending: Bool = false
     @State private var monitor: DirectoryMonitor? = nil
     @State private var debounceReloadTask: Task<Void, Never>? = nil
@@ -51,6 +52,14 @@ struct SessionDetailView: View {
         .onChange(of: viewModel.preferences.timelineVisibleKinds) { _, _ in
             // Re-apply current search + sort with new visibility
             applyFilterAndSort()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .codMateConversationFilter)) { note in
+            guard let target = note.userInfo?["sessionId"] as? String, target == summary.id else { return }
+            guard let term = note.userInfo?["term"] as? String else { return }
+            DispatchQueue.main.async {
+                searchText = term
+                expandAllOnSearch = false
+            }
         }
     }
 
@@ -422,6 +431,10 @@ extension SessionDetailView {
 
         turns = sorted.compactMap {
             filterTurn($0, visible: kinds, excludingFirstEnvContext: firstEnvContextID)
+        }
+        if expandAllOnSearch {
+            expandedTurnIDs = Set(turns.map(\.id))
+            expandAllOnSearch = false
         }
     }
 

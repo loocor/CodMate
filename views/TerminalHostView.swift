@@ -138,6 +138,9 @@ import SwiftUI
                 terminal.getTerminal().setCursorStyle(targetStyle)
                 if let codmate = terminal as? CodMateTerminalView {
                     codmate.setOverlaySuppressed(!isActive)
+                    // Update cursor style tracking for TUI apps that override cursor settings
+                    codmate.preferredCursorStyle = targetStyle
+                    codmate.isActiveTerminal = isActive
                 }
                 if !isActive {
                     overlay?.isHidden = true
@@ -192,12 +195,18 @@ import SwiftUI
                let existingKey = (existing as? CodMateTerminalView)?.sessionID,
                existingKey == terminalKey {
                 // Terminal already attached, just update theme and font if changed
+                var needsRelayout = false
                 if existing.font != font {
                     existing.font = font
+                    needsRelayout = true
                 }
                 applyTheme(existing)
                 applyCursorStyle(existing)
-                coordinator.scheduleRelayout(existing)
+                // Only relayout when font actually changed; avoid triggering layout on every SwiftUI update
+                // to prevent terminal size jitter that causes SIGWINCH storms in nested TUIs like Claude Code.
+                if needsRelayout {
+                    coordinator.scheduleRelayout(existing)
+                }
                 let isActive = container.window?.firstResponder === existing
                 coordinator.handleFocusChange(isActive: isActive)
                 return

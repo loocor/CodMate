@@ -37,6 +37,14 @@ import Foundation
     ]
     var onFocusChanged: ((Bool) -> Void)?
     private var overlaySuppressed = false
+    private var lastScrollActivityTime: TimeInterval = 0
+    private let scrollActivityThrottle: TimeInterval = 0.5
+
+    // Cursor style reapplication tracking to counter TUI apps that override cursor settings
+    var preferredCursorStyle: CursorStyle = .blinkBlock
+    var isActiveTerminal: Bool = false
+    private var cursorStyleReapplyWork: DispatchWorkItem?
+    private let cursorStyleReapplyDelay: TimeInterval = 0.15
 
     deinit {}
 
@@ -88,7 +96,7 @@ import Foundation
 
     // Intercept copy to sanitize CJK spacing artifacts introduced by rendering hacks.
     // This cleans spaces between adjacent CJK or fullwidth characters so the
-    // pasted text looks natural. Example to fix: "其 它 完 成 项 （ 回 顾 ）".
+    // pasted text looks natural.
     override func copy(_ sender: Any) {
       super.copy(sender)
       let pb = NSPasteboard.general
@@ -173,18 +181,17 @@ import Foundation
         // Only intercept when this view is the active first responder
         guard self.window?.firstResponder === self else { return event }
 
-        // Handle Shift/Option + Return as newline (kitty CSI-u with modifiers)
+        // Handle Shift/Option + Return as newline
         let isReturnKey =
           (event.keyCode == 36 /* Return */) || (event.keyCode == 76 /* Keypad Enter */)
         if isReturnKey {
           let hasShift = event.modifierFlags.contains(.shift)
           let hasAlt = event.modifierFlags.contains(.option)
           if hasShift || hasAlt {
-            // Kitty keyboard protocol: CSI 13;<mod>u
-            // Mod values (xterm-style): 2=Shift, 3=Alt, 4=Shift+Alt
-            let mod: Int = (hasShift && hasAlt) ? 4 : (hasAlt ? 3 : 2)
-            let seq = "\u{1B}[13;\(mod)u"
-            self.send(txt: seq)
+            // Send plain newline for maximum compatibility.
+            // Both Claude Code CLI and Codex support this for multi-line input.
+            // The kitty keyboard protocol CSI-u sequences (\u{1B}[13;2u) are not universally supported.
+            self.send(txt: "\n")
             return nil  // swallow original key event
           }
         }
@@ -197,12 +204,22 @@ import Foundation
       if !overlaySuppressed {
         onScrolled?(position, self.scrollThumbsize)
       }
-      onScrollActivity?(Date())
+      // Throttle scroll activity callbacks to avoid excessive Task churn in TerminalSessionManager.
+      // The scrolled() delegate fires on every data receipt, creating/canceling Tasks hundreds
+      // of times per second during active use. Throttling to 500ms dramatically reduces overhead.
+      let now = CFAbsoluteTimeGetCurrent()
+      if now - lastScrollActivityTime >= scrollActivityThrottle {
+        lastScrollActivityTime = now
+        onScrollActivity?(Date())
+      }
     }
 
     override func dataReceived(slice: ArraySlice<UInt8>) {
       if Thread.isMainThread {
         forwardDataReceived(slice: slice)
+        // Reapply cursor style after data receipt to counter any cursor control sequences
+        // from nested TUIs like Claude Code CLI that may override our configured style.
+        scheduleReapplyCursorStyle()
         return
       }
       enqueueChunk(Array(slice))
@@ -213,6 +230,7 @@ import Foundation
         DispatchQueue.main.async { [weak self] in
           guard let self else { return }
           self.forwardDataReceived(slice: chunk[...])
+          self.scheduleReapplyCursorStyle()
         }
         return
       }
@@ -259,6 +277,7 @@ import Foundation
         guard let self else { return }
         if chunks.count == 1 {
           self.forwardDataReceived(slice: chunks[0][...])
+          self.scheduleReapplyCursorStyle()
           return
         }
         var merged = [UInt8]()
@@ -270,11 +289,27 @@ import Foundation
           merged.append(contentsOf: chunk)
         }
         self.forwardDataReceived(slice: merged[...])
+        self.scheduleReapplyCursorStyle()
       }
     }
 
     private func forwardDataReceived(slice: ArraySlice<UInt8>) {
       super.dataReceived(slice: slice)
+    }
+
+    private func scheduleReapplyCursorStyle() {
+      // Cancel any pending reapply to avoid excessive calls
+      cursorStyleReapplyWork?.cancel()
+
+      let work = DispatchWorkItem { [weak self] in
+        guard let self else { return }
+        // Only reapply if this terminal is active
+        if self.isActiveTerminal {
+          self.getTerminal().setCursorStyle(self.preferredCursorStyle)
+        }
+      }
+      cursorStyleReapplyWork = work
+      DispatchQueue.main.asyncAfter(deadline: .now() + cursorStyleReapplyDelay, execute: work)
     }
 
     // TerminalDelegate notification hook: handle OSC 777 notifications emitted by the TUI/CLI.

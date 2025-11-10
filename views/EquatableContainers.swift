@@ -4,6 +4,7 @@ import SwiftUI
 struct EquatableGitChangesContainer: View, Equatable {
   struct Key: Equatable {
     var workingDirectoryPath: String
+    var projectDirectoryPath: String?
     var state: ReviewPanelState
   }
 
@@ -13,6 +14,7 @@ struct EquatableGitChangesContainer: View, Equatable {
 
   let key: Key
   let workingDirectory: URL
+  let projectDirectory: URL?
   let presentation: GitChangesPanel.Presentation
   let preferences: SessionPreferencesStore
   var onRequestAuthorization: (() -> Void)? = nil
@@ -21,6 +23,7 @@ struct EquatableGitChangesContainer: View, Equatable {
   var body: some View {
     GitChangesPanel(
       workingDirectory: workingDirectory,
+      projectDirectory: projectDirectory,
       presentation: presentation,
       preferences: preferences,
       onRequestAuthorization: onRequestAuthorization,
@@ -41,11 +44,10 @@ struct EquatableUsageContainer: View, Equatable {
   }
 
   static func == (lhs: EquatableUsageContainer, rhs: EquatableUsageContainer) -> Bool {
-    lhs.key == rhs.key && lhs.selectedProviderValue == rhs.selectedProviderValue
+    lhs.key == rhs.key
   }
 
   let key: UsageDigest
-  let selectedProviderValue: UsageProviderKind
 
   var snapshots: [UsageProviderKind: UsageProviderSnapshot]
   @Binding var selectedProvider: UsageProviderKind
@@ -60,7 +62,6 @@ struct EquatableUsageContainer: View, Equatable {
     self._selectedProvider = selectedProvider
     self.onRequestRefresh = onRequestRefresh
     self.key = Self.digest(snapshots)
-    self.selectedProviderValue = selectedProvider.wrappedValue
   }
 
   var body: some View {
