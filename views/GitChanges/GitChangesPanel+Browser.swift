@@ -85,6 +85,7 @@ extension GitChangesPanel {
 
     private func browserDirectoryRow(_ row: BrowserRow) -> some View {
         let key = row.directoryKey ?? row.node.name
+        let repoAvailable = vm.repoRoot != nil
         let indent = CGFloat(max(row.depth, 0)) * indentStep
         let isExpanded = !treeQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || expandedDirsBrowser.contains(key)
         return HStack(spacing: 0) {
@@ -139,7 +140,7 @@ extension GitChangesPanel {
                 toggleBrowserDirectory(key)
             }
             let paths = filePaths(under: key)
-            if !paths.isEmpty {
+            if repoAvailable, !paths.isEmpty {
                 Button("Stage Folder") {
                     Task { await vm.stage(paths: paths) }
                 }
@@ -169,6 +170,7 @@ extension GitChangesPanel {
     private func browserFileRowContent(path: String, row: BrowserRow) -> some View {
         let indent = CGFloat(max(row.depth, 0)) * indentStep
         let change = vm.changes.first { $0.path == path }
+        let repoAvailable = vm.repoRoot != nil
         let isSelected = vm.selectedPath == path
         let bulletColor = change.map { statusColor(for: $0.path) } ?? Color.clear
         let showStageAction = change != nil
@@ -251,7 +253,7 @@ extension GitChangesPanel {
                             }
                         }
 #endif
-                        if let change {
+                        if repoAvailable, let change {
                             Button {
                                 Task {
                                     if change.staged != nil {
@@ -275,7 +277,7 @@ extension GitChangesPanel {
                             }
                         }
                     }
-                    if let change {
+                    if repoAvailable, let change {
                         statusBadge(for: change)
                             .frame(height: quickActionHeight)
                     }
@@ -307,7 +309,7 @@ extension GitChangesPanel {
                 revealBrowserItem(path: path, isDirectory: false)
             }
 #endif
-            if let change {
+            if repoAvailable, let change {
                 if change.staged != nil {
                     Button("Unstage File") {
                         Task { await vm.unstage(paths: [path]) }
@@ -317,7 +319,7 @@ extension GitChangesPanel {
                         Task { await vm.stage(paths: [path]) }
                     }
                 }
-            } else {
+            } else if repoAvailable {
                 Button("Stage File") {
                     Task { await vm.stage(paths: [path]) }
                 }
@@ -342,7 +344,13 @@ extension GitChangesPanel {
             if isLoadingBrowserTree { return }
             if !browserNodes.isEmpty && browserTreeError == nil { return }
         }
-        guard let root = vm.repoRoot else { return }
+        let root = vm.repoRoot ?? explorerRoot
+        if !FileManager.default.fileExists(atPath: root.path) {
+            browserNodes = []
+            displayedBrowserRows = []
+            browserTreeError = "Explorer root unavailable."
+            return
+        }
 
         browserTreeTask?.cancel()
         isLoadingBrowserTree = true
@@ -350,8 +358,9 @@ extension GitChangesPanel {
 
         let limit = browserEntryLimit
         let viewModel = vm
+        let repoAvailable = vm.repoRoot != nil
         browserTreeTask = Task {
-            let gitResult = await viewModel.listVisiblePaths(limit: limit)
+            let gitResult = repoAvailable ? await viewModel.listVisiblePaths(limit: limit) : nil
             if Task.isCancelled {
                 await MainActor.run {
                     browserTreeTask = nil
@@ -395,13 +404,11 @@ extension GitChangesPanel {
     }
 
     func rebuildBrowserDisplayed() {
-        let filtered: [FileNode]
         let query = treeQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-        if query.isEmpty {
-            filtered = browserNodes
-        } else {
-            filtered = filteredNodes(browserNodes, query: query)
-        }
+        let matches = query.isEmpty ? Set<String>() : contentSearchMatches
+        let filtered = query.isEmpty
+            ? browserNodes
+            : filteredNodes(browserNodes, query: query, contentMatches: matches)
         displayedBrowserRows = flattenBrowserNodes(filtered, depth: 0, forceExpand: !query.isEmpty)
     }
 
@@ -527,7 +534,7 @@ extension GitChangesPanel {
             } else {
                 vm.selectedSide = .staged
             }
-            vm.showPreviewInsteadOfDiff = isImagePath(path)
+            vm.showPreviewInsteadOfDiff = mode == .browser ? true : isImagePath(path)
         } else {
             vm.selectedSide = .unstaged
             vm.showPreviewInsteadOfDiff = true

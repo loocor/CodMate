@@ -10,6 +10,7 @@ extension GitChangesPanel {
             if node.isDirectory {
                 // Directory row with VS Code-style layout
                 let key = node.dirPath ?? ""
+                let hoverKey = scopedHoverKey(for: key, scope: scope)
                 let isExpanded: Bool = {
                     switch scope {
                     case .staged: return expandedDirsStaged.contains(key)
@@ -44,9 +45,10 @@ extension GitChangesPanel {
                             .lineLimit(1)
                         Spacer(minLength: 0)
                     }
-                    .padding(.trailing, (hoverDirKey == (node.dirPath ?? "")) ? (quickActionWidth + trailingPad) : trailingPad)
+                    .padding(.trailing, (hoverDirKey == hoverKey) ? (quickActionWidth + trailingPad) : trailingPad)
                     .overlay(alignment: .trailing) {
                         if let dir = node.dirPath {
+                            let dirHoverKey = scopedHoverKey(for: dir, scope: scope)
                             HStack(spacing: hoverButtonSpacing) {
                                 Button(action: {
                                     Task {
@@ -60,12 +62,12 @@ extension GitChangesPanel {
                                 }
                                 .buttonStyle(.plain)
                                 .onHover { inside in
-                                    if inside { hoverDirButtonPath = dir } else if hoverDirButtonPath == dir { hoverDirButtonPath = nil }
+                                    if inside { hoverDirButtonPath = dirHoverKey } else if hoverDirButtonPath == dirHoverKey { hoverDirButtonPath = nil }
                                 }
                                 .frame(width: quickActionWidth, height: quickActionHeight)
                             }
-                            .foregroundStyle((hoverDirButtonPath == dir) ? Color.accentColor : Color.secondary)
-                            .opacity((hoverDirKey == dir) ? 1 : 0)
+                            .foregroundStyle((hoverDirButtonPath == dirHoverKey) ? Color.accentColor : Color.secondary)
+                            .opacity((hoverDirKey == dirHoverKey) ? 1 : 0)
                         }
                     }
                 }
@@ -73,7 +75,7 @@ extension GitChangesPanel {
                 .contentShape(Rectangle())
                 .background(
                     RoundedRectangle(cornerRadius: 4)
-                        .fill((hoverDirKey == (node.dirPath ?? "")) ? Color.secondary.opacity(0.06) : Color.clear)
+                        .fill((hoverDirKey == hoverKey) ? Color.secondary.opacity(0.06) : Color.clear)
                 )
                 .onTapGesture {
                     if let k = node.dirPath {
@@ -87,7 +89,8 @@ extension GitChangesPanel {
                 }
                 .onHover { inside in
                     if let key = node.dirPath {
-                        if inside { hoverDirKey = key } else if hoverDirKey == key { hoverDirKey = nil }
+                        let dirHover = scopedHoverKey(for: key, scope: scope)
+                        if inside { hoverDirKey = dirHover } else if hoverDirKey == dirHover { hoverDirKey = nil }
                     }
                 }
                 .contextMenu {
@@ -119,6 +122,7 @@ extension GitChangesPanel {
                 // File row
                 let path = node.fullPath ?? node.name
                 let isSelected = (vm.selectedPath == path) && ((scope == .staged && vm.selectedSide == .staged) || (scope == .unstaged && vm.selectedSide == .unstaged))
+                let hoverKey = scopedHoverKey(for: path, scope: scope)
                 HStack(spacing: 0) {
                     // Indentation guides (vertical lines)
                     ZStack(alignment: .leading) {
@@ -144,19 +148,19 @@ extension GitChangesPanel {
                             .lineLimit(1)
                         Spacer(minLength: 0)
                     }
-                    .padding(.trailing, (hoverFilePath == path)
+                    .padding(.trailing, (hoverFilePath == hoverKey)
                         ? (statusBadgeWidth + trailingPad + quickActionWidth*3 + hoverButtonSpacing*2)
                         : (statusBadgeWidth + trailingPad))
                     .overlay(alignment: .trailing) {
                             HStack(spacing: hoverButtonSpacing) {
-                            if hoverFilePath == path {
+                            if hoverFilePath == hoverKey {
                                 Button { vm.openFile(path, using: preferences.defaultFileEditor) } label: {
                                     Image(systemName: "square.and.pencil")
-                                        .foregroundStyle((hoverEditPath == path) ? Color.accentColor : Color.secondary)
+                                        .foregroundStyle((hoverEditPath == hoverKey) ? Color.accentColor : Color.secondary)
                                 }
                                 .buttonStyle(.plain)
                                 .onHover { inside in
-                                    if inside { hoverEditPath = path } else if hoverEditPath == path { hoverEditPath = nil }
+                                    if inside { hoverEditPath = hoverKey } else if hoverEditPath == hoverKey { hoverEditPath = nil }
                                 }
                                 .frame(width: quickActionWidth, height: quickActionHeight)
 
@@ -165,11 +169,11 @@ extension GitChangesPanel {
                                     showDiscardAlert = true
                                 }) {
                                     Image(systemName: "arrow.uturn.backward.circle")
-                                        .foregroundStyle((hoverRevertPath == path) ? Color.red : Color.secondary)
+                                        .foregroundStyle((hoverRevertPath == hoverKey) ? Color.red : Color.secondary)
                                 }
                                 .buttonStyle(.plain)
                                 .onHover { inside in
-                                    if inside { hoverRevertPath = path } else if hoverRevertPath == path { hoverRevertPath = nil }
+                                    if inside { hoverRevertPath = hoverKey } else if hoverRevertPath == hoverKey { hoverRevertPath = nil }
                                 }
                                 .frame(width: quickActionWidth, height: quickActionHeight)
 
@@ -180,11 +184,11 @@ extension GitChangesPanel {
                                     }
                                 }) {
                                     Image(systemName: scope == .staged ? "minus.circle" : "plus.circle")
-                                        .foregroundStyle((hoverStagePath == path) ? Color.accentColor : Color.secondary)
+                                        .foregroundStyle((hoverStagePath == hoverKey) ? Color.accentColor : Color.secondary)
                                 }
                                 .buttonStyle(.plain)
                                 .onHover { inside in
-                                    if inside { hoverStagePath = path } else if hoverStagePath == path { hoverStagePath = nil }
+                                    if inside { hoverStagePath = hoverKey } else if hoverStagePath == hoverKey { hoverStagePath = nil }
                                 }
                                 .frame(width: quickActionWidth, height: quickActionHeight)
                             }
@@ -200,7 +204,7 @@ extension GitChangesPanel {
                 .contentShape(Rectangle())
                 .background(
                     RoundedRectangle(cornerRadius: 4)
-                        .fill(isSelected ? Color.accentColor.opacity(0.15) : ((hoverFilePath == path) ? Color.secondary.opacity(0.06) : Color.clear))
+                        .fill(isSelected ? Color.accentColor.opacity(0.15) : ((hoverFilePath == hoverKey) ? Color.secondary.opacity(0.06) : Color.clear))
                 )
                 .onTapGesture {
                     vm.selectedPath = path
@@ -208,7 +212,7 @@ extension GitChangesPanel {
                     Task { await vm.refreshDetail() }
                 }
                 .onHover { inside in
-                    if inside { hoverFilePath = path } else if hoverFilePath == path { hoverFilePath = nil }
+                    if inside { hoverFilePath = hoverKey } else if hoverFilePath == hoverKey { hoverFilePath = nil }
                 }
                 .contextMenu {
                     if scope == .staged {
@@ -232,5 +236,10 @@ extension GitChangesPanel {
                 }
             }
         }
+    }
+
+    private func scopedHoverKey(for path: String, scope: TreeScope) -> String {
+        let prefix = (scope == .staged) ? "S" : "U"
+        return "\(prefix)::\(path)"
     }
 }

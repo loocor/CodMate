@@ -6,6 +6,7 @@ import AppKit
 struct GitChangesPanel: View {
     enum Presentation { case embedded, full }
     let workingDirectory: URL
+    let projectDirectory: URL?
     var presentation: Presentation = .embedded
     let preferences: SessionPreferencesStore
     var onRequestAuthorization: (() -> Void)? = nil
@@ -69,6 +70,7 @@ struct GitChangesPanel: View {
     let hoverButtonSpacing: CGFloat = 8
     let statusBadgeWidth: CGFloat = 18
     let browserEntryLimit: Int = 6000
+    let repoContentMatchLimit: Int = 4000
     // Viewer options (from Settings › Git Review). Defaults: line numbers ON, wrap OFF
     var wrapText: Bool { preferences.gitWrapText }
     var showLineNumbers: Bool { preferences.gitShowLineNumbers }
@@ -76,41 +78,45 @@ struct GitChangesPanel: View {
     let wandButtonSize: CGFloat = 24
     var wandReservedTrailing: CGFloat { wandButtonSize } // equal-width indent to avoid overlap
     @State var hoverWand: Bool = false
+    @State private var diffModePreviewPreference: Bool = false
+    @State private var forcedBrowserDueToMissingRepo = false
+    @State var contentSearchMatches: Set<String> = []
+    @State private var contentSearchTask: Task<Void, Never>? = nil
+    @State private var contentSearchQueryVersion: UInt64 = 0
 #if canImport(AppKit)
     @State var previewImage: NSImage? = nil
     @State var previewImageTask: Task<Void, Never>? = nil
 #endif
+    private let repoSearchService = RepoContentSearchService()
 
     var body: some View {
         Group {
-            if vm.repoRoot == nil {
-                if vm.isResolvingRepo {
-                    VStack(spacing: 16) {
-                        ProgressView()
-                        Text("Resolving repository access…")
-                            .font(.headline)
-                            .foregroundStyle(.secondary)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else {
-                    VStack(spacing: 12) {
-                        Image(systemName: "lock.rectangle.on.rectangle")
-                            .font(.system(size: 42))
-                            .foregroundStyle(.secondary)
-                        Text("Git Review Unavailable")
-                            .font(.headline)
-                        Text("This folder is either not a Git repository or requires permission. Authorize the repository root (the folder containing .git).")
-                            .font(.subheadline)
-                            .multilineTextAlignment(.center)
-                            .foregroundStyle(.secondary)
-                            .frame(maxWidth: 520)
-                        Button("Authorize Repository Folder…") {
-                            onRequestAuthorization?()
-                        }
-                        .buttonStyle(.borderedProminent)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            if vm.repoRoot == nil && vm.isResolvingRepo {
+                VStack(spacing: 16) {
+                    ProgressView()
+                    Text("Resolving repository access…")
+                        .font(.headline)
+                        .foregroundStyle(.secondary)
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if !explorerRootExists && vm.repoRoot == nil {
+                VStack(spacing: 12) {
+                    Image(systemName: "lock.rectangle.on.rectangle")
+                        .font(.system(size: 42))
+                        .foregroundStyle(.secondary)
+                    Text("Git Review Unavailable")
+                        .font(.headline)
+                    Text("This folder is either not a Git repository or requires permission. Authorize the repository root (the folder containing .git).")
+                        .font(.subheadline)
+                        .multilineTextAlignment(.center)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: 520)
+                    Button("Authorize Repository Folder…") {
+                        onRequestAuthorization?()
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 contentWithPresentation
             }
@@ -147,7 +153,7 @@ struct GitChangesPanel: View {
                 }
             }
             .task(id: workingDirectory) {
-                vm.attach(to: workingDirectory)
+                vm.attach(to: workingDirectory, fallbackProjectDirectory: projectDirectory)
             }
             .task(id: vm.repoRoot?.path) {
                 browserNodes = []
@@ -155,6 +161,12 @@ struct GitChangesPanel: View {
                 browserTreeError = nil
                 if mode == .browser {
                     reloadBrowserTreeIfNeeded(force: true)
+                }
+                let trimmed = treeQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty {
+                    await MainActor.run {
+                        handleTreeQueryChange(treeQuery)
+                    }
                 }
             }
             .modifier(LifecycleModifier(
@@ -165,12 +177,55 @@ struct GitChangesPanel: View {
                 mode: $mode,
                 vm: vm,
                 treeQuery: treeQuery,
+                onSearchQueryChanged: { handleTreeQueryChange($0) },
                 onRebuildNodes: rebuildNodes,
                 onRebuildDisplayed: rebuildDisplayed,
                 onEnsureExpandAll: ensureExpandAllIfNeeded,
                 onRebuildBrowserDisplayed: rebuildBrowserDisplayed,
                 onRefreshBrowserTree: { reloadBrowserTreeIfNeeded(force: false) }
             ))
+            .onDisappear {
+                contentSearchTask?.cancel()
+                contentSearchTask = nil
+            }
+            .onAppear {
+                diffModePreviewPreference = vm.showPreviewInsteadOfDiff
+            }
+            .onChange(of: vm.showPreviewInsteadOfDiff) { _, newValue in
+                if mode == .diff {
+                    diffModePreviewPreference = newValue
+                }
+            }
+            .onChange(of: mode) { _, newMode in
+                if newMode == .browser {
+                    diffModePreviewPreference = vm.showPreviewInsteadOfDiff
+                    if !vm.showPreviewInsteadOfDiff {
+                        vm.showPreviewInsteadOfDiff = true
+                    }
+                } else {
+                    vm.showPreviewInsteadOfDiff = diffModePreviewPreference
+                }
+            }
+            .onChange(of: vm.repoRoot) { _, newRoot in
+                if newRoot == nil {
+                    forcedBrowserDueToMissingRepo = true
+                    if mode != .browser {
+                        mode = .browser
+                    }
+                    if !vm.showPreviewInsteadOfDiff {
+                        vm.showPreviewInsteadOfDiff = true
+                    }
+                } else if forcedBrowserDueToMissingRepo {
+                    forcedBrowserDueToMissingRepo = false
+                    let target = savedState.mode
+                    mode = target
+                    if target == .diff {
+                        vm.showPreviewInsteadOfDiff = diffModePreviewPreference
+                    } else if !vm.showPreviewInsteadOfDiff {
+                        vm.showPreviewInsteadOfDiff = true
+                    }
+                }
+            }
     }
 
     private var contentWithPresentation: some View {
@@ -240,6 +295,50 @@ struct GitChangesPanel: View {
         }
     }
 
+    @MainActor
+    private func handleTreeQueryChange(_ query: String) {
+        contentSearchTask?.cancel()
+        contentSearchTask = nil
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            contentSearchMatches = []
+            return
+        }
+        guard let root = vm.repoRoot else {
+            contentSearchMatches = []
+            return
+        }
+        contentSearchMatches = []
+        contentSearchQueryVersion &+= 1
+        let version = contentSearchQueryVersion
+        let service = repoSearchService
+        contentSearchTask = Task {
+            try? await Task.sleep(nanoseconds: 200_000_000)
+            if Task.isCancelled { return }
+            do {
+                let matches = try await service.searchFilesContaining(trimmed, in: root, limit: repoContentMatchLimit)
+                if Task.isCancelled { return }
+                await MainActor.run {
+                    if version == contentSearchQueryVersion {
+                        contentSearchMatches = matches
+                        rebuildDisplayed()
+                        rebuildBrowserDisplayed()
+                        contentSearchTask = nil
+                    }
+                }
+            } catch is CancellationError {
+                // Ignore cancellation; another task will replace it
+            } catch {
+                await MainActor.run {
+                    if version == contentSearchQueryVersion {
+                        contentSearchMatches = []
+                        contentSearchTask = nil
+                    }
+                }
+            }
+        }
+    }
+
     private func ensureExpandAllIfNeeded() {
         if expandedDirsStaged.isEmpty {
             expandedDirsStaged = Set(allDirectoryKeys(nodes: cachedNodesStaged))
@@ -258,6 +357,14 @@ struct GitChangesPanel: View {
     private func effectiveLeftWidth(total: CGFloat) -> CGFloat {
         let w = (leftColumnWidth == 0) ? total * 0.25 : leftColumnWidth
         return clampLeftWidth(w, total: total)
+    }
+
+    var explorerRootExists: Bool {
+        FileManager.default.fileExists(atPath: explorerRoot.path)
+    }
+
+    var explorerRoot: URL {
+        projectDirectory ?? workingDirectory
     }
 
     // Measure dynamic height for inline commit editor based on width

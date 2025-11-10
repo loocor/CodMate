@@ -73,19 +73,21 @@ extension GitChangesPanel {
                         }
                     }
                     Button {
-                        mode.toggle()
+                        guard vm.repoRoot != nil else { return }
+                        mode = (mode == .browser) ? .diff : .browser
                         if mode == .browser {
                             reloadBrowserTreeIfNeeded()
                         }
                     } label: {
                         Image(systemName: mode == .browser ? "folder" : "arrow.triangle.branch")
                             .font(.system(size: 12))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(vm.repoRoot == nil ? Color.secondary.opacity(0.4) : .secondary)
                     }
                     .buttonStyle(.plain)
                     .frame(width: 28, height: 28)
                     .contentShape(Rectangle())
-                    .help(mode == .browser ? "Switch to Diff" : "Switch to Explorer")
+                    .disabled(vm.repoRoot == nil)
+                    .help(vm.repoRoot == nil ? "Explorer mode only: repository not found" : (mode == .browser ? "Switch to Diff" : "Switch to Explorer"))
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }

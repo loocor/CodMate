@@ -7,10 +7,11 @@ extension GitChangesPanel {
             HStack(spacing: 8) {
                 Label("Changes", systemImage: "arrow.triangle.branch")
                     .font(.headline)
-                if let rootURL = vm.repoRoot {
-                    let authorized = SecurityScopedBookmarks.shared.isSandboxed
-                        ? SecurityScopedBookmarks.shared.hasDynamicBookmark(for: rootURL)
-                        : true
+                let rootURL = vm.repoRoot ?? projectDirectory ?? workingDirectory
+                let authorized = SecurityScopedBookmarks.shared.isSandboxed
+                    ? SecurityScopedBookmarks.shared.hasDynamicBookmark(for: rootURL)
+                    : true
+                if vm.repoRoot != nil || explorerRootExists {
                     HStack(spacing: 8) {
                         Text(rootURL.path)
                             .font(.caption)
@@ -64,6 +65,16 @@ extension GitChangesPanel {
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
+            }
+            if vm.repoRoot == nil {
+                HStack(spacing: 6) {
+                    Image(systemName: "info.circle")
+                        .foregroundStyle(.secondary)
+                    Text("Git repository not found. Explorer mode only.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                }
             }
             // Moved authorization controls inline in header path; remove separate row
             if let err = vm.errorMessage, !err.isEmpty {

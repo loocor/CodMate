@@ -16,7 +16,7 @@ extension GitChangesPanel {
         return keys
     }
 
-    func filteredNodes(_ nodes: [FileNode], query: String) -> [FileNode] {
+    func filteredNodes(_ nodes: [FileNode], query: String, contentMatches: Set<String>) -> [FileNode] {
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty else { return nodes }
         func filter(_ ns: [FileNode]) -> [FileNode] {
@@ -29,9 +29,14 @@ extension GitChangesPanel {
                         dir.children = kids
                         out.append(dir)
                     }
-                } else if let p = n.fullPath,
-                          n.name.localizedCaseInsensitiveContains(q) || p.localizedCaseInsensitiveContains(q) {
-                    out.append(n)
+                } else if let p = n.fullPath {
+                    let matchesPath = contentMatches.contains(p)
+                    if matchesPath
+                        || n.name.localizedCaseInsensitiveContains(q)
+                        || p.localizedCaseInsensitiveContains(q)
+                    {
+                        out.append(n)
+                    }
                 }
             }
             return out
@@ -67,8 +72,10 @@ extension GitChangesPanel {
     }
 
     func rebuildDisplayed() {
-        displayedStaged = filteredNodes(cachedNodesStaged, query: treeQuery)
-        displayedUnstaged = filteredNodes(cachedNodesUnstaged, query: treeQuery)
+        let trimmed = treeQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        let matches = trimmed.isEmpty ? Set<String>() : contentSearchMatches
+        displayedStaged = filteredNodes(cachedNodesStaged, query: treeQuery, contentMatches: matches)
+        displayedUnstaged = filteredNodes(cachedNodesUnstaged, query: treeQuery, contentMatches: matches)
     }
 
     // MARK: - Status helpers
@@ -134,8 +141,8 @@ extension GitChangesPanel {
 
 #if canImport(AppKit)
     func revealInFinder(path: String, isDirectory: Bool) {
-        guard let root = vm.repoRoot else { return }
-        let url = root.appendingPathComponent(path, isDirectory: isDirectory)
+        let base = vm.repoRoot ?? projectDirectory ?? workingDirectory
+        let url = base.appendingPathComponent(path, isDirectory: isDirectory)
         NSWorkspace.shared.activateFileViewerSelecting([url])
     }
 #endif

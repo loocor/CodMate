@@ -10,6 +10,7 @@ extension GitChangesPanel {
         @Binding var mode: ReviewPanelState.Mode
         let vm: GitChangesViewModel
         let treeQuery: String
+        let onSearchQueryChanged: (String) -> Void
         let onRebuildNodes: () -> Void
         let onRebuildDisplayed: () -> Void
         let onEnsureExpandAll: () -> Void
@@ -24,6 +25,7 @@ extension GitChangesPanel {
                     onRebuildDisplayed()
                     onRebuildBrowserDisplayed()
                     onEnsureExpandAll()
+                    onSearchQueryChanged(treeQuery)
                     if mode == .browser { onRefreshBrowserTree() }
                 }
             )
@@ -37,7 +39,8 @@ extension GitChangesPanel {
             )
 
             view = AnyView(
-                view.onChange(of: treeQuery) { _, _ in
+                view.onChange(of: treeQuery) { _, newValue in
+                    onSearchQueryChanged(newValue)
                     onRebuildDisplayed()
                     onRebuildBrowserDisplayed()
                 }

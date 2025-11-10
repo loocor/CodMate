@@ -29,13 +29,15 @@ final class GitChangesViewModel: ObservableObject {
     private var treeBuildTask: Task<Void, Never>? = nil
     private var diffTask: Task<Void, Never>? = nil
     private var treeSnapshotGeneration: UInt64 = 0
+    private var explorerFallbackRoot: URL? = nil
 
-    func attach(to directory: URL) {
+    func attach(to directory: URL, fallbackProjectDirectory: URL? = nil) {
         isResolvingRepo = true
+        explorerFallbackRoot = fallbackProjectDirectory ?? directory
         Task { [weak self] in
             guard let self else { return }
             defer { self.isResolvingRepo = false }
-            await self.resolveRepoRoot(from: directory)
+            await self.resolveRepoRoot(from: directory, fallbackProjectDirectory: fallbackProjectDirectory)
             await self.refreshStatus()
             self.configureMonitors()
         }
@@ -48,6 +50,7 @@ final class GitChangesViewModel: ObservableObject {
         diffTask?.cancel(); diffTask = nil
         repo = nil
         repoRoot = nil
+        explorerFallbackRoot = nil
         changes = []
         selectedPath = nil
         diffText = ""
@@ -55,70 +58,72 @@ final class GitChangesViewModel: ObservableObject {
         treeSnapshot = .empty
     }
 
-    private func resolveRepoRoot(from directory: URL) async {
+    private func resolveRepoRoot(from directory: URL, fallbackProjectDirectory: URL?) async {
         let canonical = directory
         if let repo = await service.repositoryRoot(for: canonical) {
-            // Git CLI succeeded - ensure we have sandbox access
-            if SecurityScopedBookmarks.shared.isSandboxed {
-                let hasBookmark = SecurityScopedBookmarks.shared.hasDynamicBookmark(for: repo.root)
-                Self.log.info("Repository at \(repo.root.path, privacy: .public) has bookmark: \(hasBookmark, privacy: .public)")
-
-                let hasAccess = SecurityScopedBookmarks.shared.startAccessDynamic(for: repo.root)
-                Self.log.info("Started access for \(repo.root.path, privacy: .public): \(hasAccess, privacy: .public)")
-
-                if !hasAccess {
-                    Self.log.error("Failed to start access for repository at \(repo.root.path, privacy: .public)")
-                    if hasBookmark {
-                        errorMessage = "Repository access failed. The bookmark may be stale. Please re-authorize."
-                    } else {
-                        errorMessage = "Repository access required. Please authorize the repository folder: \(repo.root.path)"
-                    }
-                }
-            }
-            self.repo = repo
-            self.repoRoot = repo.root
-            Self.log.info("Git repository resolved: \(repo.root.path, privacy: .public)")
+            assignRepoRoot(to: repo.root, reason: "git-cli (session)")
             return
         }
-        // Fallback: walk up to find a folder containing .git when git CLI is unavailable
-        var cur = canonical.standardizedFileURL
-        let fm = FileManager.default
-        var guardCounter = 0
-        while guardCounter < 200 {
-            let gitDir = cur.appendingPathComponent(".git", isDirectory: true)
-            var isDir: ObjCBool = false
-            if fm.fileExists(atPath: gitDir.path, isDirectory: &isDir), isDir.boolValue {
-                // Found repository via filesystem - try to start sandbox access
-                if SecurityScopedBookmarks.shared.isSandboxed {
-                    let hasBookmark = SecurityScopedBookmarks.shared.hasDynamicBookmark(for: cur)
-                    Self.log.info("Repository at \(cur.path, privacy: .public) has bookmark: \(hasBookmark, privacy: .public)")
-
-                    let hasAccess = SecurityScopedBookmarks.shared.startAccessDynamic(for: cur)
-                    Self.log.info("Started access for \(cur.path, privacy: .public): \(hasAccess, privacy: .public)")
-
-                    if !hasAccess {
-                        Self.log.error("Failed to start access for repository at \(cur.path, privacy: .public)")
-                        if hasBookmark {
-                            errorMessage = "Repository access failed. The bookmark may be stale. Please re-authorize."
-                        } else {
-                            errorMessage = "Repository access required. Please authorize the repository folder: \(cur.path)"
-                        }
-                    }
-                }
-                self.repo = GitService.Repo(root: cur)
-                self.repoRoot = cur
-                Self.log.info("Git repository resolved via filesystem: \(cur.path, privacy: .public)")
+        if let fsRoot = filesystemGitRoot(startingAt: canonical) {
+            assignRepoRoot(to: fsRoot, reason: "filesystem (session)")
+            return
+        }
+        if let fallback = fallbackProjectDirectory {
+            if let repo = await service.repositoryRoot(for: fallback) {
+                assignRepoRoot(to: repo.root, reason: "git-cli (project)")
                 return
             }
-            let parent = cur.deletingLastPathComponent()
-            if parent.path == cur.path { break }
-            cur = parent
-            guardCounter += 1
+            if hasGitDirectory(at: fallback) {
+                assignRepoRoot(to: fallback.standardizedFileURL, reason: "project directory")
+                return
+            }
         }
         Self.log.warning("No Git repository found starting from \(directory.path, privacy: .public)")
         self.repo = nil
         self.repoRoot = nil
         errorMessage = "No Git repository found"
+    }
+
+    private func assignRepoRoot(to root: URL, reason: String) {
+        if SecurityScopedBookmarks.shared.isSandboxed {
+            let hasBookmark = SecurityScopedBookmarks.shared.hasDynamicBookmark(for: root)
+            Self.log.info("Repository at \(root.path, privacy: .public) has bookmark: \(hasBookmark, privacy: .public)")
+
+            let hasAccess = SecurityScopedBookmarks.shared.startAccessDynamic(for: root)
+            Self.log.info("Started access for \(root.path, privacy: .public): \(hasAccess, privacy: .public)")
+
+            if !hasAccess {
+                Self.log.error("Failed to start access for repository at \(root.path, privacy: .public)")
+                if hasBookmark {
+                    errorMessage = "Repository access failed. The bookmark may be stale. Please re-authorize."
+                } else {
+                    errorMessage = "Repository access required. Please authorize the repository folder: \(root.path)"
+                }
+            }
+        }
+        self.repo = GitService.Repo(root: root)
+        self.repoRoot = root
+        Self.log.info("Git repository resolved via \(reason, privacy: .public): \(root.path, privacy: .public)")
+    }
+
+    private func filesystemGitRoot(startingAt start: URL) -> URL? {
+        var cur = start.standardizedFileURL
+        let fm = FileManager.default
+        var guardCounter = 0
+        while guardCounter < 200 {
+            if hasGitDirectory(at: cur) { return cur }
+            let parent = cur.deletingLastPathComponent()
+            if parent.path == cur.path { break }
+            cur = parent
+            guardCounter += 1
+        }
+        return nil
+    }
+
+    private func hasGitDirectory(at url: URL) -> Bool {
+        let gitDir = url.appendingPathComponent(".git", isDirectory: true)
+        var isDir: ObjCBool = false
+        return FileManager.default.fileExists(atPath: gitDir.path, isDirectory: &isDir) && isDir.boolValue
     }
 
     private func configureMonitors() {
@@ -204,7 +209,19 @@ final class GitChangesViewModel: ObservableObject {
 
     func refreshDetail() async {
         diffTask?.cancel()
-        guard let repo = self.repo, let path = selectedPath else { diffText = ""; return }
+        guard let path = selectedPath else { diffText = ""; return }
+        let currentRepo = self.repo
+
+        if currentRepo == nil, showPreviewInsteadOfDiff, let base = repoRoot ?? explorerFallbackRoot {
+            let url = base.appendingPathComponent(path)
+            if let data = try? Data(contentsOf: url), let text = String(data: data, encoding: .utf8) {
+                diffText = text
+            } else {
+                diffText = "(Preview unavailable)"
+            }
+            return
+        }
+        guard let repo = currentRepo else { diffText = ""; return }
 
         // Ensure access before reading files
         if SecurityScopedBookmarks.shared.isSandboxed {
@@ -280,13 +297,13 @@ final class GitChangesViewModel: ObservableObject {
     private static func describeGitFailure(_ raw: String) -> String {
         let message = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         if message.isEmpty {
-            return "Git 命令执行失败（未返回错误信息）。"
+            return "The git command failed without returning an error message."
         }
         if message.contains("App Sandbox") || message.contains("xcrun: error") {
-            return "系统自带 git 依赖 xcrun，在 App Sandbox 中被拒绝访问。请安装 Xcode Command Line Tools（xcode-select --install），或在系统中提供一个可访问的 git 可执行文件。"
+            return "The built-in git relies on xcrun and was denied in the App Sandbox. Install Xcode Command Line Tools (xcode-select --install) or provide an accessible git executable."
         }
         if message.contains("not a git repository") {
-            return "当前目录不是 Git 仓库。"
+            return "The current directory is not a Git repository."
         }
         return message
     }
@@ -359,7 +376,7 @@ final class GitChangesViewModel: ObservableObject {
 
     // MARK: - Open in external editor (file)
     func openFile(_ path: String, using editor: EditorApp) {
-        guard let root = repoRoot else { return }
+        guard let root = repoRoot ?? explorerFallbackRoot else { return }
         let filePath = root.appendingPathComponent(path).path
         // Try CLI command first
         if let exe = Self.findExecutableInPath(editor.cliCommand) {
