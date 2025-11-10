@@ -46,6 +46,7 @@ struct UsageProviderSnapshot: Identifiable, Equatable {
   let metrics: [UsageMetricSnapshot]
   let updatedAt: Date?
   let statusMessage: String?
+  let requiresReauth: Bool  // True when user needs to re-authenticate
 
   init(
     provider: UsageProviderKind,
@@ -53,7 +54,8 @@ struct UsageProviderSnapshot: Identifiable, Equatable {
     availability: Availability,
     metrics: [UsageMetricSnapshot],
     updatedAt: Date?,
-    statusMessage: String? = nil
+    statusMessage: String? = nil,
+    requiresReauth: Bool = false
   ) {
     self.provider = provider
     self.title = title
@@ -61,6 +63,7 @@ struct UsageProviderSnapshot: Identifiable, Equatable {
     self.metrics = metrics
     self.updatedAt = updatedAt
     self.statusMessage = statusMessage
+    self.requiresReauth = requiresReauth
   }
 
   func urgentMetric(relativeTo now: Date = Date()) -> UsageMetricSnapshot? {

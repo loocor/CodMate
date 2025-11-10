@@ -27,31 +27,49 @@ struct ClaudeUsageAnalyzer {
         limit: Int = 48,
         now: Date = Date()
     ) -> ClaudeUsageStatus? {
-        guard !sessions.isEmpty else { return nil }
+        guard !sessions.isEmpty else {
+            NSLog("[ClaudeUsage] No sessions provided")
+            return nil
+        }
 
         let weekInterval = Calendar.current.dateInterval(of: .weekOfYear, for: now)
         let horizon = weekInterval?.start.addingTimeInterval(-ClaudeUsageConstants.blockDuration)
             ?? now.addingTimeInterval(ClaudeUsageConstants.defaultHorizon)
 
         let entries = collectEntries(from: sessions, limit: limit, horizon: horizon)
-        guard !entries.isEmpty else { return nil }
+        guard !entries.isEmpty else {
+            NSLog("[ClaudeUsage] No entries collected from \(sessions.count) sessions")
+            return nil
+        }
+
+        NSLog("[ClaudeUsage] Collected \(entries.count) entries from \(sessions.count) sessions")
 
         let blocks = UsageBlockBuilder(entries: entries).build()
-        guard let latestBlock = blocks.last else { return nil }
+        guard let latestBlock = blocks.last else {
+            NSLog("[ClaudeUsage] No blocks built")
+            return nil
+        }
 
+        NSLog("[ClaudeUsage] Built \(blocks.count) blocks, latest: sessionLimit=\(latestBlock.sessionLimitReached), usageReset=\(String(describing: latestBlock.usageLimitReset))")
+
+        let fiveHour = latestSessionUsage(block: latestBlock, now: now)
         let weekly = WeeklyUsageAggregator(blocks: blocks, now: now).summary()
+        let weeklyOverride = blocks.last(where: { $0.weeklyLimitReached })
+        let weeklyReset = weeklyOverride?.weeklyLimitReset ?? weekly.resetDate
+
+        NSLog("[ClaudeUsage] 5h: \(fiveHour.minutes)min, reset=\(String(describing: fiveHour.resetDate)); Weekly: \(weekly.minutes)min, reset=\(String(describing: weeklyReset))")
 
         return ClaudeUsageStatus(
             updatedAt: latestBlock.lastActivity,
             modelName: latestBlock.primaryModel,
             contextUsedTokens: latestBlock.totalTokens,
             contextLimitTokens: ClaudeModelContextProvider.contextLimit(for: latestBlock.primaryModel),
-            fiveHourUsedMinutes: latestBlock.usedMinutes,
+            fiveHourUsedMinutes: fiveHour.minutes,
             fiveHourWindowMinutes: ClaudeUsageConstants.blockDuration / 60,
-            fiveHourResetAt: latestBlock.resetDate,
+            fiveHourResetAt: fiveHour.resetDate,
             weeklyUsedMinutes: weekly.minutes,
             weeklyWindowMinutes: weekly.windowMinutes,
-            weeklyResetAt: weekly.resetDate
+            weeklyResetAt: weeklyReset
         )
     }
 
@@ -99,7 +117,7 @@ struct ClaudeUsageAnalyzer {
         }
 
         let message = json["message"] as? [String: Any]
-        guard let usage = extractUsageDictionary(from: json, message: message) else { return nil }
+        let usage = extractUsageDictionary(from: json, message: message)
 
         let dedupKey = makeDedupKey(message: message, root: json)
         if let dedupKey {
@@ -107,23 +125,31 @@ struct ClaudeUsageAnalyzer {
             seenKeys.insert(dedupKey)
         }
 
-        let input = numberValue(in: usage, keys: ["input_tokens", "inputTokens"])
-        let cacheCreation = numberValue(in: usage, keys: ["cache_creation_input_tokens", "cacheCreationInputTokens"])
-        let cacheRead = numberValue(in: usage, keys: ["cache_read_input_tokens", "cacheReadInputTokens"])
-        let output = numberValue(in: usage, keys: ["output_tokens", "outputTokens"])
-        let tokens = input + cacheCreation + cacheRead + output
-        guard tokens > 0 else { return nil }
+        let (limitResetFromMessage, limitKind) = parseLimitResetHint(from: message, timestamp: timestamp)
+
+        var tokens = 0
+        if let usage {
+            let input = numberValue(in: usage, keys: ["input_tokens", "inputTokens"])
+            let cacheCreation = numberValue(in: usage, keys: ["cache_creation_input_tokens", "cacheCreationInputTokens"])
+            let cacheRead = numberValue(in: usage, keys: ["cache_read_input_tokens", "cacheReadInputTokens"])
+            let output = numberValue(in: usage, keys: ["output_tokens", "outputTokens"])
+            tokens = input + cacheCreation + cacheRead + output
+        }
+        if tokens <= 0, limitKind == nil {
+            return nil
+        }
 
         let model = (message?["model"] as? String)
             ?? (json["model"] as? String)
             ?? ((json["metadata"] as? [String: Any])?["model"] as? String)
-        let resetDate = parseResetDate(from: json, timestamp: timestamp)
+        let resetDate = limitResetFromMessage ?? parseResetDate(from: json, timestamp: timestamp)
 
         return UsageEntry(
             timestamp: timestamp,
             tokens: tokens,
             model: model,
-            usageLimitReset: resetDate
+            usageLimitReset: resetDate,
+            limitKind: limitKind
         )
     }
 
@@ -178,15 +204,166 @@ struct ClaudeUsageAnalyzer {
         }
         return nil
     }
+
+    private func parseLimitResetHint(from message: [String: Any]?, timestamp: Date) -> (Date?, UsageEntry.LimitKind?) {
+        guard
+            let message,
+            let contents = message["content"] as? [[String: Any]]
+        else { return (nil, nil) }
+
+        let text = contents.compactMap { $0["text"] as? String }.joined(separator: " ")
+        guard !text.isEmpty else { return (nil, nil) }
+
+        let lower = text.lowercased()
+        let kind: UsageEntry.LimitKind?
+        if lower.contains("session limit reached") {
+            kind = .session
+        } else if lower.contains("weekly limit reached") {
+            kind = .weekly
+        } else {
+            kind = nil
+        }
+        guard let kind else { return (nil, nil) }
+        NSLog("[ClaudeUsage] Found limit message: kind=\(kind), text=\(text.prefix(80))")
+        let resetDate = parseResetDateHint(from: text, reference: timestamp)
+        NSLog("[ClaudeUsage] Parsed reset date: \(String(describing: resetDate))")
+        return (resetDate, kind)
+    }
+
+    private func parseResetDateHint(from text: String, reference: Date) -> Date? {
+        // First, try to extract Unix timestamp (format: |<digits>)
+        // This is the most accurate source from Claude Code CLI
+        if let unixTimestamp = extractUnixTimestamp(from: text) {
+            NSLog("[ClaudeUsage] Extracted Unix timestamp: \(unixTimestamp)")
+            return Date(timeIntervalSince1970: TimeInterval(unixTimestamp))
+        }
+
+        guard var payload = extractResetPayload(from: text) else { return nil }
+        if payload.isEmpty { return nil }
+
+        if let dated = parseMonthBasedReset(payload: payload, reference: reference) {
+            return dated
+        }
+
+        payload = payload.replacingOccurrences(of: " at ", with: " ")
+        payload = payload.replacingOccurrences(of: "  ", with: " ")
+        return parseTimeOnlyReset(payload: payload, reference: reference)
+    }
+
+    private func extractUnixTimestamp(from text: String) -> Int? {
+        // Claude Code CLI embeds Unix timestamp as |<digits>
+        // Example: "Session limit reached · resets 3pm … |1731147600"
+        let pattern = "\\|(\\d+)"
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
+        let range = NSRange(text.startIndex..., in: text)
+        guard let match = regex.firstMatch(in: text, range: range) else { return nil }
+        guard let timestampRange = Range(match.range(at: 1), in: text) else { return nil }
+        let timestampString = String(text[timestampRange])
+        return Int(timestampString)
+    }
+
+    private func extractResetPayload(from text: String) -> String? {
+        let lower = text.lowercased()
+        guard let range = lower.range(of: "resets") else { return nil }
+        var payload = String(text[range.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        if payload.hasPrefix("∙") {
+            payload = String(payload.dropFirst()).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        if let idx = payload.firstIndex(of: "(") {
+            payload = String(payload[..<idx])
+        }
+        return payload.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func parseMonthBasedReset(payload: String, reference: Date) -> Date? {
+        NSLog("[ClaudeUsage] parseMonthBasedReset: payload=\"\(payload)\"")
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone.current
+        let attempts = [
+            "MMM d 'at' h:mma",
+            "MMM d 'at' h a",
+            "MMM d 'at' ha",
+            "MMM d h:mma",
+            "MMM d h a",
+            "MMM d ha"
+        ]
+        let year = Calendar.current.component(.year, from: reference)
+        let enriched = payload + " \(year)"
+        for format in attempts {
+            formatter.dateFormat = format + " yyyy"
+            if let date = formatter.date(from: enriched) {
+                NSLog("[ClaudeUsage] Matched format \"\(format)\", date=\(date)")
+                if date < reference,
+                   let nextYear = Calendar.current.date(byAdding: .year, value: 1, to: date) {
+                    return nextYear
+                }
+                return date
+            }
+        }
+        NSLog("[ClaudeUsage] No format matched for payload=\"\(payload)\"")
+        return nil
+    }
+
+    private func parseTimeOnlyReset(payload: String, reference: Date) -> Date? {
+        let trimmed = payload.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            NSLog("[ClaudeUsage] parseTimeOnlyReset: empty payload")
+            return nil
+        }
+        NSLog("[ClaudeUsage] parseTimeOnlyReset: payload=\"\(trimmed)\"")
+        let calendar = Calendar.current
+        var components = calendar.dateComponents([.year, .month, .day], from: reference)
+
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone.current
+
+        let lower = trimmed.lowercased()
+        let attempts: [String]
+        if lower.contains("am") || lower.contains("pm") {
+            attempts = ["h:mma", "h.mma", "ha", "hmma"]
+        } else if trimmed.contains(":") {
+            attempts = ["HH:mm"]
+        } else {
+            NSLog("[ClaudeUsage] parseTimeOnlyReset: no am/pm or colon found")
+            return nil
+        }
+
+        for format in attempts {
+            formatter.dateFormat = format
+            let testString = trimmed.replacingOccurrences(of: " ", with: "")
+            if let date = formatter.date(from: testString) {
+                let time = calendar.dateComponents([.hour, .minute], from: date)
+                components.hour = time.hour
+                components.minute = time.minute
+                components.second = 0
+                if let combined = calendar.date(from: components) {
+                    NSLog("[ClaudeUsage] parseTimeOnlyReset: matched format \"\(format)\", combined=\(combined)")
+                    if combined <= reference {
+                        let next = calendar.date(byAdding: .day, value: 1, to: combined)
+                        NSLog("[ClaudeUsage] parseTimeOnlyReset: date in past, adding 1 day -> \(String(describing: next))")
+                        return next
+                    }
+                    return combined
+                }
+            }
+        }
+        NSLog("[ClaudeUsage] parseTimeOnlyReset: no format matched")
+        return nil
+    }
 }
 
 // MARK: - Usage Entry
 
 private struct UsageEntry {
+    enum LimitKind { case session, weekly }
+
     let timestamp: Date
     let tokens: Int
     let model: String?
     let usageLimitReset: Date?
+    let limitKind: LimitKind?
 }
 
 // MARK: - Usage Blocks
@@ -197,6 +374,9 @@ private struct UsageBlock {
     let totalTokens: Int
     let models: Set<String>
     let usageLimitReset: Date?
+    let sessionLimitReached: Bool
+    let weeklyLimitReset: Date?
+    let weeklyLimitReached: Bool
 
     private static let blockDuration = ClaudeUsageConstants.blockDuration
 
@@ -236,14 +416,25 @@ private struct UsageBlockBuilder {
             guard !currentEntries.isEmpty else { return }
             let tokens = currentEntries.reduce(0) { $0 + $1.tokens }
             let models = Set(currentEntries.compactMap(\.model))
-            let usageReset = currentEntries.last(where: { $0.usageLimitReset != nil })?.usageLimitReset
-            let block = UsageBlock(
-                startTime: currentEntries.first!.timestamp,
-                lastActivity: currentEntries.last!.timestamp,
-                totalTokens: tokens,
-                models: models,
-                usageLimitReset: usageReset
-            )
+            let sessionLimitReached = currentEntries.contains { $0.limitKind == .session }
+            let usageReset: Date? = {
+                if sessionLimitReached {
+                    return currentEntries.last { entry in
+                        entry.limitKind == .session && entry.usageLimitReset != nil
+                    }?.usageLimitReset ?? currentEntries.last(where: { $0.usageLimitReset != nil })?.usageLimitReset
+                }
+                return currentEntries.last(where: { $0.usageLimitReset != nil })?.usageLimitReset
+            }()
+        let block = UsageBlock(
+            startTime: currentEntries.first!.timestamp,
+            lastActivity: currentEntries.last!.timestamp,
+            totalTokens: tokens,
+            models: models,
+            usageLimitReset: usageReset,
+            sessionLimitReached: sessionLimitReached,
+            weeklyLimitReset: currentEntries.last(where: { $0.limitKind == .weekly && $0.usageLimitReset != nil })?.usageLimitReset,
+            weeklyLimitReached: currentEntries.contains { $0.limitKind == .weekly }
+        )
             blocks.append(block)
             currentEntries.removeAll(keepingCapacity: true)
         }
@@ -255,6 +446,9 @@ private struct UsageBlockBuilder {
                 blockStart = entry.timestamp
                 currentEntries.append(entry)
                 lastTimestamp = entry.timestamp
+                if entry.limitKind == .session {
+                    finalize()
+                }
                 continue
             }
 
@@ -264,10 +458,20 @@ private struct UsageBlockBuilder {
             if exceedsBlock || gapTooLarge {
                 finalize()
                 blockStart = entry.timestamp
+                lastTimestamp = entry.timestamp
+                currentEntries.append(entry)
+                if entry.limitKind == .session {
+                    finalize()
+                }
+                continue
             }
 
             currentEntries.append(entry)
             lastTimestamp = entry.timestamp
+
+            if entry.limitKind == .session {
+                finalize()
+            }
         }
 
         finalize()
@@ -299,6 +503,41 @@ private struct WeeklyUsageAggregator {
             resetDate: interval.end
         )
     }
+}
+
+// MARK: - Latest Session (5-hour window) Aggregation
+
+private func latestSessionUsage(block: UsageBlock, now: Date) -> (minutes: Double, resetDate: Date?) {
+    let duration = ClaudeUsageConstants.blockDuration
+    let windowEnd = block.startTime.addingTimeInterval(duration)
+
+    if block.sessionLimitReached {
+        let reset = block.usageLimitReset ?? windowEnd
+        if reset <= now {
+            return (minutes: 0, resetDate: nil)
+        }
+        return (
+            minutes: duration / 60,
+            resetDate: reset
+        )
+    }
+
+    guard windowEnd > now else { return (0, nil) }
+
+    let usedSeconds = min(now, windowEnd).timeIntervalSince(block.startTime)
+    let minutes = max(0, usedSeconds) / 60
+
+    let candidateReset = block.usageLimitReset
+    let resetDate: Date?
+    if let candidateReset, candidateReset > now {
+        resetDate = candidateReset
+    } else if windowEnd > now {
+        resetDate = windowEnd
+    } else {
+        resetDate = nil
+    }
+
+    return (minutes: minutes, resetDate: resetDate)
 }
 
 // MARK: - Context Limit Resolution

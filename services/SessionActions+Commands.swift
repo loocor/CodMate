@@ -373,7 +373,7 @@ extension SessionActions {
         // MAS sandbox: do not auto-execute external CLI inside the app. Only prepare directory and env.
         // The user can copy or insert the real command via UI prompts.
         let cliName = session.source == .codex ? "codex" : "claude"
-        let notice = "echo \"[CodMate] App Store 沙盒无法直接运行 \(cliName) CLI，请使用右侧按钮复制命令，在外部终端执行。\""
+        let notice = "echo \"[CodMate] App Store sandbox cannot run \(cliName) CLI directly. Copy the command and run it in an external terminal.\""
         return cd + "\n" + exports + "\n" + notice + "\n"
         #else
         let injectedPATH = CLIEnvironment.buildInjectedPATH()
@@ -397,7 +397,7 @@ extension SessionActions {
         let exports = embeddedExportLines(for: session.source).joined(separator: "; ")
         #if APPSTORE
         // MAS: do not execute external CLI in embedded terminal.
-        let notice = "echo \"[CodMate] App Store 沙盒无法直接运行 codex/claude CLI，请在外部终端执行复制的命令。\""
+        let notice = "echo \"[CodMate] App Store sandbox cannot run codex/claude CLI directly. Run the copied command in an external terminal.\""
         return cd + "\n" + exports + "\n" + notice + "\n"
         #else
         let injectedPATH = CLIEnvironment.buildInjectedPATH()

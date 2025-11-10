@@ -513,7 +513,7 @@ final class CodexVM: ObservableObject {
       let outStr = String(data: outData, encoding: .utf8) ?? ""
       if proc.terminationStatus == 0 {
         if outStr.contains("__CODMATE_NOTIFIED__") {
-          // 成功：显示一条轻量状态，避免“无反馈”的体验
+          // Success: show a lightweight status to avoid a "no feedback" experience
           await SystemNotifier.shared.notify(title: "CodMate", body: "Notifications self-test sent")
           notifySelfTestResult = "Sent (check Notification Center)"
         } else {

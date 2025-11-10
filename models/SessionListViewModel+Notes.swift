@@ -18,15 +18,21 @@ extension SessionListViewModel {
         let titleValue = editTitle.isEmpty ? nil : editTitle
         let commentValue = editComment.isEmpty ? nil : editComment
         await notesStore.upsert(id: session.id, title: titleValue, comment: commentValue)
-        notesSnapshot[session.id] = SessionNote(
-            id: session.id, title: titleValue, comment: commentValue, updatedAt: Date())
-        var map = Dictionary(uniqueKeysWithValues: allSessions.map { ($0.id, $0) })
-        if var s = map[session.id] {
-            s.userTitle = titleValue
-            s.userComment = commentValue
-            map[session.id] = s
+
+        // Reload the complete note from store to ensure cache consistency
+        // (preserves projectId, profileId and other fields managed by notesStore)
+        if let updatedNote = await notesStore.note(for: session.id) {
+            notesSnapshot[session.id] = updatedNote
         }
-        allSessions = Array(map.values)
+
+        // Update the session in place to preserve sorting and trigger didSet observer
+        allSessions = allSessions.map { s in
+            guard s.id == session.id else { return s }
+            var updated = s
+            updated.userTitle = titleValue
+            updated.userComment = commentValue
+            return updated
+        }
         applyFilters()
         cancelEdits()
     }

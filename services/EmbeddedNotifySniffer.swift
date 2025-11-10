@@ -17,7 +17,7 @@ struct EmbeddedNotifySniffer {
             "session complete",
         ]
         for n in needles {
-            if lower.contains(n) { return "回合完成" }
+            if lower.contains(n) { return "Turn complete" }
         }
         return nil
     }
@@ -27,4 +27,3 @@ struct EmbeddedNotifySniffer {
         return nil
     }
 }
-

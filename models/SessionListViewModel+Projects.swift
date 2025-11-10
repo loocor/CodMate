@@ -294,4 +294,27 @@ extension SessionListViewModel {
         }
         projectCounts = counts
     }
+
+    func requestProjectExpansion(for projectId: String) {
+        let chain = projectAncestorChain(projectId: projectId)
+        guard !chain.isEmpty else { return }
+        NotificationCenter.default.post(
+            name: .codMateExpandProjectTree,
+            object: nil,
+            userInfo: ["ids": chain]
+        )
+    }
+
+    private func projectAncestorChain(projectId: String) -> [String] {
+        guard !projects.isEmpty else { return [] }
+        var map: [String: Project] = [:]
+        for p in projects { map[p.id] = p }
+        var chain: [String] = []
+        var current: String? = projectId
+        while let id = current, let project = map[id] {
+            chain.insert(project.id, at: 0)
+            current = project.parentId
+        }
+        return chain
+    }
 }

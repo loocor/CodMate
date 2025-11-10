@@ -1,6 +1,6 @@
 import Foundation
 
-struct SessionNote: Codable, Hashable {
+struct SessionNote: Codable, Hashable, Sendable {
     let id: String
     var title: String?
     var comment: String?

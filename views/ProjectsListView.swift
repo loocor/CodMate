@@ -9,6 +9,7 @@ struct ProjectsListView: View {
     @State private var newParentProject: Project? = nil
     @State private var pendingDelete: Project? = nil
     @State private var showDeleteConfirm = false
+    @State private var expandedProjects: Set<String> = []
 
     var body: some View {
         let countsDisplay = viewModel.projectCountsDisplay()
@@ -22,90 +23,48 @@ struct ProjectsListView: View {
             if tree.isEmpty {
                 ContentUnavailableView("No Projects", systemImage: "square.grid.2x2")
             } else {
-                OutlineGroup(tree, children: \.children) { node in
-                    let p = node.project
-                    let pair = countsDisplay[p.id] ?? (visible: 0, total: 0)
-                    ProjectRow(
-                        project: p,
-                        displayName: displayName(p),
-                        visible: pair.visible,
-                        total: pair.total,
-                        onNewSession: { viewModel.newSession(project: p) },
-                        onEdit: { editingProject = p; showEdit = true },
-                        onDelete: { pendingDelete = p; showDeleteConfirm = true }
-                    )
-                    .tag(p.id)
-                    .listRowInsets(EdgeInsets())
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        handleSelection(for: p)
-                    }
-                    .onTapGesture(count: 2) { editingProject = p; showEdit = true }
-                    .contextMenu {
-                        Button { viewModel.newSession(project: p) } label: {
-                            Label("New Session", systemImage: "plus")
-                        }
-                        Button {
-                            newParentProject = p
+                ForEach(tree) { node in
+                    ProjectTreeNodeView(
+                        node: node,
+                        countsDisplay: countsDisplay,
+                        displayName: displayName(_:),
+                        expanded: $expandedProjects,
+                        onTap: { handleSelection(for: $0) },
+                        onDoubleTap: { editingProject = $0; showEdit = true },
+                        onNewSession: { viewModel.newSession(project: $0) },
+                        onNewSubproject: { parent in
+                            newParentProject = parent
                             showNewProject = true
-                        } label: {
-                            Label("New Subproject", systemImage: "plus.square.on.square")
-                        }
-                        Divider()
-
-                        // Open in Editor submenu
-                        Menu {
-                            ForEach(EditorApp.allCases) { editor in
-                                Button {
-                                    viewModel.openProjectInEditor(p, using: editor)
-                                } label: {
-                                    HStack {
-                                        Label(editor.title, systemImage: "chevron.left.forwardslash.chevron.right")
-                                        if !editor.isInstalled {
-                                            Text("(Not Installed)")
-                                                .font(.caption)
-                                                .foregroundStyle(.secondary)
-                                        }
-                                    }
-                                }
-                                .disabled(!editor.isInstalled)
-                            }
-                        } label: {
-                            Label("Open in", systemImage: "arrow.up.forward.app")
-                        }
-                        .disabled(p.directory == nil || p.directory?.isEmpty == true)
-
-                        Button {
-                            viewModel.revealProjectDirectory(p)
-                        } label: {
-                            Label("Reveal in Finder", systemImage: "finder")
-                        }
-                        .disabled(p.directory == nil || p.directory?.isEmpty == true)
-
-                        Button { editingProject = p; showEdit = true } label: {
-                            Label("Edit Project / Property", systemImage: "pencil")
-                        }
-                        Divider()
-                        Button(role: .destructive) {
-                            // Route through the same confirmation flow used by the row action menu
-                            pendingDelete = p
+                        },
+                        onEdit: { editingProject = $0; showEdit = true },
+                        onDelete: { project in
+                            pendingDelete = project
                             showDeleteConfirm = true
-                        } label: {
-                            Label("Delete Project", systemImage: "trash")
+                        },
+                        onReveal: { viewModel.revealProjectDirectory($0) },
+                        onOpenInEditor: { project, editor in
+                            viewModel.openProjectInEditor(project, using: editor)
+                        },
+                        onAssignSessions: { projectId, ids in
+                            Task { await viewModel.assignSessions(to: projectId, ids: ids) }
                         }
-                    }
-                    .dropDestination(for: String.self) { items, _ in
-                        let all = items.flatMap { $0.split(separator: "\n").map(String.init) }
-                        let ids = Array(Set(all))
-                        Task { await viewModel.assignSessions(to: p.id, ids: ids) }
-                        return true
-                    }
+                    )
                 }
             }
         }
         .listStyle(.sidebar)
         .environment(\.defaultMinListRowHeight, 16)
         .environment(\.controlSize, .small)
+        .onAppear {
+            if expandedProjects.isEmpty {
+                expandedProjects = Set(tree.map(\.id))
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .codMateExpandProjectTree)) { note in
+            if let ids = note.userInfo?["ids"] as? [String] {
+                expandedProjects.formUnion(ids)
+            }
+        }
         .sheet(isPresented: $showEdit) {
             if let project = editingProject {
                 ProjectEditorSheet(isPresented: $showEdit, mode: .edit(existing: project))
@@ -209,6 +168,141 @@ private struct ProjectRow: View {
         .padding(.vertical, 8)
         .padding(.trailing, 8)
         .padding(.leading, 8)
+    }
+}
+
+private struct ProjectTreeNodeView: View {
+    let node: ProjectTreeNode
+    let countsDisplay: [String: (visible: Int, total: Int)]
+    let displayName: (Project) -> String
+    @Binding var expanded: Set<String>
+    let onTap: (Project) -> Void
+    let onDoubleTap: (Project) -> Void
+    let onNewSession: (Project) -> Void
+    let onNewSubproject: (Project) -> Void
+    let onEdit: (Project) -> Void
+    let onDelete: (Project) -> Void
+    let onReveal: (Project) -> Void
+    let onOpenInEditor: (Project, EditorApp) -> Void
+    let onAssignSessions: (String, [String]) -> Void
+
+    var body: some View {
+        Group {
+            if let children = node.children, !children.isEmpty {
+                DisclosureGroup(isExpanded: binding(for: node.project.id)) {
+                    ForEach(children) { child in
+                        ProjectTreeNodeView(
+                            node: child,
+                            countsDisplay: countsDisplay,
+                            displayName: displayName,
+                            expanded: $expanded,
+                            onTap: onTap,
+                            onDoubleTap: onDoubleTap,
+                            onNewSession: onNewSession,
+                            onNewSubproject: onNewSubproject,
+                            onEdit: onEdit,
+                            onDelete: onDelete,
+                            onReveal: onReveal,
+                            onOpenInEditor: onOpenInEditor,
+                            onAssignSessions: onAssignSessions
+                        )
+                    }
+                } label: {
+                    row(for: node.project)
+                }
+                .tag(node.project.id)
+            } else {
+                row(for: node.project)
+                    .tag(node.project.id)
+            }
+        }
+    }
+
+    private func binding(for id: String) -> Binding<Bool> {
+        Binding(
+            get: { expanded.contains(id) },
+            set: { value in
+                if value {
+                    expanded.insert(id)
+                } else {
+                    expanded.remove(id)
+                }
+            }
+        )
+    }
+
+    private func row(for project: Project) -> some View {
+        let pair = countsDisplay[project.id] ?? (visible: 0, total: 0)
+        return ProjectRow(
+            project: project,
+            displayName: displayName(project),
+            visible: pair.visible,
+            total: pair.total,
+            onNewSession: { onNewSession(project) },
+            onEdit: { onEdit(project) },
+            onDelete: { onDelete(project) }
+        )
+        .listRowInsets(EdgeInsets())
+        .contentShape(Rectangle())
+        .onTapGesture { onTap(project) }
+        .onTapGesture(count: 2) { onDoubleTap(project) }
+        .contextMenu { contextMenu(for: project) }
+        .dropDestination(for: String.self) { items, _ in
+            let all = items.flatMap { $0.split(separator: "\n").map(String.init) }
+            let ids = Array(Set(all))
+            onAssignSessions(project.id, ids)
+            return true
+        }
+    }
+
+    @ViewBuilder
+    private func contextMenu(for project: Project) -> some View {
+        Button { onNewSession(project) } label: {
+            Label("New Session", systemImage: "plus")
+        }
+        Button {
+            onNewSubproject(project)
+        } label: {
+            Label("New Subproject", systemImage: "plus.square.on.square")
+        }
+        Divider()
+        Menu {
+            ForEach(EditorApp.allCases) { editor in
+                Button {
+                    onOpenInEditor(project, editor)
+                } label: {
+                    HStack {
+                        Label(editor.title, systemImage: "chevron.left.forwardslash.chevron.right")
+                        if !editor.isInstalled {
+                            Text("(Not Installed)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                .disabled(!editor.isInstalled)
+            }
+        } label: {
+            Label("Open in", systemImage: "arrow.up.forward.app")
+        }
+        .disabled(project.directory == nil || project.directory?.isEmpty == true)
+
+        Button {
+            onReveal(project)
+        } label: {
+            Label("Reveal in Finder", systemImage: "finder")
+        }
+        .disabled(project.directory == nil || project.directory?.isEmpty == true)
+
+        Button { onEdit(project) } label: {
+            Label("Edit Project / Property", systemImage: "pencil")
+        }
+        Divider()
+        Button(role: .destructive) {
+            onDelete(project)
+        } label: {
+            Label("Delete Project", systemImage: "trash")
+        }
     }
 }
 
