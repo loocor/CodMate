@@ -19,12 +19,16 @@ final class ClaudeCodeVM: ObservableObject {
     @Published var aliasOpus: String = ""
     @Published var lastError: String?
     @Published var rawSettingsText: String = ""
+    @Published var notificationsEnabled: Bool = false
+    @Published var notificationBridgeHealthy: Bool = false
+    @Published var notificationSelfTestResult: String? = nil
 
     private let registry = ProvidersRegistryService()
     private var saveDebounceTask: Task<Void, Never>? = nil
     private var applyProviderDebounceTask: Task<Void, Never>? = nil
     private var defaultAliasDebounceTask: Task<Void, Never>? = nil
     private var runtimeDebounceTask: Task<Void, Never>? = nil
+    private var notificationDebounceTask: Task<Void, Never>? = nil
 
     func loadAll() async {
         let providerList = await registry.listProviders()
@@ -35,6 +39,7 @@ final class ClaudeCodeVM: ObservableObject {
             self.syncAliases()
             self.syncLoginMethod()
         }
+        await loadNotificationSettings()
     }
 
     func availableModels() -> [String] {
@@ -257,6 +262,19 @@ final class ClaudeCodeVM: ObservableObject {
         try? await settings.applyRuntime(runtime)
     }
 
+    func loadNotificationSettings() async {
+        let settings = ClaudeSettingsService()
+        let status = await settings.codMateNotificationHooksStatus()
+        await MainActor.run {
+            let healthy = status.permissionHookInstalled && status.completionHookInstalled
+            self.notificationsEnabled = healthy
+            self.notificationBridgeHealthy = healthy
+            if !healthy {
+                self.notificationSelfTestResult = nil
+            }
+        }
+    }
+
     private func syncAliases() {
         guard let id = activeProviderId,
               let provider = providers.first(where: { $0.id == id })
@@ -340,6 +358,50 @@ final class ClaudeCodeVM: ObservableObject {
         }
     }
 
+    private func applyNotificationSettings() async {
+        if SecurityScopedBookmarks.shared.isSandboxed {
+            let home = SessionPreferencesStore.getRealUserHomeURL()
+            _ = AuthorizationHub.shared.ensureDirectoryAccessOrPromptSync(
+                directory: home,
+                purpose: .generalAccess,
+                message: "Authorize ~/.claude to update Claude notifications"
+            )
+        }
+        let settings = ClaudeSettingsService()
+        do {
+            try await settings.setCodMateNotificationHooks(enabled: notificationsEnabled)
+            await loadNotificationSettings()
+        } catch {
+            await MainActor.run { self.lastError = "Failed to update Claude notifications" }
+        }
+    }
+
+    func runNotificationSelfTest() async {
+        notificationSelfTestResult = nil
+        var comps = URLComponents()
+        comps.scheme = "codmate"
+        comps.host = "notify"
+        let title = "CodMate"
+        let body = "Claude notifications self-test"
+        var items = [
+            URLQueryItem(name: "source", value: "claude"),
+            URLQueryItem(name: "event", value: "test")
+        ]
+        if let titleData = title.data(using: .utf8) {
+            items.append(URLQueryItem(name: "title64", value: titleData.base64EncodedString()))
+        }
+        if let bodyData = body.data(using: .utf8) {
+            items.append(URLQueryItem(name: "body64", value: bodyData.base64EncodedString()))
+        }
+        comps.queryItems = items
+        guard let url = comps.url else {
+            notificationSelfTestResult = "Invalid test URL"
+            return
+        }
+        let success = NSWorkspace.shared.open(url)
+        notificationSelfTestResult = success ? "Sent (check Notification Center)" : "Failed to open codmate:// URL"
+    }
+
     // MARK: - Debounced operations
     func scheduleApplyActiveProviderDebounced(delayMs: UInt64 = 300) {
         applyProviderDebounceTask?.cancel()
@@ -358,6 +420,16 @@ final class ClaudeCodeVM: ObservableObject {
             do { try await Task.sleep(nanoseconds: delayMs * 1_000_000) } catch { return }
             if Task.isCancelled { return }
             await self.applyDefaultAlias(modelId)
+        }
+    }
+
+    func scheduleApplyNotificationSettingsDebounced(delayMs: UInt64 = 250) {
+        notificationDebounceTask?.cancel()
+        notificationDebounceTask = Task { [weak self] in
+            guard let self else { return }
+            do { try await Task.sleep(nanoseconds: delayMs * 1_000_000) } catch { return }
+            if Task.isCancelled { return }
+            await self.applyNotificationSettings()
         }
     }
 

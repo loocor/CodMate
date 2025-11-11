@@ -14,7 +14,32 @@
 		41A001242B30040000000001 /* THIRD-PARTY-NOTICES.md in Resources */ = {isa = PBXBuildFile; fileRef = 41A001232B30040000000001 /* THIRD-PARTY-NOTICES.md */; };
 		41A001282B30040000000005 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 41A001272B30040000000004 /* PrivacyInfo.xcprivacy */; };
 		41A0012A2B30050000000001 /* providers.json in Resources */ = {isa = PBXBuildFile; fileRef = 41A001292B30050000000001 /* providers.json */; };
+		5A1A6B062F3A8D1C00A1B001 /* CodMateNotifyMain.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A1A6B042F3A8D1C00A1B001 /* CodMateNotifyMain.swift */; };
+		5A1A6B0B2F3A8D1D00A1B001 /* codmate-notify in CopyFiles */ = {isa = PBXBuildFile; fileRef = 5A1A6B052F3A8D1C00A1B001 /* codmate-notify */; };
 /* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		5A1A6B0E2F3A8D1D00A1B001 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 1A0000052A00000100000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 5A1A6AF92F3A8D1B00A1B001;
+			remoteInfo = CodMateNotify;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		5A1A6B0A2F3A8D1D00A1B001 /* CopyFiles */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = bin;
+			dstSubfolderSpec = 7;
+			files = (
+				5A1A6B0B2F3A8D1D00A1B001 /* codmate-notify in CopyFiles */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		1A00007F2A00000100000001 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; name = Info.plist; path = CodMate/Info.plist; sourceTree = SOURCE_ROOT; };
@@ -24,6 +49,8 @@
 		41A001232B30040000000001 /* THIRD-PARTY-NOTICES.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = "THIRD-PARTY-NOTICES.md"; sourceTree = SOURCE_ROOT; };
 		41A001272B30040000000004 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = PrivacyInfo.xcprivacy; sourceTree = SOURCE_ROOT; };
 		41A001292B30050000000001 /* providers.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; name = providers.json; path = payload/providers.json; sourceTree = SOURCE_ROOT; };
+		5A1A6B042F3A8D1C00A1B001 /* CodMateNotifyMain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodMateNotifyMain.swift; sourceTree = "<group>"; };
+		5A1A6B052F3A8D1C00A1B001 /* codmate-notify */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = "codmate-notify"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -43,6 +70,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		5A1A6AF82F3A8D1B00A1B001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -59,6 +93,7 @@
 			isa = PBXGroup;
 			children = (
 				1A0000802A00000100000001 /* CodMate.app */,
+				5A1A6B052F3A8D1C00A1B001 /* codmate-notify */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -83,8 +118,17 @@
 				317DBA462EADF961005C01C0 /* views */,
 				317DBA502EADF9EC005C01C0 /* utils */,
 				317DB9F52EADF7DC005C01C0 /* CodMateApp.swift */,
+				5A1A6B032F3A8D1C00A1B001 /* CodMateNotify */,
 			);
 			name = Sources;
+			sourceTree = SOURCE_ROOT;
+		};
+		5A1A6B032F3A8D1C00A1B001 /* CodMateNotify */ = {
+			isa = PBXGroup;
+			children = (
+				5A1A6B042F3A8D1C00A1B001 /* CodMateNotifyMain.swift */,
+			);
+			path = CodMateNotify;
 			sourceTree = SOURCE_ROOT;
 		};
 /* End PBXGroup section */
@@ -97,10 +141,12 @@
 				1A0000012A00000100000001 /* Sources */,
 				1A0000032A00000100000001 /* Frameworks */,
 				1A0000042A00000100000001 /* Resources */,
+				5A1A6B0A2F3A8D1D00A1B001 /* CopyFiles */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				5A1A6B0D2F3A8D1D00A1B001 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				317DBA442EADF92E005C01C0 /* models */,
@@ -113,6 +159,22 @@
 			productReference = 1A0000802A00000100000001 /* CodMate.app */;
 			productType = "com.apple.product-type.application";
 		};
+		5A1A6AF92F3A8D1B00A1B001 /* CodMateNotify */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 5A1A6AFE2F3A8D1C00A1B001 /* Build configuration list for PBXNativeTarget "CodMateNotify" */;
+			buildPhases = (
+				5A1A6AF72F3A8D1B00A1B001 /* Sources */,
+				5A1A6AF82F3A8D1B00A1B001 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = CodMateNotify;
+			productName = CodMateNotify;
+			productReference = 5A1A6B052F3A8D1C00A1B001 /* codmate-notify */;
+			productType = "com.apple.product-type.tool";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -122,6 +184,14 @@
 				BuildIndependentTargetsInParallel = YES;
 				LastSwiftUpdateCheck = 1530;
 				LastUpgradeCheck = 2610;
+				TargetAttributes = {
+					1A0000022A00000100000001 = {
+						DevelopmentTeam = AN5X2K46ER;
+					};
+					5A1A6AF92F3A8D1B00A1B001 = {
+						DevelopmentTeam = AN5X2K46ER;
+					};
+				};
 			};
 			buildConfigurationList = 1A0000062A00000100000001 /* Build configuration list for PBXProject "CodMate" */;
 			compatibilityVersion = "Xcode 15.0";
@@ -141,6 +211,7 @@
 			projectRoot = "";
 			targets = (
 				1A0000022A00000100000001 /* CodMate */,
+				5A1A6AF92F3A8D1B00A1B001 /* CodMateNotify */,
 			);
 		};
 /* End PBXProject section */
@@ -168,7 +239,23 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		5A1A6AF72F3A8D1B00A1B001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				5A1A6B062F3A8D1C00A1B001 /* CodMateNotifyMain.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		5A1A6B0D2F3A8D1D00A1B001 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 5A1A6AF92F3A8D1B00A1B001 /* CodMateNotify */;
+			targetProxy = 5A1A6B0E2F3A8D1D00A1B001 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		1A0000072A00000100000001 /* Debug */ = {
@@ -783,6 +870,144 @@
 			};
 			name = "Release-MAS";
 		};
+		5A1A6B002F3A8D1C00A1B001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_IDENTITY = "Apple Development";
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = AN5X2K46ER;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright © 2025 CodMate";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				PRODUCT_BUNDLE_IDENTIFIER = ai.umate.codmate.notifybridge;
+				PRODUCT_NAME = "codmate-notify";
+				SDKROOT = macosx;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		5A1A6B012F3A8D1C00A1B001 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_IDENTITY = "Apple Development";
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = AN5X2K46ER;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright © 2025 CodMate";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				PRODUCT_BUNDLE_IDENTIFIER = ai.umate.codmate.notifybridge;
+				PRODUCT_NAME = "codmate-notify";
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		5A44F4A82F3AAAE400AF56A1 /* Debug-Direct */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_IDENTITY = "Apple Development";
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = AN5X2K46ER;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright © 2025 CodMate";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				PRODUCT_BUNDLE_IDENTIFIER = ai.umate.codmate.notifybridge;
+				PRODUCT_NAME = "codmate-notify";
+				SDKROOT = macosx;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = "Debug-Direct";
+		};
+		5A44F4A92F3AAAE400AF56A1 /* Release-Direct */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_IDENTITY = "Apple Development";
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = AN5X2K46ER;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright © 2025 CodMate";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				PRODUCT_BUNDLE_IDENTIFIER = ai.umate.codmate.notifybridge;
+				PRODUCT_NAME = "codmate-notify";
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_VERSION = 5.0;
+			};
+			name = "Release-Direct";
+		};
+		5A44F4AA2F3AAAE400AF56A1 /* Debug-MAS */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_IDENTITY = "Apple Development";
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = AN5X2K46ER;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright © 2025 CodMate";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				PRODUCT_BUNDLE_IDENTIFIER = ai.umate.codmate.notifybridge;
+				PRODUCT_NAME = "codmate-notify";
+				SDKROOT = macosx;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = "Debug-MAS";
+		};
+		5A44F4AB2F3AAAE400AF56A1 /* Release-MAS */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_IDENTITY = "Apple Development";
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = AN5X2K46ER;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright © 2025 CodMate";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				PRODUCT_BUNDLE_IDENTIFIER = ai.umate.codmate.notifybridge;
+				PRODUCT_NAME = "codmate-notify";
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_VERSION = 5.0;
+			};
+			name = "Release-MAS";
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -808,6 +1033,19 @@
 				5A0001112AFF000100000012 /* Release-Direct */,
 				5A0001122AFF000100000013 /* Debug-MAS */,
 				5A0001132AFF000100000014 /* Release-MAS */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		5A1A6AFE2F3A8D1C00A1B001 /* Build configuration list for PBXNativeTarget "CodMateNotify" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				5A1A6B002F3A8D1C00A1B001 /* Debug */,
+				5A1A6B012F3A8D1C00A1B001 /* Release */,
+				5A44F4A82F3AAAE400AF56A1 /* Debug-Direct */,
+				5A44F4A92F3AAAE400AF56A1 /* Release-Direct */,
+				5A44F4AA2F3AAAE400AF56A1 /* Debug-MAS */,
+				5A44F4AB2F3AAAE400AF56A1 /* Release-MAS */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;

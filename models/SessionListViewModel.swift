@@ -204,7 +204,7 @@ final class SessionListViewModel: ObservableObject {
     @Published var editComment: String = ""
     @Published var globalSessionCount: Int = 0
     @Published private(set) var pathTreeRootPublished: PathTreeNode?
-    @Published private var monthCountsCache: [String: [Int: Int]] = [:]  // key: "dim|yyyy-MM"
+    private var monthCountsCache: [String: [Int: Int]] = [:]  // key: "dim|yyyy-MM" (not @Published to avoid updates during view reads)
     @Published private(set) var codexUsageStatus: CodexUsageStatus?
     @Published private(set) var usageSnapshots: [UsageProviderKind: UsageProviderSnapshot] = [:]
     // Live activity indicators

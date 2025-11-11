@@ -33,7 +33,10 @@ Status: macOS 15+, Swift 6, Xcode 16. Universal binary (arm64 + x86_64).
 - Codex Settings
   - Dedicated Settings › Codex page with tabs: Providers, Runtime, Notifications, Privacy, Raw Config.
   - Provider presets include K2, GLM, DeepSeek with “Get key” links and prefilled base URLs.
-  - System notifications bridge via a managed `codmate-notify` helper; TUI notifications toggle.
+  - System notifications bridge via the bundled Swift `codmate-notify` helper (installed in `~/Library/Application Support/CodMate/bin/`); TUI notifications toggle.
+- Claude Settings
+  - Tabs for Provider, Runtime, Notifications, and Raw Config.
+  - Notifications tab installs/removes Claude Code hooks that call `/usr/bin/open -g "codmate://notify?source=claude&event=…&title64=…&body64=…"`, mirroring the Codex UX (toggle + self-test).
 - Dialectics (Diagnostics)
   - Codex sessions root probe (current vs default), counts/samples/errors with “Save Report…”.
   - Claude sessions directory probe (default path), counts and sample files.
@@ -143,14 +146,14 @@ This sets CFBundleShortVersionString to `1.4.0`, CFBundleVersion to the computed
 
 ## Scripts
 - `scripts/gen-icons.sh` — generate `AppIcon.appiconset` from a source image or a directory of images.
-- `scripts/codmate-notify` — bridges Codex TUI `notify` events to macOS notifications.
 
 ## Project Layout
 ```
 CodMate.xcodeproj/          # Xcode project (single app target “CodMate”)
 CodMate/                    # Assets and Info.plist (not in Copy Bundle Resources)
 Sources/CodMate/            # App sources (Models / Services / ViewModels / Views)
-scripts/                    # Helper scripts (icons, notifications)
+CodMateNotify/             # Swift command-line helper installed as `codmate-notify`
+scripts/                    # Helper scripts (icons, build flows)
 Tests/                      # XCTest (light coverage)
 ```
 

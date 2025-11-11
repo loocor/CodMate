@@ -1,146 +1,171 @@
 import SwiftUI
 
 #if os(macOS)
-    import AppKit
+  import AppKit
 #endif
 
 @main
 struct CodMateApp: App {
-    #if os(macOS)
+  #if os(macOS)
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+  #endif
+  @StateObject private var listViewModel: SessionListViewModel
+  @StateObject private var preferences: SessionPreferencesStore
+  @State private var settingsSelection: SettingCategory = .general
+  @Environment(\.openWindow) private var openWindow
+
+  init() {
+    let prefs = SessionPreferencesStore()
+    _preferences = StateObject(wrappedValue: prefs)
+    _listViewModel = StateObject(wrappedValue: SessionListViewModel(preferences: prefs))
+    // Prepare user notifications early so banners can show while app is active
+    SystemNotifier.shared.bootstrap()
+    // In App Sandbox, restore security-scoped access to user-selected directories
+    SecurityScopedBookmarks.shared.restoreAndStartAccess()
+    // Restore all dynamic bookmarks (e.g., repository directories for Git Review)
+    SecurityScopedBookmarks.shared.restoreAllDynamicBookmarks()
+    // Restore and check sandbox permissions for critical directories
+    Task { @MainActor in
+      SandboxPermissionsManager.shared.restoreAccess()
+    }
+  }
+
+  var bodyCommands: some Commands {
+    Group {
+      CommandGroup(replacing: .appInfo) {
+        Button("About CodMate") { presentSettings(for: .about) }
+      }
+      CommandGroup(replacing: .appSettings) {
+        Button("Settings…") { presentSettings(for: .general) }
+          .keyboardShortcut(",", modifiers: [.command])
+      }
+      CommandGroup(after: .appSettings) {
+        Button("Global Search…") {
+          NotificationCenter.default.post(name: .codMateFocusGlobalSearch, object: nil)
+        }
+        .keyboardShortcut("f", modifiers: [.command])
+      }
+      // Integrate actions into the system View menu
+      CommandGroup(after: .sidebar) {
+        Button("Refresh Sessions") {
+          Task { await listViewModel.refreshSessions(force: true) }
+        }
+        .keyboardShortcut("r", modifiers: [.command])
+
+        Button("Toggle Sidebar") {
+          NotificationCenter.default.post(name: .codMateToggleSidebar, object: nil)
+        }
+        .keyboardShortcut("1", modifiers: [.command])
+
+        Button("Toggle Session List") {
+          NotificationCenter.default.post(name: .codMateToggleList, object: nil)
+        }
+        .keyboardShortcut("2", modifiers: [.command])
+      }
+    }
+  }
+
+  var body: some Scene {
+    WindowGroup {
+      ContentView(viewModel: listViewModel)
+        .frame(minWidth: 880, minHeight: 600)
+    }
+    .defaultSize(width: 1200, height: 780)
+    .handlesExternalEvents(matching: [])  // 防止 URL scheme 触发新窗口创建
+    .commands { bodyCommands }
+    WindowGroup("Settings", id: "settings") {
+      SettingsWindowContainer(
+        preferences: preferences,
+        listViewModel: listViewModel,
+        selection: $settingsSelection
+      )
+    }
+    .defaultSize(width: 800, height: 640)
+    .handlesExternalEvents(matching: [])  // 防止 URL scheme 触发新设置窗口创建
+    .windowStyle(.titleBar)
+    .windowToolbarStyle(.automatic)
+    .windowResizability(.contentMinSize)
+  }
+
+  private func presentSettings(for category: SettingCategory) {
+    settingsSelection = category
+    #if os(macOS)
+      NSApplication.shared.activate(ignoringOtherApps: true)
     #endif
-    @StateObject private var listViewModel: SessionListViewModel
-    @StateObject private var preferences: SessionPreferencesStore
-    @State private var settingsSelection: SettingCategory = .general
-    @Environment(\.openWindow) private var openWindow
-
-    init() {
-        let prefs = SessionPreferencesStore()
-        _preferences = StateObject(wrappedValue: prefs)
-        _listViewModel = StateObject(wrappedValue: SessionListViewModel(preferences: prefs))
-        // Prepare user notifications early so banners can show while app is active
-        SystemNotifier.shared.bootstrap()
-        // In App Sandbox, restore security-scoped access to user-selected directories
-        SecurityScopedBookmarks.shared.restoreAndStartAccess()
-        // Restore all dynamic bookmarks (e.g., repository directories for Git Review)
-        SecurityScopedBookmarks.shared.restoreAllDynamicBookmarks()
-        // Restore and check sandbox permissions for critical directories
-        Task { @MainActor in
-            SandboxPermissionsManager.shared.restoreAccess()
-        }
-    }
-
-    var bodyCommands: some Commands {
-        Group {
-            CommandGroup(replacing: .appInfo) {
-                Button("About CodMate") { presentSettings(for: .about) }
-            }
-            CommandGroup(replacing: .appSettings) {
-                Button("Settings…") { presentSettings(for: .general) }
-                    .keyboardShortcut(",", modifiers: [.command])
-            }
-            CommandGroup(after: .appSettings) {
-                Button("Global Search…") {
-                    NotificationCenter.default.post(name: .codMateFocusGlobalSearch, object: nil)
-                }
-                .keyboardShortcut("f", modifiers: [.command])
-            }
-            // Integrate actions into the system View menu
-            CommandGroup(after: .sidebar) {
-                Button("Refresh Sessions") {
-                    Task { await listViewModel.refreshSessions(force: true) }
-                }
-                .keyboardShortcut("r", modifiers: [.command])
-
-                Button("Toggle Sidebar") {
-                    NotificationCenter.default.post(name: .codMateToggleSidebar, object: nil)
-                }
-                .keyboardShortcut("1", modifiers: [.command])
-
-                Button("Toggle Session List") {
-                    NotificationCenter.default.post(name: .codMateToggleList, object: nil)
-                }
-                .keyboardShortcut("2", modifiers: [.command])
-            }
-        }
-    }
-
-    var body: some Scene {
-        WindowGroup {
-            ContentView(viewModel: listViewModel)
-                .frame(minWidth: 880, minHeight: 600)
-        }
-        .defaultSize(width: 1200, height: 780)
-        .commands { bodyCommands }
-        WindowGroup("Settings", id: "settings") {
-            SettingsWindowContainer(
-                preferences: preferences,
-                listViewModel: listViewModel,
-                selection: $settingsSelection
-            )
-        }
-        .defaultSize(width: 800, height: 640)
-        .windowStyle(.titleBar)
-        .windowToolbarStyle(.automatic)
-        .windowResizability(.contentMinSize)
-    }
-
-    private func presentSettings(for category: SettingCategory) {
-        settingsSelection = category
-        #if os(macOS)
-            NSApplication.shared.activate(ignoringOtherApps: true)
-        #endif
-        openWindow(id: "settings")
-    }
+    openWindow(id: "settings")
+  }
 }
 
 private struct SettingsWindowContainer: View {
-    let preferences: SessionPreferencesStore
-    let listViewModel: SessionListViewModel
-    @Binding var selection: SettingCategory
+  let preferences: SessionPreferencesStore
+  let listViewModel: SessionListViewModel
+  @Binding var selection: SettingCategory
 
-    var body: some View {
-        SettingsView(preferences: preferences, selection: $selection)
-            .environmentObject(listViewModel)
-    }
+  var body: some View {
+    SettingsView(preferences: preferences, selection: $selection)
+      .environmentObject(listViewModel)
+  }
 }
 
 #if os(macOS)
-final class AppDelegate: NSObject, NSApplicationDelegate {
+  final class AppDelegate: NSObject, NSApplicationDelegate {
+    func application(_ application: NSApplication, open urls: [URL]) {
+      print("🔗 [AppDelegate] Received URLs: \(urls)")
+      print("🪟 [AppDelegate] Current windows count: \(application.windows.count)")
+      print("🪟 [AppDelegate] Visible windows: \(application.windows.filter { $0.isVisible }.count)")
+      ExternalURLRouter.handle(urls)
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool)
+      -> Bool
+    {
+      print("🔄 [AppDelegate] applicationShouldHandleReopen called, hasVisibleWindows: \(flag)")
+      //  If there are visible windows, bring them to the front
+      if flag {
+        sender.windows
+          .filter { $0.isVisible }
+          .forEach { $0.makeKeyAndOrderFront(nil) }
+      }
+      //  Always return true to prevent the system from creating new windows
+      //  This is particularly important for notification forwarding triggered by URL scheme (codmate://)
+      return true
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
-        #if canImport(SwiftTerm) && !APPSTORE
-            // Synchronously stop all terminal sessions to ensure clean exit
-            // This prevents orphaned codex/claude processes when app quits
-            let manager = TerminalSessionManager.shared
+      #if canImport(SwiftTerm) && !APPSTORE
+        // Synchronously stop all terminal sessions to ensure clean exit
+        // This prevents orphaned codex/claude processes when app quits
+        let manager = TerminalSessionManager.shared
 
-            // Use sync mode to block until all processes are killed
-            // This ensures no orphaned processes when app terminates
-            manager.stopAll(withPrefix: "", sync: true)
+        // Use sync mode to block until all processes are killed
+        // This ensures no orphaned processes when app terminates
+        manager.stopAll(withPrefix: "", sync: true)
 
-            // No sleep needed - sync mode blocks until processes are dead
-        #endif
+      // No sleep needed - sync mode blocks until processes are dead
+      #endif
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        #if canImport(SwiftTerm) && !APPSTORE
-            // Check if there are any running terminal sessions
-            let manager = TerminalSessionManager.shared
-            if manager.hasAnyRunningProcesses() {
-                // Show confirmation dialog
-                let alert = NSAlert()
-                alert.messageText = "Stop Running Sessions?"
-                alert.informativeText = "There are Codex/Claude Code sessions still running. Quitting now will terminate them."
-                alert.alertStyle = .warning
-                alert.addButton(withTitle: "Quit")
-                alert.addButton(withTitle: "Cancel")
+      #if canImport(SwiftTerm) && !APPSTORE
+        // Check if there are any running terminal sessions
+        let manager = TerminalSessionManager.shared
+        if manager.hasAnyRunningProcesses() {
+          // Show confirmation dialog
+          let alert = NSAlert()
+          alert.messageText = "Stop Running Sessions?"
+          alert.informativeText =
+            "There are Codex/Claude Code sessions still running. Quitting now will terminate them."
+          alert.alertStyle = .warning
+          alert.addButton(withTitle: "Quit")
+          alert.addButton(withTitle: "Cancel")
 
-                let response = alert.runModal()
-                if response == .alertSecondButtonReturn {
-                    return .terminateCancel
-                }
-            }
-        #endif
-        return .terminateNow
+          let response = alert.runModal()
+          if response == .alertSecondButtonReturn {
+            return .terminateCancel
+          }
+        }
+      #endif
+      return .terminateNow
     }
-}
+  }
 #endif

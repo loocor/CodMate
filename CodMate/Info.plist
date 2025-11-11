@@ -16,5 +16,16 @@
 	<true/>
     <key>NSAppleEventsUsageDescription</key>
     <string>CodMate may open Terminal or other apps on your request.</string>
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLName</key>
+            <string>ai.codmate.app</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>codmate</string>
+            </array>
+        </dict>
+    </array>
 </dict>
 </plist>

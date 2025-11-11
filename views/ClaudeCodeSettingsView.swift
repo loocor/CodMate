@@ -27,6 +27,7 @@ struct ClaudeCodeSettingsView: View {
             TabView {
                 Tab("Provider", systemImage: "server.rack") { SettingsTabContent { providerPane } }
                 Tab("Runtime", systemImage: "gearshape.2") { SettingsTabContent { runtimePane } }
+                Tab("Notifications", systemImage: "bell") { SettingsTabContent { notificationsPane } }
                 Tab("Raw Config", systemImage: "doc.text") { SettingsTabContent { rawPane } }
             }
             .padding(.bottom, 16)
@@ -168,6 +169,62 @@ struct ClaudeCodeSettingsView: View {
     // modelsPane removed; Provider pane now includes the default model picker like Codex
 
     // MARK: - Raw Config (read-only; toolbar mirrors Codex)
+    private var notificationsPane: some View {
+        Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 18) {
+            GridRow {
+                VStack(alignment: .leading, spacing: 0) {
+                    Text("macOS Notifications").font(.subheadline).fontWeight(.medium)
+                    Text("Forward Claude Code permission and completion hooks to macOS via codmate://notify.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Toggle("", isOn: $vm.notificationsEnabled)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .onChange(of: vm.notificationsEnabled) { _, _ in
+                        vm.scheduleApplyNotificationSettingsDebounced()
+                    }
+            }
+            gridDivider
+            GridRow {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Hook Commands").font(.subheadline).fontWeight(.medium)
+                    Text("/usr/bin/open -g codmate://notify?source=claude&event=permission&title64=…&body64=…")
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                    Text("/usr/bin/open -g codmate://notify?source=claude&event=complete&title64=…&body64=…")
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                    Text("Titles/bodies are base64-encoded to avoid shell escaping issues.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            gridDivider
+            GridRow {
+                VStack(alignment: .leading, spacing: 0) {
+                    Text("Self-test").font(.subheadline).fontWeight(.medium)
+                    Text("Sends a codmate:// test URL to verify notification routing.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                HStack(spacing: 8) {
+                    if vm.notificationBridgeHealthy {
+                        Image(systemName: "checkmark.seal.fill").foregroundStyle(.green)
+                    } else {
+                        Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                    }
+                    Button("Send Test") { Task { await vm.runNotificationSelfTest() } }
+                        .controlSize(.small)
+                    if let result = vm.notificationSelfTestResult {
+                        Text(result).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .trailing)
+            }
+        }
+    }
+
     private var rawPane: some View {
         let displayText = vm.rawSettingsText
         

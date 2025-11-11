@@ -84,9 +84,15 @@ CLI Integration (codex)
 Codex Settings
 - Settings › Codex only manages Codex CLI runtime-related configuration (Model & Reasoning, Sandbox & Approvals, Notifications, Privacy, Raw Config).
 - Providers page is independent: Settings › Providers (cross-application shared, for Codex and Claude Code selection/configuration).
-- Notifications: TUI notifications toggle; system notifications bridge via `notify` (built‑in script path is managed by CodMate).
+- Notifications: TUI notifications toggle; system notifications bridge via the bundled Swift `codmate-notify` helper (installed to `~/Library/Application Support/CodMate/bin/`).
 - Privacy: expose `shell_environment_policy`, reasoning visibility, OTEL exporter; do not surface history persistence in phase 1.
 - Projects auto‑create a same‑id Profile on creation; renaming a project synchronizes the profile name. Conflict prompts are required.
+
+Claude Settings
+- Settings › Claude splits into Provider, Runtime, Notifications, and Raw Config tabs.
+- Notifications tab mirrors Codex UX: single toggle to install/remove macOS notification hooks, health indicator, and self-test button.
+- Hooks write to `~/.claude/settings.json` under `hooks.Notification` and `hooks.Stop`, pointing to `/usr/bin/open -g "codmate://notify?source=claude&event=…&title64=…&body64=…"`.
+- Always request Home directory access through `AuthorizationHub` before mutating the hooks file when sandboxed.
 
 Session Metadata (Rename/Comment)
 - Users can rename any session and attach a short comment.
@@ -135,3 +141,5 @@ Known Pitfalls
 - Swift KeyPath escaping when patching: do not double-escape the leading backslash in typed key paths. Always write single-backslash literals like `\ProvidersVM.codexBaseURL` in Swift sources. The apply_patch tool takes plain text; extra escaping (e.g., `\\ProvidersVM...`) will compile-fail and break symbol discovery across files.
 - Prefer dot-shorthand KeyPaths in Swift (clearer, avoids escaping pitfalls): use `\.codexBaseURL` instead of `\ProvidersVM.codexBaseURL` when the generic context already constrains the base type (e.g., `ReferenceWritableKeyPath<ProvidersVM, String>`). This makes patches safer and reduces chances of accidental extra backslashes.
 - String interpolation gotcha: do not escape quotes inside `\( ... )`. Write `Text("Codex: \(dict["codex"] ?? "")")`, not `Text("Codex: \(dict[\"codex\"] ?? \"\")")`. Escaping quotes inside interpolation confuses the outer string literal and can cause “Unterminated string literal”.
+- SwiftUI view extensions live in separate files; properties that those extensions need must be internal (default) or `fileprivate`. Marking them `private` will make the extension fail to build (“is inaccessible due to 'private'”).
+- Toolbar popovers must manage their own `@State` visibility. Binding `isPresented` directly to a view model flag tied to focus/search states causes the popover to close immediately when other columns steal focus or the toolbar re-renders.
