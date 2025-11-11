@@ -292,12 +292,12 @@ PLIST
   echo "[verify][$ARCH] entitlements (pre post-sign)"
   codesign -d --entitlements :- "$APP_PATH" 2>/dev/null || true
 
-  # Ensure sandbox entitlements are present on the exported app.
-  # Some export paths strip entitlements; re-sign with our entitlements when SANDBOX=on.
+  # Ensure hardened runtime is always applied and sandbox entitlements are present when needed.
+  # Some export paths may not properly apply hardened runtime or strip entitlements.
   if [[ "$SANDBOX" == "on" ]]; then
     ENT_FILE="$ROOT_DIR/CodMate/CodMate.entitlements"
     if [[ -f "$ENT_FILE" ]]; then
-      echo "[post][$ARCH] Re-signing app with entitlements to preserve App Sandbox"
+      echo "[post][$ARCH] Re-signing app with entitlements and hardened runtime"
       codesign --force --options runtime \
         --entitlements "$ENT_FILE" \
         --sign "${SIGNING_CERT}" \
@@ -305,6 +305,12 @@ PLIST
     else
       echo "[WARN][$ARCH] Entitlements file missing at $ENT_FILE; skipping post re-sign"
     fi
+  else
+    # For Direct builds (SANDBOX=off), ensure hardened runtime is applied
+    echo "[post][$ARCH] Re-signing app with hardened runtime (no entitlements)"
+    codesign --force --options runtime \
+      --sign "${SIGNING_CERT}" \
+      "$APP_PATH"
   fi
 
   echo "[verify][$ARCH] entitlements (after post-sign)"
