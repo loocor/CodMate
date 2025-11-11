@@ -94,7 +94,6 @@ actor RepoContentSearchService {
     activeProcess = nil
 
     let status = process.terminationStatus
-    let reason = process.terminationReason
     if !truncated && status != 0 && status != 1 {
       let errData = try? stderr.fileHandleForReading.readToEnd()
       let message = errData.flatMap { String(data: $0, encoding: .utf8) } ?? "ripgrep exit code \(status)"

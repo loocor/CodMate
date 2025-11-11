@@ -108,7 +108,6 @@ final class GitChangesViewModel: ObservableObject {
 
     private func filesystemGitRoot(startingAt start: URL) -> URL? {
         var cur = start.standardizedFileURL
-        let fm = FileManager.default
         var guardCounter = 0
         while guardCounter < 200 {
             if hasGitDirectory(at: cur) { return cur }

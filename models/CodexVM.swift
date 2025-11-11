@@ -96,7 +96,9 @@ final class CodexVM: ObservableObject {
   }
 
   func loadRegistryBindings() async {
-    registryProviders = await providersRegistry.listAllProviders()
+    // Align with Claude Code: only show user-configured providers,
+    // not bundled templates, to avoid confusing, incomplete entries.
+    registryProviders = await providersRegistry.listProviders()
     let bindings = await providersRegistry.getBindings()
     registryActiveProviderId =
       bindings.activeProvider?[

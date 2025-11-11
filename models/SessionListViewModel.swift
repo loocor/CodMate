@@ -461,17 +461,19 @@ final class SessionListViewModel: ObservableObject {
             guard let self else { return }
             let consumer = note.userInfo?["consumer"] as? String
             let providerId = note.userInfo?["providerId"] as? String
-            if consumer == ProvidersRegistryService.Consumer.codex.rawValue {
-                if providerId == nil || providerId?.isEmpty == true {
-                    self.refreshCodexUsageStatus()
-                } else {
-                    self.setUsageSnapshot(.codex, Self.thirdPartyUsageSnapshot(for: .codex))
-                }
-            } else if consumer == ProvidersRegistryService.Consumer.claudeCode.rawValue {
-                if providerId == nil || providerId?.isEmpty == true {
-                    self.refreshClaudeUsageStatus()
-                } else {
-                    self.setUsageSnapshot(.claude, Self.thirdPartyUsageSnapshot(for: .claude))
+            Task { @MainActor in
+                if consumer == ProvidersRegistryService.Consumer.codex.rawValue {
+                    if providerId == nil || providerId?.isEmpty == true {
+                        self.refreshCodexUsageStatus()
+                    } else {
+                        self.setUsageSnapshot(.codex, Self.thirdPartyUsageSnapshot(for: .codex))
+                    }
+                } else if consumer == ProvidersRegistryService.Consumer.claudeCode.rawValue {
+                    if providerId == nil || providerId?.isEmpty == true {
+                        self.refreshClaudeUsageStatus()
+                    } else {
+                        self.setUsageSnapshot(.claude, Self.thirdPartyUsageSnapshot(for: .claude))
+                    }
                 }
             }
         }
