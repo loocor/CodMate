@@ -162,7 +162,7 @@ struct SessionDetailView: View {
                 }
                 .task(id: environmentExpanded) {
                     guard environmentExpanded else { return }
-                    guard summary.source == .codex else {
+                    guard summary.source == .codexLocal else {
                         environmentInfo = nil
                         environmentLoading = false
                         return
@@ -202,7 +202,7 @@ struct SessionDetailView: View {
                 }
                 .task(id: instructionsExpanded) {
                     guard instructionsExpanded else { return }
-                    guard summary.source == .codex else {
+                    guard summary.source == .codexLocal else {
                         instructionsText = nil
                         instructionsLoading = false
                         return
@@ -384,7 +384,7 @@ extension SessionDetailView {
         loadingTimeline = true
         defer { loadingTimeline = false }
         let loaded: [ConversationTurn]
-        if summary.source == .claude {
+        if summary.source == .claudeLocal {
             loaded = await viewModel.timeline(for: summary)
         } else {
             loaded = (try? loader.load(url: summary.fileURL)) ?? []
@@ -579,7 +579,8 @@ private func sanitizedExportFileName(_ s: String, fallback: String, maxLength: I
         eventCount: 12,
         lineCount: 156,
         lastUpdatedAt: Date().addingTimeInterval(-1800),
-        source: .codex
+        source: .codexLocal,
+        remotePath: nil
     )
 
     return SessionDetailView(
@@ -617,7 +618,8 @@ private func sanitizedExportFileName(_ s: String, fallback: String, maxLength: I
         eventCount: 6,
         lineCount: 89,
         lastUpdatedAt: Date().addingTimeInterval(-300),
-        source: .codex
+        source: .codexLocal,
+        remotePath: nil
     )
 
     return SessionDetailView(

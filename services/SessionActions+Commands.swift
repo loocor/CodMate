@@ -9,11 +9,11 @@ extension SessionActions {
     {
         // Always invoke via /usr/bin/env to rely on system PATH resolution.
         // This removes the need for user-configured CLI paths and aligns with app policy.
-        let exeName = session.source == .codex ? "codex" : "claude"
+        let exeName = session.source.baseKind == .codex ? "codex" : "claude"
 
         // Prepare arguments first, including async MCP config if needed
         var args: [String]
-        switch session.source {
+        switch session.source.baseKind {
         case .codex:
             args = buildResumeArguments(session: session, options: options)
         case .claude:
@@ -77,7 +77,7 @@ extension SessionActions {
                         env["PATH"] = basePath
                     }
                     // Prepare environment overlays (Claude Code picks up Anthropic-compatible vars)
-                    if session.source == .claude {
+                    if session.source.baseKind == .claude {
                         var envOverlays: [String: String] = [:]
                         let registry = ProvidersRegistryService()
                         let bindings = await registry.getBindings()
@@ -161,6 +161,20 @@ extension SessionActions {
         return s
     }
 
+    private func sshInvocation(
+        host: String,
+        remoteCommand: String,
+        resolvedArguments: [String]? = nil
+    ) -> String {
+        let contextArguments = resolvedArguments ?? resolvedSSHContext(for: host)
+        if let args = contextArguments {
+            let parts = ["ssh", "-t"] + args
+            let command = parts.map { shellQuoteIfNeeded($0) }.joined(separator: " ")
+            return "\(command) \(shellSingleQuoted(remoteCommand))"
+        }
+        return "ssh -t \(shellQuoteIfNeeded(host)) \(shellSingleQuoted(remoteCommand))"
+    }
+
     // Reliable conversation id for resume commands: always use the session_meta id
     // parsed from the log (SessionSummary.id). This matches Codex CLI's
     // expectation (UUID) and Claude's native id semantics.
@@ -173,7 +187,7 @@ extension SessionActions {
             "export LC_CTYPE=zh_CN.UTF-8",
             "export TERM=xterm-256color",
         ]
-        if source == .codex {
+        if source.baseKind == .codex {
             lines.append("export CODEX_DISABLE_COLOR_QUERY=1")
         }
         return lines
@@ -186,7 +200,7 @@ extension SessionActions {
         env["LC_ALL"] = "zh_CN.UTF-8"
         env["LC_CTYPE"] = "zh_CN.UTF-8"
         env["TERM"] = "xterm-256color"
-        if source == .codex { env["CODEX_DISABLE_COLOR_QUERY"] = "1" }
+        if source.baseKind == .codex { env["CODEX_DISABLE_COLOR_QUERY"] = "1" }
         return env
     }
 
@@ -206,7 +220,7 @@ extension SessionActions {
         session: SessionSummary, executablePath: String, options: ResumeOptions
     ) -> String {
         let exe = shellQuoteIfNeeded(executablePath)
-        switch session.source {
+        switch session.source.baseKind {
         case .codex:
             let f = flags(from: options).map { shellQuoteIfNeeded($0) }
             if f.isEmpty { return "\(exe) resume \(conversationId(for: session))" }
@@ -249,7 +263,7 @@ extension SessionActions {
     {
         var args: [String] = []
         // Preserve model for Codex default New (non-project) to ensure CLI has a model
-        if session.source == .codex,
+        if session.source.baseKind == .codex,
            let m = session.model?.trimmingCharacters(in: .whitespacesAndNewlines), !m.isEmpty {
             args += ["--model", m]
         }
@@ -261,7 +275,30 @@ extension SessionActions {
     func buildNewSessionCLIInvocation(
         session: SessionSummary, options: ResumeOptions, initialPrompt: String? = nil
     ) -> String {
-        switch session.source {
+        // Check if this is a remote session and return SSH command if so
+        if session.isRemote, let host = session.remoteHost {
+            let sshContext = resolvedSSHContext(for: host)
+            let remoteCommand = buildRemoteNewShellCommand(
+                session: session,
+                options: options,
+                initialPrompt: initialPrompt
+            )
+            return sshInvocation(
+                host: host,
+                remoteCommand: remoteCommand,
+                resolvedArguments: sshContext
+            )
+        }
+        
+        // Local session handling
+        return buildLocalNewSessionCLIInvocation(session: session, options: options, initialPrompt: initialPrompt)
+    }
+
+    func buildLocalNewSessionCLIInvocation(
+        session: SessionSummary, options: ResumeOptions, initialPrompt: String? = nil
+    ) -> String {
+        // Local session handling (without checking remote status)
+        switch session.source.baseKind {
         case .codex:
             // Launch a fresh Codex session by invoking `codex` directly (no "new" subcommand).
             let exe = "codex"
@@ -363,22 +400,38 @@ extension SessionActions {
     func buildResumeCommandLines(
         session: SessionSummary, executableURL: URL, options: ResumeOptions
     ) -> String {
+        #if APPSTORE
         let cwd =
             FileManager.default.fileExists(atPath: session.cwd)
             ? session.cwd : session.fileURL.deletingLastPathComponent().path
         let cd = "cd " + shellEscapedPath(cwd)
-        // Embedded terminal: keep environment exports for robustness (source-specific)
         let exports = embeddedExportLines(for: session.source).joined(separator: "; ")
-        #if APPSTORE
         // MAS sandbox: do not auto-execute external CLI inside the app. Only prepare directory and env.
         // The user can copy or insert the real command via UI prompts.
-        let cliName = session.source == .codex ? "codex" : "claude"
-        let notice = "echo \"[CodMate] App Store sandbox cannot run \(cliName) CLI directly. Copy the command and run it in an external terminal.\""
+        let cliName = session.source.baseKind == .codex ? "codex" : "claude"
+        let notice = "echo \"[CodMate] App Store 沙盒无法直接运行 \(cliName) CLI，请使用右侧按钮复制命令，在外部终端执行。\""
         return cd + "\n" + exports + "\n" + notice + "\n"
         #else
+        if session.isRemote, let host = session.remoteHost {
+            let sshContext = resolvedSSHContext(for: host)
+            let remote = buildRemoteResumeShellCommand(
+                session: session,
+                options: options
+            )
+            return sshInvocation(
+                host: host,
+                remoteCommand: remote,
+                resolvedArguments: sshContext
+            ) + "\n"
+        }
+        let cwd =
+            FileManager.default.fileExists(atPath: session.cwd)
+            ? session.cwd : session.fileURL.deletingLastPathComponent().path
+        let cd = "cd " + shellEscapedPath(cwd)
+        let exports = embeddedExportLines(for: session.source).joined(separator: "; ")
         let injectedPATH = CLIEnvironment.buildInjectedPATH()
         // Use bare executable name for embedded terminal to respect user's PATH resolution
-        let execPath = session.source == .codex ? "codex" : "claude"
+        let execPath = session.source.baseKind == .codex ? "codex" : "claude"
         let invocation = buildResumeCLIInvocation(
             session: session, executablePath: execPath, options: options)
         let resume = "PATH=\(injectedPATH) \(invocation)"
@@ -390,16 +443,34 @@ extension SessionActions {
         session: SessionSummary, executableURL: URL, options: ResumeOptions
     ) -> String {
         _ = executableURL  // retained for API symmetry; PATH handles resolution
+        #if APPSTORE
         let cwd =
             FileManager.default.fileExists(atPath: session.cwd)
             ? session.cwd : session.fileURL.deletingLastPathComponent().path
         let cd = "cd " + shellEscapedPath(cwd)
         let exports = embeddedExportLines(for: session.source).joined(separator: "; ")
-        #if APPSTORE
         // MAS: do not execute external CLI in embedded terminal.
-        let notice = "echo \"[CodMate] App Store sandbox cannot run codex/claude CLI directly. Run the copied command in an external terminal.\""
+        let notice = "echo \"[CodMate] App Store 沙盒无法直接运行 codex/claude CLI，请在外部终端执行复制的命令。\""
         return cd + "\n" + exports + "\n" + notice + "\n"
         #else
+        if session.isRemote, let host = session.remoteHost {
+            let sshContext = resolvedSSHContext(for: host)
+            let remote = buildRemoteNewShellCommand(
+                session: session,
+                options: options,
+                initialPrompt: nil
+            )
+            return sshInvocation(
+                host: host,
+                remoteCommand: remote,
+                resolvedArguments: sshContext
+            ) + "\n"
+        }
+        let cwd =
+            FileManager.default.fileExists(atPath: session.cwd)
+            ? session.cwd : session.fileURL.deletingLastPathComponent().path
+        let cd = "cd " + shellEscapedPath(cwd)
+        let exports = embeddedExportLines(for: session.source).joined(separator: "; ")
         let injectedPATH = CLIEnvironment.buildInjectedPATH()
         let invocation = buildNewSessionCLIInvocation(session: session, options: options)
         let command = "PATH=\(injectedPATH) \(invocation)"
@@ -411,6 +482,19 @@ extension SessionActions {
         session: SessionSummary, executableURL: URL, options: ResumeOptions
     ) -> String {
         _ = executableURL
+        if session.isRemote, let host = session.remoteHost {
+            let sshContext = resolvedSSHContext(for: host)
+            let remote = buildRemoteNewShellCommand(
+                session: session,
+                options: options,
+                initialPrompt: nil
+            )
+            return sshInvocation(
+                host: host,
+                remoteCommand: remote,
+                resolvedArguments: sshContext
+            ) + "\n"
+        }
         let cwd =
             FileManager.default.fileExists(atPath: session.cwd)
             ? session.cwd : session.fileURL.deletingLastPathComponent().path
@@ -423,11 +507,23 @@ extension SessionActions {
     func buildExternalResumeCommands(
         session: SessionSummary, executableURL: URL, options: ResumeOptions
     ) -> String {
+        if session.isRemote, let host = session.remoteHost {
+            let sshContext = resolvedSSHContext(for: host)
+            let remote = buildRemoteResumeShellCommand(
+                session: session,
+                options: options
+            )
+            return sshInvocation(
+                host: host,
+                remoteCommand: remote,
+                resolvedArguments: sshContext
+            ) + "\n"
+        }
         let cwd =
             FileManager.default.fileExists(atPath: session.cwd)
             ? session.cwd : session.fileURL.deletingLastPathComponent().path
         let cd = "cd " + shellEscapedPath(cwd)
-        let execPath = session.source == .codex ? "codex" : "claude"
+        let execPath = session.source.baseKind == .codex ? "codex" : "claude"
         let resume = buildResumeCLIInvocation(
             session: session, executablePath: execPath, options: options)
         return cd + "\n" + resume + "\n"
@@ -720,11 +816,11 @@ extension SessionActions {
         initialPrompt: String? = nil
     ) -> String {
         // Launch using project profile; choose executable based on session source.
-        let exe = session.source == .codex ? "codex" : "claude"
+        let exe = session.source.baseKind == .codex ? "codex" : "claude"
         var parts: [String] = [exe]
 
         // For Claude, only include model if specified; profile settings don't apply.
-        if session.source == .claude {
+        if session.source.baseKind == .claude {
             if let model = session.model, !model.trimmingCharacters(in: .whitespaces).isEmpty {
                 parts.append("--model")
                 parts.append(shellQuoteIfNeeded(model))
@@ -756,18 +852,6 @@ extension SessionActions {
         initialPrompt: String? = nil
     ) -> String {
         _ = executableURL
-        let cwd =
-            FileManager.default.fileExists(atPath: session.cwd)
-            ? session.cwd : session.fileURL.deletingLastPathComponent().path
-        let cd = "cd " + shellEscapedPath(cwd)
-        // PATH/env injection comes from project profile only (no global env here)
-        let prepend = project.profile?.pathPrepend ?? []
-        let prependString = prepend.filter {
-            !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        }.joined(separator: ":")
-        let injectedPATH = CLIEnvironment.buildInjectedPATH(
-            additionalPaths: prependString.isEmpty ? [] : [prependString]
-        )
         var exportLines: [String] = [
             "export LANG=zh_CN.UTF-8",
             "export LC_ALL=zh_CN.UTF-8",
@@ -781,10 +865,27 @@ extension SessionActions {
                 exportLines.append("export \(key)=\(shellSingleQuoted(v))")
             }
         }
-        let exports = exportLines.joined(separator: "; ")
         let invocation = buildNewSessionUsingProjectProfileCLIInvocation(
             session: session, project: project, options: options, initialPrompt: initialPrompt)
-        let command = "PATH=\(injectedPATH) \(invocation)"
+        if session.isRemote, let host = session.remoteHost {
+            let sshContext = resolvedSSHContext(for: host)
+            let remote = buildRemoteShellCommand(
+                session: session,
+                exports: exportLines,
+                invocation: invocation
+            )
+            return sshInvocation(
+                host: host,
+                remoteCommand: remote,
+                resolvedArguments: sshContext
+            ) + "\n"
+        }
+        let cwd =
+            FileManager.default.fileExists(atPath: session.cwd)
+            ? session.cwd : session.fileURL.deletingLastPathComponent().path
+        let cd = "cd " + shellEscapedPath(cwd)
+        let exports = exportLines.joined(separator: "; ")
+        let command = invocation
         return cd + "\n" + exports + "\n" + command + "\n"
     }
 
@@ -793,6 +894,34 @@ extension SessionActions {
         initialPrompt: String? = nil
     ) -> String {
         _ = executableURL
+        if session.isRemote, let host = session.remoteHost {
+            let sshContext = resolvedSSHContext(for: host)
+            var exportLines: [String] = [
+                "export LANG=zh_CN.UTF-8",
+                "export LC_ALL=zh_CN.UTF-8",
+                "export LC_CTYPE=zh_CN.UTF-8",
+                "export TERM=xterm-256color",
+            ]
+            if let env = project.profile?.env {
+                for (k, v) in env {
+                    let key = k.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !key.isEmpty else { continue }
+                    exportLines.append("export \(key)=\(shellSingleQuoted(v))")
+                }
+            }
+            let invocation = buildNewSessionUsingProjectProfileCLIInvocation(
+                session: session, project: project, options: options, initialPrompt: initialPrompt)
+            let remote = buildRemoteShellCommand(
+                session: session,
+                exports: exportLines,
+                invocation: invocation
+            )
+            return sshInvocation(
+                host: host,
+                remoteCommand: remote,
+                resolvedArguments: sshContext
+            ) + "\n"
+        }
         let cwd =
             FileManager.default.fileExists(atPath: session.cwd)
             ? session.cwd : session.fileURL.deletingLastPathComponent().path
@@ -867,11 +996,11 @@ extension SessionActions {
         session: SessionSummary, project: Project, options: ResumeOptions
     ) -> String {
         // Choose executable based on session source; select profile (no flags for Claude).
-        let exe = session.source == .codex ? "codex" : "claude"
+        let exe = session.source.baseKind == .codex ? "codex" : "claude"
         var parts: [String] = [exe]
 
         // For Claude, profiles don't apply; use simple resume command.
-        if session.source == .claude {
+        if session.source.baseKind == .claude {
             parts.append("--resume")
             parts.append(session.id)
             return parts.joined(separator: " ")
@@ -902,7 +1031,7 @@ extension SessionActions {
         var parts: [String] = [exe]
 
         // For Claude, profiles don't apply; use simple resume command.
-        if session.source == .claude {
+        if session.source.baseKind == .claude {
             parts.append("--resume")
             parts.append(session.id)
             return parts.joined(separator: " ")
@@ -930,18 +1059,6 @@ extension SessionActions {
         session: SessionSummary, project: Project, executableURL: URL, options: ResumeOptions
     ) -> String {
         _ = executableURL
-        let cwd =
-            FileManager.default.fileExists(atPath: session.cwd)
-            ? session.cwd : session.fileURL.deletingLastPathComponent().path
-        let cd = "cd " + shellEscapedPath(cwd)
-        // PATH/env injection comes from project profile only
-        let prepend = project.profile?.pathPrepend ?? []
-        let prependString = prepend.filter {
-            !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        }.joined(separator: ":")
-        let injectedPATH = CLIEnvironment.buildInjectedPATH(
-            additionalPaths: prependString.isEmpty ? [] : [prependString]
-        )
         var exportLines: [String] = [
             "export LANG=zh_CN.UTF-8",
             "export LC_ALL=zh_CN.UTF-8",
@@ -955,10 +1072,27 @@ extension SessionActions {
                 exportLines.append("export \(key)=\(shellSingleQuoted(v))")
             }
         }
-        let exports = exportLines.joined(separator: "; ")
         let invocation = buildResumeUsingProjectProfileCLIInvocation(
             session: session, project: project, options: options)
-        let command = "PATH=\(injectedPATH) \(invocation)"
+        if session.isRemote, let host = session.remoteHost {
+            let sshContext = resolvedSSHContext(for: host)
+            let remote = buildRemoteShellCommand(
+                session: session,
+                exports: exportLines,
+                invocation: invocation
+            )
+            return sshInvocation(
+                host: host,
+                remoteCommand: remote,
+                resolvedArguments: sshContext
+            ) + "\n"
+        }
+        let cwd =
+            FileManager.default.fileExists(atPath: session.cwd)
+            ? session.cwd : session.fileURL.deletingLastPathComponent().path
+        let cd = "cd " + shellEscapedPath(cwd)
+        let exports = exportLines.joined(separator: "; ")
+        let command = invocation
         return cd + "\n" + exports + "\n" + command + "\n"
     }
 
@@ -966,6 +1100,34 @@ extension SessionActions {
         session: SessionSummary, project: Project, executableURL: URL, options: ResumeOptions
     ) -> String {
         _ = executableURL
+        if session.isRemote, let host = session.remoteHost {
+            let sshContext = resolvedSSHContext(for: host)
+            var exportLines: [String] = [
+                "export LANG=zh_CN.UTF-8",
+                "export LC_ALL=zh_CN.UTF-8",
+                "export LC_CTYPE=zh_CN.UTF-8",
+                "export TERM=xterm-256color",
+            ]
+            if let env = project.profile?.env {
+                for (k, v) in env {
+                    let key = k.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !key.isEmpty else { continue }
+                    exportLines.append("export \(key)=\(shellSingleQuoted(v))")
+                }
+            }
+            let invocation = buildResumeUsingProjectProfileCLIInvocation(
+                session: session, project: project, options: options)
+            let remote = buildRemoteShellCommand(
+                session: session,
+                exports: exportLines,
+                invocation: invocation
+            )
+            return sshInvocation(
+                host: host,
+                remoteCommand: remote,
+                resolvedArguments: sshContext
+            ) + "\n"
+        }
         let cwd =
             FileManager.default.fileExists(atPath: session.cwd)
             ? session.cwd : session.fileURL.deletingLastPathComponent().path
@@ -1025,12 +1187,25 @@ extension SessionActions {
     func copyRealResumeInvocation(
         session: SessionSummary, executableURL: URL, options: ResumeOptions
     ) {
-        // Always prefer bare command; let PATH resolve the binary
-        let execName = session.source == .codex ? "codex" : "claude"
-        let cmd = buildResumeCLIInvocation(
+        let command: String
+        if session.isRemote, let host = session.remoteHost {
+            let sshContext = resolvedSSHContext(for: host)
+            let remote = buildRemoteResumeShellCommand(
+                session: session,
+                options: options
+            )
+            command = sshInvocation(
+                host: host,
+                remoteCommand: remote,
+                resolvedArguments: sshContext
+            )
+        } else {
+            let execName = session.source.baseKind == .codex ? "codex" : "claude"
+            command = buildResumeCLIInvocation(
             session: session, executablePath: execName, options: options)
+        }
         let pb = NSPasteboard.general
         pb.clearContents()
-        pb.setString(cmd + "\n", forType: .string)
+        pb.setString(command + "\n", forType: .string)
     }
 }

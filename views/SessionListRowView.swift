@@ -11,7 +11,7 @@ struct SessionSourceBranding {
 extension SessionSource {
     var branding: SessionSourceBranding {
         switch self {
-        case .codex:
+        case .codexLocal:
             return SessionSourceBranding(
                 displayName: "Codex",
                 symbolName: "sparkles",
@@ -19,9 +19,25 @@ extension SessionSource {
                 badgeBackground: Color.accentColor.opacity(0.08),
                 badgeAssetName: "ChatGPTIcon"
             )
-        case .claude:
+        case .codexRemote(let host):
+            return SessionSourceBranding(
+                displayName: "Codex (\(host))",
+                symbolName: "sparkles",
+                iconColor: Color.accentColor,
+                badgeBackground: Color.accentColor.opacity(0.08),
+                badgeAssetName: "ChatGPTIcon"
+            )
+        case .claudeLocal:
             return SessionSourceBranding(
                 displayName: "Claude",
+                symbolName: "cloud.fill",
+                iconColor: Color.purple,
+                badgeBackground: Color.purple.opacity(0.10),
+                badgeAssetName: "ClaudeIcon"
+            )
+        case .claudeRemote(let host):
+            return SessionSourceBranding(
+                displayName: "Claude (\(host))",
                 symbolName: "cloud.fill",
                 iconColor: Color.purple,
                 badgeBackground: Color.purple.opacity(0.10),
@@ -87,6 +103,17 @@ struct SessionListRowView: View {
                 Text(summary.effectiveTitle)
                     .font(.headline)
                     .lineLimit(1)
+                if let remoteHost = summary.remoteHost {
+                    Text(remoteHost)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(
+                            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                                .fill(Color.secondary.opacity(0.12))
+                        )
+                }
                 HStack(spacing: 8) {
                     Text(summary.startedAt.formatted(date: .numeric, time: .shortened))
                         .layoutPriority(1)
@@ -294,7 +321,8 @@ private extension SessionListRowView {}
         eventCount: 12,
         lineCount: 156,
         lastUpdatedAt: Date().addingTimeInterval(-1800),
-        source: .codex
+        source: .codexLocal,
+        remotePath: nil
     )
 
     return SessionListRowView(summary: mockSummary)
@@ -324,7 +352,8 @@ private extension SessionListRowView {}
         eventCount: 3,
         lineCount: 45,
         lastUpdatedAt: Date().addingTimeInterval(-6900),
-        source: .codex
+        source: .codexLocal,
+        remotePath: nil
     )
 
     return SessionListRowView(summary: mockSummary)
@@ -355,7 +384,8 @@ private extension SessionListRowView {}
         eventCount: 2,
         lineCount: 20,
         lastUpdatedAt: Date().addingTimeInterval(-10500),
-        source: .codex
+        source: .codexLocal,
+        remotePath: nil
     )
 
     return SessionListRowView(summary: mockSummary)

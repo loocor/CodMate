@@ -6,6 +6,7 @@ enum SettingCategory: String, CaseIterable, Identifiable {
   case command
   case providers
   case codex
+  case remoteHosts
   case gitReview
   case claudeCode
   case dialectics
@@ -13,7 +14,7 @@ enum SettingCategory: String, CaseIterable, Identifiable {
   case about
 
   // Customize displayed order and allow hiding categories without breaking enums elsewhere.
-  static var allCases: [SettingCategory] { [.general, .terminal, .providers, .gitReview, .mcpServer, .codex, .claudeCode, .dialectics, .about] }
+  static var allCases: [SettingCategory] { [.general, .terminal, .providers, .gitReview, .mcpServer, .codex, .remoteHosts, .claudeCode, .dialectics, .about] }
 
   var id: String { rawValue }
 
@@ -24,6 +25,7 @@ enum SettingCategory: String, CaseIterable, Identifiable {
     case .command: return "Command"
     case .providers: return "Providers"
     case .codex: return "Codex"
+    case .remoteHosts: return "Remote Hosts"
     case .gitReview: return "Git Review"
     case .claudeCode: return "Claude Code"
     case .dialectics: return "Dialectics"
@@ -39,6 +41,7 @@ enum SettingCategory: String, CaseIterable, Identifiable {
     case .command: return "slider.horizontal.3"
     case .providers: return "server.rack"
     case .codex: return "sparkles"
+    case .remoteHosts: return "antenna.radiowaves.left.and.right"
     case .dialectics: return "doc.text.magnifyingglass"
     case .gitReview: return "square.and.pencil"
     case .claudeCode: return "chevron.left.slash.chevron.right"
@@ -54,6 +57,7 @@ enum SettingCategory: String, CaseIterable, Identifiable {
     case .command: return "Command execution policies"
     case .providers: return "Global providers and bindings"
     case .codex: return "Codex CLI configuration"
+    case .remoteHosts: return "Remote SSH host configuration"
     case .gitReview: return "Git changes viewer and commit generation"
     case .claudeCode: return "Claude Code configuration"
     case .dialectics: return "Deep diagnostics & reports"

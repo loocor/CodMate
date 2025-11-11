@@ -184,14 +184,6 @@
 				BuildIndependentTargetsInParallel = YES;
 				LastSwiftUpdateCheck = 1530;
 				LastUpgradeCheck = 2610;
-				TargetAttributes = {
-					1A0000022A00000100000001 = {
-						DevelopmentTeam = AN5X2K46ER;
-					};
-					5A1A6AF92F3A8D1B00A1B001 = {
-						DevelopmentTeam = AN5X2K46ER;
-					};
-				};
 			};
 			buildConfigurationList = 1A0000062A00000100000001 /* Build configuration list for PBXProject "CodMate" */;
 			compatibilityVersion = "Xcode 15.0";
@@ -364,12 +356,11 @@
 				CLANG_ENABLE_OBJC_WEAK = YES;
 				CODE_SIGN_ENTITLEMENTS = CodMate/CodMate.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
-				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "-";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				DEAD_CODE_STRIPPING = YES;
-				DEVELOPMENT_TEAM = AN5X2K46ER;
-				"DEVELOPMENT_TEAM[sdk=macosx*]" = AN5X2K46ER;
+				DEVELOPMENT_TEAM = "";
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_FILE_ACCESS_DOWNLOADS_FOLDER = readwrite;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -384,6 +375,7 @@
 				ENABLE_RESOURCE_ACCESS_PRINTING = NO;
 				ENABLE_RESOURCE_ACCESS_USB = NO;
 				ENABLE_USER_SELECTED_FILES = readwrite;
+				FUSE_BUILD_SCRIPT_PHASES = YES;
 				INFOPLIST_FILE = CodMate/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = CodMate;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
@@ -399,7 +391,6 @@
 				PRODUCT_BUNDLE_IDENTIFIER = ai.umate.codmate;
 				PRODUCT_NAME = CodMate;
 				PROVISIONING_PROFILE_SPECIFIER = "";
-				"PROVISIONING_PROFILE_SPECIFIER[sdk=macosx*]" = "";
 				SDKROOT = macosx;
 				SUPPORTS_MACCATALYST = NO;
 				SWIFT_COMPILATION_MODE = singlefile;
@@ -416,13 +407,12 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_OBJC_WEAK = YES;
 				CODE_SIGN_ENTITLEMENTS = CodMate/CodMate.entitlements;
-				CODE_SIGN_IDENTITY = "Apple Distribution";
-				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
+				CODE_SIGN_IDENTITY = "Apple Development";
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "-";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				DEAD_CODE_STRIPPING = YES;
-				DEVELOPMENT_TEAM = AN5X2K46ER;
-				"DEVELOPMENT_TEAM[sdk=macosx*]" = AN5X2K46ER;
+				DEVELOPMENT_TEAM = "";
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_FILE_ACCESS_DOWNLOADS_FOLDER = readwrite;
 				ENABLE_INCOMING_NETWORK_CONNECTIONS = NO;
@@ -436,6 +426,7 @@
 				ENABLE_RESOURCE_ACCESS_PRINTING = NO;
 				ENABLE_RESOURCE_ACCESS_USB = NO;
 				ENABLE_USER_SELECTED_FILES = readwrite;
+				FUSE_BUILD_SCRIPT_PHASES = YES;
 				INFOPLIST_FILE = CodMate/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = CodMate;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
@@ -451,7 +442,6 @@
 				PRODUCT_BUNDLE_IDENTIFIER = ai.umate.codmate;
 				PRODUCT_NAME = CodMate;
 				PROVISIONING_PROFILE_SPECIFIER = "";
-				"PROVISIONING_PROFILE_SPECIFIER[sdk=macosx*]" = "";
 				SDKROOT = macosx;
 				SUPPORTS_MACCATALYST = NO;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = APPSTORE;
@@ -668,12 +658,11 @@
 				CLANG_ENABLE_OBJC_WEAK = YES;
 				CODE_SIGN_ENTITLEMENTS = "";
 				CODE_SIGN_IDENTITY = "Apple Development";
-				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "-";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				DEAD_CODE_STRIPPING = YES;
-				DEVELOPMENT_TEAM = AN5X2K46ER;
-				"DEVELOPMENT_TEAM[sdk=macosx*]" = AN5X2K46ER;
+				DEVELOPMENT_TEAM = "";
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_FILE_ACCESS_DOWNLOADS_FOLDER = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -688,6 +677,7 @@
 				ENABLE_RESOURCE_ACCESS_PRINTING = NO;
 				ENABLE_RESOURCE_ACCESS_USB = NO;
 				ENABLE_USER_SELECTED_FILES = readwrite;
+				FUSE_BUILD_SCRIPT_PHASES = YES;
 				INFOPLIST_FILE = CodMate/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = CodMate;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
@@ -703,7 +693,6 @@
 				PRODUCT_BUNDLE_IDENTIFIER = ai.umate.codmate;
 				PRODUCT_NAME = CodMate;
 				PROVISIONING_PROFILE_SPECIFIER = "";
-				"PROVISIONING_PROFILE_SPECIFIER[sdk=macosx*]" = "";
 				SDKROOT = macosx;
 				SUPPORTS_MACCATALYST = NO;
 				SWIFT_COMPILATION_MODE = singlefile;
@@ -720,13 +709,12 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_OBJC_WEAK = YES;
 				CODE_SIGN_ENTITLEMENTS = "";
-				CODE_SIGN_IDENTITY = "Apple Distribution";
-				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
+				CODE_SIGN_IDENTITY = "Apple Development";
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "-";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				DEAD_CODE_STRIPPING = YES;
-				DEVELOPMENT_TEAM = AN5X2K46ER;
-				"DEVELOPMENT_TEAM[sdk=macosx*]" = AN5X2K46ER;
+				DEVELOPMENT_TEAM = "";
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_FILE_ACCESS_DOWNLOADS_FOLDER = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -741,6 +729,7 @@
 				ENABLE_RESOURCE_ACCESS_PRINTING = NO;
 				ENABLE_RESOURCE_ACCESS_USB = NO;
 				ENABLE_USER_SELECTED_FILES = readwrite;
+				FUSE_BUILD_SCRIPT_PHASES = YES;
 				INFOPLIST_FILE = CodMate/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = CodMate;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
@@ -756,7 +745,6 @@
 				PRODUCT_BUNDLE_IDENTIFIER = ai.umate.codmate;
 				PRODUCT_NAME = CodMate;
 				PROVISIONING_PROFILE_SPECIFIER = "";
-				"PROVISIONING_PROFILE_SPECIFIER[sdk=macosx*]" = "";
 				SDKROOT = macosx;
 				SUPPORTS_MACCATALYST = NO;
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -772,12 +760,11 @@
 				CLANG_ENABLE_OBJC_WEAK = YES;
 				CODE_SIGN_ENTITLEMENTS = CodMate/CodMate.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
-				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "-";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				DEAD_CODE_STRIPPING = YES;
-				DEVELOPMENT_TEAM = AN5X2K46ER;
-				"DEVELOPMENT_TEAM[sdk=macosx*]" = AN5X2K46ER;
+				DEVELOPMENT_TEAM = "";
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_FILE_ACCESS_DOWNLOADS_FOLDER = readwrite;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -792,6 +779,7 @@
 				ENABLE_RESOURCE_ACCESS_PRINTING = NO;
 				ENABLE_RESOURCE_ACCESS_USB = NO;
 				ENABLE_USER_SELECTED_FILES = readwrite;
+				FUSE_BUILD_SCRIPT_PHASES = YES;
 				INFOPLIST_FILE = CodMate/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = CodMate;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
@@ -807,7 +795,6 @@
 				PRODUCT_BUNDLE_IDENTIFIER = ai.umate.codmate;
 				PRODUCT_NAME = CodMate;
 				PROVISIONING_PROFILE_SPECIFIER = "";
-				"PROVISIONING_PROFILE_SPECIFIER[sdk=macosx*]" = "";
 				SDKROOT = macosx;
 				SUPPORTS_MACCATALYST = NO;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = APPSTORE;
@@ -825,13 +812,12 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_OBJC_WEAK = YES;
 				CODE_SIGN_ENTITLEMENTS = CodMate/CodMate.entitlements;
-				CODE_SIGN_IDENTITY = "Apple Distribution";
-				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
+				CODE_SIGN_IDENTITY = "Apple Development";
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "-";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				DEAD_CODE_STRIPPING = YES;
-				DEVELOPMENT_TEAM = AN5X2K46ER;
-				"DEVELOPMENT_TEAM[sdk=macosx*]" = AN5X2K46ER;
+				DEVELOPMENT_TEAM = "";
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_FILE_ACCESS_DOWNLOADS_FOLDER = readwrite;
 				ENABLE_INCOMING_NETWORK_CONNECTIONS = NO;
@@ -845,6 +831,7 @@
 				ENABLE_RESOURCE_ACCESS_PRINTING = NO;
 				ENABLE_RESOURCE_ACCESS_USB = NO;
 				ENABLE_USER_SELECTED_FILES = readwrite;
+				FUSE_BUILD_SCRIPT_PHASES = YES;
 				INFOPLIST_FILE = CodMate/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = CodMate;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
@@ -860,7 +847,6 @@
 				PRODUCT_BUNDLE_IDENTIFIER = ai.umate.codmate;
 				PRODUCT_NAME = CodMate;
 				PROVISIONING_PROFILE_SPECIFIER = "";
-				"PROVISIONING_PROFILE_SPECIFIER[sdk=macosx*]" = "";
 				SDKROOT = macosx;
 				SUPPORTS_MACCATALYST = NO;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = APPSTORE;
@@ -874,9 +860,9 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_IDENTITY = "Apple Development";
-				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "-";
 				CODE_SIGN_STYLE = Automatic;
-				DEVELOPMENT_TEAM = AN5X2K46ER;
+				DEVELOPMENT_TEAM = "";
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright © 2025 CodMate";
@@ -897,9 +883,9 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_IDENTITY = "Apple Development";
-				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "-";
 				CODE_SIGN_STYLE = Automatic;
-				DEVELOPMENT_TEAM = AN5X2K46ER;
+				DEVELOPMENT_TEAM = "";
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright © 2025 CodMate";
@@ -920,9 +906,9 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_IDENTITY = "Apple Development";
-				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "-";
 				CODE_SIGN_STYLE = Automatic;
-				DEVELOPMENT_TEAM = AN5X2K46ER;
+				DEVELOPMENT_TEAM = "";
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright © 2025 CodMate";
@@ -943,9 +929,9 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_IDENTITY = "Apple Development";
-				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "-";
 				CODE_SIGN_STYLE = Automatic;
-				DEVELOPMENT_TEAM = AN5X2K46ER;
+				DEVELOPMENT_TEAM = "";
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright © 2025 CodMate";
@@ -966,9 +952,9 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_IDENTITY = "Apple Development";
-				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "-";
 				CODE_SIGN_STYLE = Automatic;
-				DEVELOPMENT_TEAM = AN5X2K46ER;
+				DEVELOPMENT_TEAM = "";
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright © 2025 CodMate";
@@ -989,9 +975,9 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_IDENTITY = "Apple Development";
-				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "-";
 				CODE_SIGN_STYLE = Automatic;
-				DEVELOPMENT_TEAM = AN5X2K46ER;
+				DEVELOPMENT_TEAM = "";
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright © 2025 CodMate";

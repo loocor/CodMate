@@ -79,14 +79,25 @@ extension SessionActions {
 
     // Optional: open using URL schemes (iTerm2 / Warp) when available
     func openTerminalViaScheme(_ app: TerminalApp, directory: String?, command: String? = nil) {
+        terminalLaunchQueue.async {
+            self.openTerminalViaSchemeSync(app: app, directory: directory, command: command)
+        }
+    }
+
+    private func openTerminalViaSchemeSync(app: TerminalApp, directory: String?, command: String?) {
         let dir = directory ?? NSHomeDirectory()
         switch app {
         case .iterm2:
+            if openITermViaAppleScript(directory: dir, command: command) {
+                return
+            }
             var comps = URLComponents()
             comps.scheme = "iterm2"
             comps.path = "/command"
             comps.queryItems = [URLQueryItem(name: "d", value: dir)]
-            if let command { comps.queryItems?.append(URLQueryItem(name: "c", value: command)) }
+            if let command {
+                comps.queryItems?.append(URLQueryItem(name: "c", value: command))
+            }
             if let url = comps.url {
                 NSWorkspace.shared.open(url)
             } else {
@@ -175,6 +186,47 @@ extension SessionActions {
         if let url = comps.url { return NSWorkspace.shared.open(url) }
         return false
     }
+}
 
+// MARK: - iTerm helpers
+extension SessionActions {
+    private func openITermViaAppleScript(directory: String, command: String?) -> Bool {
+        let cdLine = "cd \(shellEscapedPathForScripts(directory))"
+        var script = """
+        tell application "iTerm2"
+          activate
+          set newWindow to (create window with default profile)
+          tell current session of newWindow
+            write text "\(appleScriptEscaped(cdLine))"
+        """
+        if let command,
+           !command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        {
+            script += """
 
+            write text "\(appleScriptEscaped(command))"
+            """
+        }
+        script += """
+
+          end tell
+        end tell
+        """
+        guard let appleScript = NSAppleScript(source: script) else { return false }
+        var errorDict: NSDictionary?
+        appleScript.executeAndReturnError(&errorDict)
+        return errorDict == nil
+    }
+
+    private func shellEscapedPathForScripts(_ path: String) -> String {
+        "'" + path.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
+
+    private func appleScriptEscaped(_ text: String) -> String {
+        var result = text.replacingOccurrences(of: "\\", with: "\\\\")
+        result = result.replacingOccurrences(of: "\"", with: "\\\"")
+        result = result.replacingOccurrences(of: "\n", with: "; ")
+        result = result.replacingOccurrences(of: "\r", with: "")
+        return result
+    }
 }

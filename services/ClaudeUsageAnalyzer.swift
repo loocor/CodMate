@@ -84,7 +84,7 @@ struct ClaudeUsageAnalyzer {
         var processed = 0
 
         for summary in sessions.sorted(by: { ($0.lastUpdatedAt ?? $0.startedAt) > ($1.lastUpdatedAt ?? $1.startedAt) }) {
-            guard summary.source == .claude else { continue }
+            guard summary.source.baseKind == .claude else { continue }
             if processed >= limit { break }
             if let last = summary.lastUpdatedAt, last < horizon, !entries.isEmpty {
                 break

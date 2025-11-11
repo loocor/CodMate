@@ -43,8 +43,8 @@ extension ProjectSessionSource {
 
     var sessionSource: SessionSource {
         switch self {
-        case .codex: return .codex
-        case .claude: return .claude
+        case .codex: return .codexLocal
+        case .claude: return .claudeLocal
         }
     }
 }
@@ -52,16 +52,16 @@ extension ProjectSessionSource {
 extension SessionSource {
     var projectSource: ProjectSessionSource {
         switch self {
-        case .codex: return .codex
-        case .claude: return .claude
+        case .codexLocal, .codexRemote: return .codex
+        case .claudeLocal, .claudeRemote: return .claude
         }
     }
 
     func friendlyModelName(for raw: String) -> String {
         switch self {
-        case .codex:
+        case .codexLocal, .codexRemote:
             return raw
-        case .claude:
+        case .claudeLocal, .claudeRemote:
             return Self.normalizeClaudeModel(raw)
         }
     }

@@ -136,7 +136,7 @@ actor ClaudeSessionProvider {
     }
 
     func enrich(summary: SessionSummary) -> SessionSummary? {
-        guard summary.source == .claude else { return summary }
+        guard summary.source.baseKind == .claude else { return summary }
         // Parse using canonical file path when available
         let url = resolveCanonicalURL(for: summary)
         guard let parsed = parser.parse(at: url) else { return nil }
@@ -165,12 +165,15 @@ actor ClaudeSessionProvider {
             eventCount: parsed.summary.eventCount,
             lineCount: parsed.summary.lineCount,
             lastUpdatedAt: parsed.summary.lastUpdatedAt,
-            source: .claude
+            source: parsed.summary.source,
+            remotePath: parsed.summary.remotePath,
+            userTitle: parsed.summary.userTitle,
+            userComment: parsed.summary.userComment
         )
     }
 
     func timeline(for summary: SessionSummary) -> [ConversationTurn]? {
-        guard summary.source == .claude else { return nil }
+        guard summary.source.baseKind == .claude else { return nil }
         let url = resolveCanonicalURL(for: summary)
         guard let parsed = parser.parse(at: url) else { return nil }
         let loader = SessionTimelineLoader()

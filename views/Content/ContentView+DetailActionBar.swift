@@ -68,6 +68,7 @@ extension ContentView {
               // Grouped flat menu
               // Upper group: current provider quick targets
               let currentSrc = focused.source
+              let currentKind = currentSrc.projectSource
               let currentName = currentSrc.branding.displayName
               items.append(
                 .init(
@@ -84,21 +85,45 @@ extension ContentView {
                   kind: .action(title: "\(currentName) with Warp") {
                     launchNewSession(for: focused, using: currentSrc, style: .warp)
                   }))
+                            
+                // Add remote options for current provider
+                let enabledRemoteHosts = viewModel.preferences.enabledRemoteHosts
+                if !enabledRemoteHosts.isEmpty {
+                    items.append(.init(kind: .separator))
+                    for host in enabledRemoteHosts.sorted() {
+                        let remoteSrc: SessionSource
+                        if currentKind == .codex {
+                            remoteSrc = .codexRemote(host: host)
+                        } else {
+                            remoteSrc = .claudeRemote(host: host)
+                        }
+                        let remoteName = remoteSrc.branding.displayName
+                        items.append(.init(kind: .action(title: "\(remoteName) with Terminal") {
+                            launchNewSession(for: focused, using: remoteSrc, style: .terminal)
+                        }))
+                        items.append(.init(kind: .action(title: "\(remoteName) with iTerm2") {
+                            launchNewSession(for: focused, using: remoteSrc, style: .iterm)
+                        }))
+                        items.append(.init(kind: .action(title: "\(remoteName) with Warp") {
+                            launchNewSession(for: focused, using: remoteSrc, style: .warp)
+                        }))
+                    }
+                }
+                            
               // Divider
               items.append(.init(kind: .separator))
               // Lower group: alternate provider quick targets
               let allowed = viewModel.allowedSources(for: focused)
               // Compute alternate src from allowed set; fallback to opposite of current
               let altSrc: SessionSource? = {
-                let desired: SessionSource = (currentSrc == .codex) ? .claude : .codex
-                if allowed.contains(where: { $0.sessionSource == desired }) { return desired }
-                // If not allowed, pick any other allowed different from current
-                if let other = allowed.first(where: { $0.sessionSource != currentSrc })?
-                  .sessionSource
-                {
-                  return other
-                }
-                return desired
+                  let desiredKind: ProjectSessionSource = (currentKind == .codex) ? .claude : .codex
+                  if allowed.contains(desiredKind) {
+                      return desiredKind.sessionSource
+                  }
+                  if let otherKind = allowed.first(where: { $0 != currentKind }) {
+                      return otherKind.sessionSource
+                  }
+                  return desiredKind.sessionSource
               }()
               if let alt = altSrc {
                 let altName = alt.branding.displayName
@@ -117,6 +142,29 @@ extension ContentView {
                     kind: .action(title: "\(altName) with Warp") {
                       launchNewSession(for: focused, using: alt, style: .warp)
                     }))
+                                
+                  // Add remote options for alternate provider
+                  if !enabledRemoteHosts.isEmpty {
+                      items.append(.init(kind: .separator))
+                      for host in enabledRemoteHosts.sorted() {
+                          let remoteSrc: SessionSource
+                          if alt.projectSource == .codex {
+                              remoteSrc = .codexRemote(host: host)
+                          } else {
+                              remoteSrc = .claudeRemote(host: host)
+                          }
+                          let remoteName = remoteSrc.branding.displayName
+                          items.append(.init(kind: .action(title: "\(remoteName) with Terminal") {
+                              launchNewSession(for: focused, using: remoteSrc, style: .terminal)
+                          }))
+                          items.append(.init(kind: .action(title: "\(remoteName) with iTerm2") {
+                              launchNewSession(for: focused, using: remoteSrc, style: .iterm)
+                          }))
+                          items.append(.init(kind: .action(title: "\(remoteName) with Warp") {
+                              launchNewSession(for: focused, using: remoteSrc, style: .warp)
+                          }))
+                      }
+                  }
               }
               // Third group: New With Context…
               items.append(.init(kind: .separator))
@@ -152,49 +200,47 @@ extension ContentView {
               for app in apps {
                 switch app {
                 case .terminal:
-                  items.append(
-                    .init(
-                      kind: .action(title: "Terminal") {
-                        viewModel.copyResumeCommandsRespectingProject(session: focused)
-                        _ = viewModel.openAppleTerminal(at: workingDirectory(for: focused))
-                        Task {
-                          await SystemNotifier.shared.notify(
-                            title: "CodMate",
-                            body: "Command copied. Paste it in the opened terminal.")
-                        }
+                      items.append(.init(kind: .action(title: "Terminal") {
+                          launchResume(for: focused, using: focused.source, style: .terminal)
                       }))
                 case .iterm2:
-                  items.append(
-                    .init(
-                      kind: .action(title: "iTerm2") {
-                        let cmd = viewModel.buildResumeCLIInvocationRespectingProject(
-                          session: focused)
-                        viewModel.openPreferredTerminalViaScheme(
-                          app: .iterm2, directory: workingDirectory(for: focused), command: cmd)
+                      items.append(.init(kind: .action(title: "iTerm2") {
+                          launchResume(for: focused, using: focused.source, style: .iterm)
                       }))
                 case .warp:
-                  items.append(
-                    .init(
-                      kind: .action(title: "Warp") {
-                        viewModel.copyResumeCommandsRespectingProject(session: focused)
-                        viewModel.openPreferredTerminalViaScheme(
-                          app: .warp, directory: workingDirectory(for: focused))
-                        Task {
-                          await SystemNotifier.shared.notify(
-                            title: "CodMate",
-                            body: "Command copied. Paste it in the opened terminal.")
-                        }
+                      items.append(.init(kind: .action(title: "Warp") {
+                          launchResume(for: focused, using: focused.source, style: .warp)
                       }))
                 default:
                   break
                 }
               }
-              if !embeddedPreferred && viewModel.preferences.defaultResumeUseEmbeddedTerminal
-                && !AppSandbox.isEnabled
-              {
-                items.append(.init(kind: .separator))
-                items.append(
-                  .init(kind: .action(title: "Embedded") { startEmbedded(for: focused) }))
+              let enabledRemoteHosts = viewModel.preferences.enabledRemoteHosts
+              if !enabledRemoteHosts.isEmpty {
+                  items.append(.init(kind: .separator))
+                      let currentKind = focused.source.projectSource
+                      for host in enabledRemoteHosts.sorted() {
+                          let remoteSrc: SessionSource =
+                              (currentKind == .codex)
+                              ? .codexRemote(host: host)
+                              : .claudeRemote(host: host)
+                          let remoteName = remoteSrc.branding.displayName
+                          items.append(.init(kind: .action(title: "\(remoteName) with Terminal") {
+                              launchResume(for: focused, using: remoteSrc, style: .terminal)
+                          }))
+                          items.append(.init(kind: .action(title: "\(remoteName) with iTerm2") {
+                              launchResume(for: focused, using: remoteSrc, style: .iterm)
+                          }))
+                          items.append(.init(kind: .action(title: "\(remoteName) with Warp") {
+                              launchResume(for: focused, using: remoteSrc, style: .warp)
+                          }))
+                      }
+                  }
+                  if !embeddedPreferred && viewModel.preferences.defaultResumeUseEmbeddedTerminal && !AppSandbox.isEnabled {
+                      items.append(.init(kind: .separator))
+                      items.append(.init(kind: .action(title: "Embedded") {
+                          launchResume(for: focused, using: focused.source, style: .embedded)
+                }))
               }
               return items
             }()
@@ -202,7 +248,7 @@ extension ContentView {
         }
 
         // Reveal in Finder (chromed icon)
-        ChromedIconButton(systemImage: "finder", help: "Reveal in Finder") {
+          ChromedIconButton(systemImage: "macwindow", help: "Reveal in Finder") {
           viewModel.reveal(session: focused)
         }
 

@@ -2,7 +2,9 @@ import Foundation
 
 extension SessionActions {
     func listPersistedProfiles() -> Set<String> {
-        let configURL = codexHome.appendingPathComponent("config.toml", isDirectory: false)
+        let configURL = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".codex", isDirectory: true)
+            .appendingPathComponent("config.toml", isDirectory: false)
         guard let data = try? Data(contentsOf: configURL),
             let raw = String(data: data, encoding: .utf8)
         else {
@@ -10,12 +12,12 @@ extension SessionActions {
         }
         var out: Set<String> = []
         for line in raw.split(separator: "\n", omittingEmptySubsequences: false) {
-            let t = line.trimmingCharacters(in: .whitespaces)
+            let t = line.trimmingCharacters(in: CharacterSet.whitespaces)
             if t.hasPrefix("[profiles.") && t.hasSuffix("]") {
                 let start = "[profiles.".count
                 let endIndex = t.index(before: t.endIndex)
                 let id = String(t[t.index(t.startIndex, offsetBy: start)..<endIndex])
-                let trimmed = id.trimmingCharacters(in: .whitespaces)
+                let trimmed = id.trimmingCharacters(in: CharacterSet.whitespaces)
                 if !trimmed.isEmpty { out.insert(trimmed) }
             }
         }
@@ -30,13 +32,15 @@ extension SessionActions {
     }
 
     func readTopLevelConfigString(_ key: String) -> String? {
-        let url = codexHome.appendingPathComponent("config.toml", isDirectory: false)
+        let url = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".codex", isDirectory: true)
+            .appendingPathComponent("config.toml", isDirectory: false)
         guard let text = try? String(contentsOf: url, encoding: .utf8) else { return nil }
         for raw in text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init) {
-            let t = raw.trimmingCharacters(in: .whitespaces)
+            let t = raw.trimmingCharacters(in: CharacterSet.whitespaces)
             guard t.hasPrefix(key + " ") || t.hasPrefix(key + "=") else { continue }
             guard let eq = t.firstIndex(of: "=") else { continue }
-            var value = String(t[t.index(after: eq)...]).trimmingCharacters(in: .whitespaces)
+            var value = String(t[t.index(after: eq)...]).trimmingCharacters(in: CharacterSet.whitespaces)
             if value.hasPrefix("\"") && value.hasSuffix("\"") {
                 value.removeFirst()
                 value.removeLast()
@@ -52,7 +56,7 @@ extension SessionActions {
         {
             return configured
         }
-        if session.source == .codex {
+        if session.source.baseKind == .codex {
             if let m = session.model?.trimmingCharacters(in: .whitespacesAndNewlines), !m.isEmpty {
                 return m
             }

@@ -61,7 +61,7 @@ final class SessionEnrichmentService {
                         guard let s = iterator.next() else { return }
                         group.addTask { [weak self] in
                             guard let self else { return nil }
-                            if s.source == .claude {
+                            if s.source.baseKind == .claude {
                                 if let enriched = await self.claudeProvider.enrich(summary: s) {
                                     return (s.id, enriched)
                                 }

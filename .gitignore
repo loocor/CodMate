@@ -5,6 +5,7 @@ artifacts/
 build/
 build-mas/
 .xcuserstate
+._*
 
 # Xcode per-user state and caches
 **/xcuserdata/**
@@ -19,3 +20,5 @@ codmate.xcodeproj/xcuserdata/
 SwiftTerm/
 dist/
 .env
+.comate
+.serena

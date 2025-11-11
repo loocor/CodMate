@@ -129,18 +129,18 @@ struct NewWithContextSheet: View {
 
     private var rightOptionsAndPreview: some View {
         VStack(alignment: .leading, spacing: 8) {
-            GroupBox {
+            GroupBox("") {
                 VStack(alignment: .leading, spacing: 10) {
                     // Provider picker (no title, right aligned)
                     HStack {
                         Spacer(minLength: 0)
                         Picker("Provider", selection: Binding(get: {
-                            selectedSource ?? .codex
+                            selectedSource ?? .codexLocal
                         }, set: { newVal in
                             selectedSource = newVal
                         })) {
-                            Text("Codex").tag(SessionSource.codex)
-                            Text("Claude Code").tag(SessionSource.claude)
+                            Text("Codex").tag(SessionSource.codexLocal)
+                            Text("Claude Code").tag(SessionSource.claudeLocal)
                         }
                         .pickerStyle(.menu)
                         .frame(maxWidth: 240, alignment: .trailing)
@@ -357,7 +357,7 @@ struct NewWithContextSheet: View {
     private func initialDefaults() async {
         // Default to same project filter; do not preselect to avoid heavy preview on open
         selectedIDs = []
-        selectedSource = .codex
+        selectedSource = .codexLocal
         selectedProjectId = viewModel.projectIdForSession(anchor.id)
     }
 }

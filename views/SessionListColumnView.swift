@@ -35,14 +35,47 @@ struct SessionListColumnView: View {
         .padding(.top, 0)
         .padding(.bottom, 8)
 
-      if isLoading && sections.isEmpty {
+      contentView
+    }
+    .padding(.vertical, 16)
+    .padding(.horizontal, 6)
+    .sheet(isPresented: $showNewProjectSheet) {
+      ProjectEditorSheet(
+        isPresented: $showNewProjectSheet,
+        mode: .new,
+        prefill: newProjectPrefill,
+        autoAssignSessionIDs: newProjectAssignIDs
+      )
+      .environmentObject(viewModel)
+    }
+    .background(
+      GeometryReader { geo in
+        Color.clear
+          .preference(key: ListColumnWidthKey.self, value: geo.size.width)
+      }
+    )
+    .onPreferenceChange(ListColumnWidthKey.self) { w in
+      containerWidth = w
+    }
+  }
+
+  @ViewBuilder
+  private var contentView: some View {
+    if sections.isEmpty {
+      if isLoading {
         ProgressView("Scanning…")
           .padding(.vertical)
+      } else {
+        emptyStateView
       }
+    } else {
+      sessionsListView
+    }
+  }
 
-      if sections.isEmpty && !isLoading {
-        // Center the empty state within the middle column area.
-        VStack(spacing: 12) {
+  private var emptyStateView: some View {
+    let selected = selectedProject()
+    return VStack(spacing: 12) {
           Spacer(minLength: 12)
           ContentUnavailableView(
             "No Sessions", systemImage: "tray",
@@ -51,11 +84,9 @@ struct SessionListColumnView: View {
           )
           .frame(maxWidth: .infinity)
 
-          // Primary action: New Session (mirrors Sidebar › Project row › New Session)
-          let selected = selectedProject()
           Button {
-            if let p = selected {
-              viewModel.newSession(project: p)
+        if let project = selected {
+          viewModel.newSession(project: project)
             }
           } label: {
             Label("New Session", systemImage: "plus")
@@ -72,11 +103,34 @@ struct SessionListColumnView: View {
           Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-      } else {
+  }
+
+  @ViewBuilder
+  private var sessionsListView: some View {
         List(selection: $selection) {
           ForEach(sections) { section in
             Section {
               ForEach(section.sessions, id: \.id) { session in
+            sessionRow(for: session)
+          }
+        } header: {
+          HStack {
+            Text(section.title)
+            Spacer()
+            Label(section.totalDuration.readableFormattedDuration, systemImage: "clock")
+            Label("\(section.totalEvents)", systemImage: "chart.bar")
+          }
+          .font(.subheadline)
+          .foregroundStyle(.secondary)
+        }
+      }
+    }
+    .padding(.horizontal, -2)
+    .listStyle(.inset)
+  }
+
+  @ViewBuilder
+  private func sessionRow(for session: SessionSummary) -> some View {
                 EquatableSessionListRow(
                   summary: session,
                   isRunning: isRunning?(session) ?? false,
@@ -101,12 +155,17 @@ struct SessionListColumnView: View {
                   } else {
                     ids = [session.id]
                   }
-                  return NSItemProvider(
-                    object: ids.joined(separator: "\n") as NSString)
+      return NSItemProvider(object: ids.joined(separator: "\n") as NSString)
                 }
                 .listRowInsets(EdgeInsets())
                 .contextMenu {
-                  if session.source == .codex {
+      sessionContextMenu(for: session)
+    }
+  }
+
+  @ViewBuilder
+  private func sessionContextMenu(for session: SessionSummary) -> some View {
+    if session.source == .codexLocal {
                     Button {
                       onResume(session)
                     } label: {
@@ -119,7 +178,6 @@ struct SessionListColumnView: View {
                   } label: {
                     Label("Edit Title & Comment", systemImage: "pencil")
                   }
-                  // Assign to Project submenu
                   if !viewModel.projects.isEmpty {
                     Menu {
                       Button("New Project…") {
@@ -155,46 +213,7 @@ struct SessionListColumnView: View {
                     onDeleteRequest(session)
                   } label: {
                     let isBatchDelete = selectionContains(session.id) && selection.count > 1
-                    Label(
-                      isBatchDelete ? "Delete Sessions" : "Delete Session", systemImage: "trash")
-                  }
-                }
-              }
-            } header: {
-              HStack {
-                Text(section.title)
-                Spacer()
-                Label(section.totalDuration.readableFormattedDuration, systemImage: "clock")
-                Label("\(section.totalEvents)", systemImage: "chart.bar")
-              }
-              .font(.subheadline)
-              .foregroundStyle(.secondary)
-            }
-          }
-        }
-        .padding(.horizontal, -2)
-        .listStyle(.inset)
-      }
-    }
-    .padding(.vertical, 16)
-    .padding(.horizontal, 6)
-    .sheet(isPresented: $showNewProjectSheet) {
-      ProjectEditorSheet(
-        isPresented: $showNewProjectSheet,
-        mode: .new,
-        prefill: newProjectPrefill,
-        autoAssignSessionIDs: newProjectAssignIDs
-      )
-      .environmentObject(viewModel)
-    }
-    .background(
-      GeometryReader { geo in
-        Color.clear
-          .preference(key: ListColumnWidthKey.self, value: geo.size.width)
-      }
-    )
-    .onPreferenceChange(ListColumnWidthKey.self) { w in
-      containerWidth = w
+      Label(isBatchDelete ? "Delete Sessions" : "Delete Session", systemImage: "trash")
     }
   }
 
@@ -594,7 +613,8 @@ extension TimeInterval {
           eventCount: 6,
           lineCount: 89,
           lastUpdatedAt: Date().addingTimeInterval(-3600),
-          source: .codex
+          source: .codexLocal,
+          remotePath: nil
         ),
         SessionSummary(
           id: "session-2",
@@ -618,7 +638,8 @@ extension TimeInterval {
           eventCount: 9,
           lineCount: 120,
           lastUpdatedAt: Date().addingTimeInterval(-9000),
-          source: .codex
+          source: .codexLocal,
+          remotePath: nil
         ),
       ]
     ),
@@ -650,7 +671,8 @@ extension TimeInterval {
           eventCount: 14,
           lineCount: 200,
           lastUpdatedAt: Date().addingTimeInterval(-158400),
-          source: .codex
+          source: .codexLocal,
+          remotePath: nil
         )
       ]
     ),
