@@ -45,6 +45,14 @@ final class SessionListViewModel: ObservableObject {
             invalidateVisibleCountCache()
             invalidateCalendarCaches()
             enrichmentSnapshots.removeAll()
+            if dateDimension == .updated {
+                for day in selectedDays {
+                    requestCoverageIfNeeded(for: day)
+                }
+                if let day = selectedDay {
+                    requestCoverageIfNeeded(for: day)
+                }
+            }
             scheduleFiltersUpdate()
             scheduleFilterRefresh(force: true)
         }
@@ -53,6 +61,11 @@ final class SessionListViewModel: ObservableObject {
     @Published var selectedDays: Set<Date> = [] {
         didSet {
             guard !suppressFilterNotifications else { return }
+            if dateDimension == .updated {
+                for day in selectedDays {
+                    requestCoverageIfNeeded(for: day)
+                }
+            }
             invalidateVisibleCountCache()
             scheduleFilterRefresh(force: true)
         }
@@ -68,6 +81,7 @@ final class SessionListViewModel: ObservableObject {
             invalidateVisibleCountCache()
             invalidateCalendarCaches()
             pruneDayCache()
+            pruneCoverageCache()
             for session in allSessions {
                 _ = dayIndex(for: session)
             }
@@ -89,6 +103,7 @@ final class SessionListViewModel: ObservableObject {
                     }
                 }
             }
+            scheduleToolMetricsRefresh()
         }
     }
     private var fulltextMatches: Set<String> = []  // SessionSummary.id set
@@ -97,6 +112,11 @@ final class SessionListViewModel: ObservableObject {
     var notesStore: SessionNotesStore
     var notesSnapshot: [String: SessionNote] = [:]
     private var canonicalCwdCache: [String: String] = [:]
+    private let ripgrepStore = SessionRipgrepStore()
+    private var coverageLoadTasks: [String: Task<Void, Never>] = [:]
+    private var pendingCoverageMonths: Set<String> = []
+    private var toolMetricsTask: Task<Void, Never>?
+    private var pendingToolMetricsRefresh = false
     struct SessionDayIndex: Equatable {
         let created: Date
         let updated: Date
@@ -105,7 +125,17 @@ final class SessionListViewModel: ObservableObject {
         let createdDay: Int
         let updatedDay: Int
     }
+    struct SessionMonthCoverageKey: Hashable, Sendable {
+        let sessionID: String
+        let monthKey: String
+    }
+    struct DaySelectionDescriptor: Hashable, Sendable {
+        let date: Date
+        let monthKey: String
+        let day: Int
+    }
     private var sessionDayCache: [String: SessionDayIndex] = [:]
+    var updatedMonthCoverage: [SessionMonthCoverageKey: Set<Int>] = [:]
     private var directoryMonitor: DirectoryMonitor?
     private var claudeDirectoryMonitor: DirectoryMonitor?
     private var claudeProjectMonitor: DirectoryMonitor?
@@ -156,6 +186,7 @@ final class SessionListViewModel: ObservableObject {
     private let sidebarStatsDebounceNanoseconds: UInt64 = 150_000_000
     private let filterDebounceNanoseconds: UInt64 = 15_000_000
     private var cachedCalendar = Calendar.current
+    private var pendingViewUpdate = false
     static let monthFormatter: DateFormatter = {
         let df = DateFormatter()
         df.dateFormat = "yyyy-MM"
@@ -234,6 +265,12 @@ final class SessionListViewModel: ObservableObject {
         sessionDayCache = sessionDayCache.filter { ids.contains($0.key) }
     }
 
+    private func pruneCoverageCache() {
+        guard !updatedMonthCoverage.isEmpty else { return }
+        let ids = Set(allSessions.map(\.id))
+        updatedMonthCoverage = updatedMonthCoverage.filter { ids.contains($0.key.sessionID) }
+    }
+
     private func invalidateVisibleCountCache() {
         cachedVisibleCount = nil
         invalidateProjectVisibleCountsCache()
@@ -241,6 +278,23 @@ final class SessionListViewModel: ObservableObject {
 
     func invalidateProjectVisibleCountsCache() {
         cachedProjectVisibleCounts = nil
+    }
+
+    private func scheduleViewUpdate() {
+        if pendingViewUpdate { return }
+        pendingViewUpdate = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.objectWillChange.send()
+            self.pendingViewUpdate = false
+        }
+    }
+
+    private func scheduleApplyFilters() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.applyFilters()
+        }
     }
 
     func setProjectMemberships(_ memberships: [String: String]) {
@@ -251,6 +305,27 @@ final class SessionListViewModel: ObservableObject {
 
     func monthKey(for date: Date) -> String {
         Self.monthFormatter.string(from: date)
+    }
+
+    private static func formattedMonthKey(year: Int, month: Int) -> String {
+        return String(format: "%04d-%02d", year, month)
+    }
+
+    static func makeDayDescriptors(selectedDays: Set<Date>, singleDay: Date?) -> [DaySelectionDescriptor] {
+        let calendar = Calendar.current
+        let targets: [Date]
+        if !selectedDays.isEmpty {
+            targets = Array(selectedDays)
+        } else if let single = singleDay {
+            targets = [single]
+        } else {
+            targets = []
+        }
+        return targets.map { date in
+            let comps = calendar.dateComponents([.year, .month, .day], from: date)
+            let monthKey = formattedMonthKey(year: comps.year ?? 0, month: comps.month ?? 0)
+            return DaySelectionDescriptor(date: date, monthKey: monthKey, day: comps.day ?? 0)
+        }
     }
 
     func dayIndex(for session: SessionSummary) -> SessionDayIndex {
@@ -285,6 +360,19 @@ final class SessionListViewModel: ObservableObject {
         case .created: return index.created
         case .updated: return index.updated
         }
+    }
+
+    func matchesDayFilters(_ session: SessionSummary, descriptors: [DaySelectionDescriptor]) -> Bool {
+        guard !descriptors.isEmpty else { return true }
+        let bucket = dayIndex(for: session)
+        return Self.matchesDayDescriptors(
+            summary: session,
+            bucket: bucket,
+            descriptors: descriptors,
+            dimension: dateDimension,
+            coverage: updatedMonthCoverage,
+            calendar: cachedCalendar
+        )
     }
 
     static func normalizeMonthStart(_ date: Date) -> Date {
@@ -567,7 +655,7 @@ final class SessionListViewModel: ObservableObject {
         apply(notes: notes, to: &sessions)
         allSessions = sessions
         // Avoid publishing during view updates
-        Task { @MainActor in self.applyFilters() }
+        scheduleApplyFilters()
     }
 
     func updateProjectsRoot(to newURL: URL) async {
@@ -582,9 +670,10 @@ final class SessionListViewModel: ObservableObject {
         self.projectsStore = ProjectsStore(paths: p)
         await loadProjects()
         // Avoid publishing changes during view update; schedule on next runloop tick
-        Task { @MainActor in
+        Task { @MainActor [weak self] in
+            guard let self else { return }
             self.recomputeProjectCounts()
-            self.applyFilters()
+            self.scheduleApplyFilters()
         }
     }
 
@@ -599,15 +688,20 @@ final class SessionListViewModel: ObservableObject {
         let key = cacheKey(monthStart, dimension)
         if let cached = monthCountsCache[key] { return cached }
         let monthKey = Self.monthFormatter.string(from: monthStart)
+        let coverage = dimension == .updated ? monthCoverageMap(for: monthKey) : [:]
         let counts = Self.computeMonthCounts(
             sessions: allSessions,
             monthKey: monthKey,
             dimension: dimension,
-            dayIndex: sessionDayCache)
+            dayIndex: sessionDayCache,
+            coverage: coverage)
         // Update cache synchronously to avoid race conditions
         monthCountsCache[key] = counts
         currentMonthKey = key
         currentMonthDimension = dimension
+        if dimension == .updated {
+            triggerCoverageLoad(for: monthStart, dimension: dimension)
+        }
         return counts
     }
 
@@ -651,6 +745,46 @@ final class SessionListViewModel: ObservableObject {
         return delta
     }
 
+    private func scheduleToolMetricsRefresh() {
+        if toolMetricsTask != nil {
+            pendingToolMetricsRefresh = true
+            return
+        }
+        guard !allSessions.isEmpty else { return }
+        pendingToolMetricsRefresh = false
+        let sessions = allSessions
+        toolMetricsTask = Task.detached(priority: .utility) { [weak self] in
+            guard let self else { return }
+            let counts = await self.ripgrepStore.toolInvocationCounts(for: sessions)
+            await MainActor.run {
+                self.applyToolInvocationOverrides(counts)
+            }
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                self.toolMetricsTask = nil
+                if self.pendingToolMetricsRefresh {
+                    self.pendingToolMetricsRefresh = false
+                    self.scheduleToolMetricsRefresh()
+                }
+            }
+        }
+    }
+
+    @MainActor
+    private func applyToolInvocationOverrides(_ counts: [String: Int]) {
+        guard !counts.isEmpty else { return }
+        var mutated = false
+        for idx in allSessions.indices {
+            let id = allSessions[idx].id
+            if let value = counts[id], allSessions[idx].toolInvocationCount != value {
+                allSessions[idx].toolInvocationCount = value
+                mutated = true
+            }
+        }
+        guard mutated else { return }
+        scheduleApplyFilters()
+    }
+
     private func scheduleCalendarCountsRefresh(
         monthStart: Date,
         dimension: DateDimension,
@@ -667,6 +801,107 @@ final class SessionListViewModel: ObservableObject {
                 try? await Task.sleep(nanoseconds: delay)
             }
         }
+    }
+
+    private func triggerCoverageLoad(for monthStart: Date, dimension: DateDimension) {
+        guard dimension == .updated else { return }
+        let key = cacheKey(monthStart, dimension)
+        if coverageLoadTasks[key] != nil {
+            pendingCoverageMonths.insert(key)
+            return
+        }
+        let targets = sessionsIntersecting(monthStart: monthStart)
+        guard !targets.isEmpty else { return }
+        coverageLoadTasks[key] = Task.detached(priority: .utility) { [weak self] in
+            guard let self else { return }
+            let data = await self.ripgrepStore.dayCoverage(for: monthStart, sessions: targets)
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                self.coverageLoadTasks[key]?.cancel()
+                self.coverageLoadTasks.removeValue(forKey: key)
+                if data.isEmpty {
+                    if !targets.isEmpty {
+                        self.pendingCoverageMonths.insert(key)
+                        self.rebuildMonthCounts(for: monthStart, dimension: dimension)
+                    }
+                } else {
+                    self.applyCoverage(monthStart: monthStart, coverage: data)
+                }
+                if self.pendingCoverageMonths.remove(key) != nil {
+                    self.triggerCoverageLoad(for: monthStart, dimension: dimension)
+                }
+            }
+        }
+    }
+
+    private func requestCoverageIfNeeded(for day: Date) {
+        guard dateDimension == .updated else { return }
+        let monthStart = Self.normalizeMonthStart(day)
+        triggerCoverageLoad(for: monthStart, dimension: .updated)
+    }
+
+    private func sessionsIntersecting(monthStart: Date) -> [SessionSummary] {
+        let calendar = Calendar.current
+        guard let monthEnd = calendar.date(byAdding: DateComponents(month: 1), to: monthStart) else {
+            return []
+        }
+        return allSessions.filter { summary in
+            let start = summary.startedAt
+            let end = summary.lastUpdatedAt ?? summary.startedAt
+            return end >= monthStart && start < monthEnd
+        }
+    }
+
+    @MainActor
+    private func applyCoverage(monthStart: Date, coverage: [String: Set<Int>]) {
+        guard !coverage.isEmpty else {
+            rebuildMonthCounts(for: monthStart, dimension: .updated)
+            return
+        }
+        let monthKey = monthKey(for: monthStart)
+        var changed = false
+        let validIDs = Set(allSessions.map(\.id))
+        for (sessionID, days) in coverage {
+            guard validIDs.contains(sessionID) else { continue }
+            let key = SessionMonthCoverageKey(sessionID: sessionID, monthKey: monthKey)
+            if updatedMonthCoverage[key] != days {
+                updatedMonthCoverage[key] = days
+                changed = true
+            }
+        }
+        if changed {
+            invalidateVisibleCountCache()
+        }
+        rebuildMonthCounts(for: monthStart, dimension: .updated)
+        if changed {
+            scheduleApplyFilters()
+        } else {
+            scheduleViewUpdate()
+        }
+    }
+
+    private func monthCoverageMap(for monthKey: String) -> [String: Set<Int>] {
+        var map: [String: Set<Int>] = [:]
+        for (key, days) in updatedMonthCoverage where key.monthKey == monthKey {
+            map[key.sessionID] = days
+        }
+        return map
+    }
+
+    private func rebuildMonthCounts(for monthStart: Date, dimension: DateDimension) {
+        let key = cacheKey(monthStart, dimension)
+        let monthKey = monthKey(for: monthStart)
+        let coverage = dimension == .updated ? monthCoverageMap(for: monthKey) : [:]
+        let counts = Self.computeMonthCounts(
+            sessions: allSessions,
+            monthKey: monthKey,
+            dimension: dimension,
+            dayIndex: sessionDayCache,
+            coverage: coverage)
+        monthCountsCache[key] = counts
+        currentMonthKey = key
+        currentMonthDimension = dimension
+        scheduleViewUpdate()
     }
 
     // MARK: - Filter state management
@@ -692,9 +927,13 @@ final class SessionListViewModel: ObservableObject {
             }
         }
 
+        if let d = normalized {
+            requestCoverageIfNeeded(for: d)
+        }
+
         suppressFilterNotifications = false
         // Update UI using next-runloop to avoid publishing during view updates
-        Task { @MainActor in self.applyFilters() }
+        scheduleApplyFilters()
         // After coordinated update of selectedDay/selectedDays, trigger a refresh once.
         // Use force=true to ensure scope reload
         scheduleFilterRefresh(force: true)
@@ -709,6 +948,7 @@ final class SessionListViewModel: ObservableObject {
         } else {
             selectedDays.insert(d)
         }
+        requestCoverageIfNeeded(for: d)
         // Keep single-selection reflected in selectedDay; otherwise nil
         if selectedDays.count == 1, let only = selectedDays.first {
             selectedDay = only
@@ -719,7 +959,7 @@ final class SessionListViewModel: ObservableObject {
         }
         suppressFilterNotifications = false
         // Update UI using next-runloop to avoid publishing during view updates
-        Task { @MainActor in self.applyFilters() }
+        scheduleApplyFilters()
         scheduleFilterRefresh(force: true)
     }
 
@@ -749,7 +989,7 @@ final class SessionListViewModel: ObservableObject {
             if filterDebounceNanoseconds > 0 {
                 try? await Task.sleep(nanoseconds: filterDebounceNanoseconds)
             }
-            self.applyFilters()
+            self.scheduleApplyFilters()
         }
     }
 
@@ -821,6 +1061,10 @@ final class SessionListViewModel: ObservableObject {
         for session in allSessions {
             dayIndexMap[session.id] = dayIndex(for: session)
         }
+        let dayDescriptors = Self.makeDayDescriptors(
+            selectedDays: selectedDays,
+            singleDay: selectedDay
+        )
 
         return FilterSnapshot(
             sessions: allSessions,
@@ -832,7 +1076,9 @@ final class SessionListViewModel: ObservableObject {
             quickSearchNeedle: quickNeedle,
             sortOrder: sortOrder,
             canonicalCache: canonicalCwdCache,
-            dayIndex: dayIndexMap
+            dayIndex: dayIndexMap,
+            dayCoverage: updatedMonthCoverage,
+            dayDescriptors: dayDescriptors
         )
     }
 
@@ -881,20 +1127,19 @@ final class SessionListViewModel: ObservableObject {
             filtered = matches
         }
 
-        let dayBuckets: (SessionSummary) -> Date = { summary in
-            if let bucket = snapshot.dayIndex[summary.id] {
-                switch snapshot.dateDimension {
-                case .created: return bucket.created
-                case .updated: return bucket.updated
-                }
+        if !snapshot.dayDescriptors.isEmpty {
+            let calendar = Calendar.current
+            filtered = filtered.filter { summary in
+                let bucket = snapshot.dayIndex[summary.id]
+                return Self.matchesDayDescriptors(
+                    summary: summary,
+                    bucket: bucket,
+                    descriptors: snapshot.dayDescriptors,
+                    dimension: snapshot.dateDimension,
+                    coverage: snapshot.dayCoverage,
+                    calendar: calendar
+                )
             }
-            return referenceDate(for: summary, dimension: snapshot.dateDimension)
-        }
-        if !snapshot.selectedDays.isEmpty {
-            let days = snapshot.selectedDays
-            filtered = filtered.filter { sess in days.contains(dayBuckets(sess)) }
-        } else if let day = snapshot.singleDay {
-            filtered = filtered.filter { sess in dayBuckets(sess) == day }
         }
 
         if let needle = snapshot.quickSearchNeedle {
@@ -911,6 +1156,34 @@ final class SessionListViewModel: ObservableObject {
             filteredSessions: filtered,
             newCanonicalEntries: newCanonicalEntries
         )
+    }
+
+    nonisolated private static func matchesDayDescriptors(
+        summary: SessionSummary,
+        bucket: SessionDayIndex?,
+        descriptors: [DaySelectionDescriptor],
+        dimension: DateDimension,
+        coverage: [SessionMonthCoverageKey: Set<Int>],
+        calendar: Calendar
+    ) -> Bool {
+        guard let bucket else { return false }
+        for descriptor in descriptors {
+            switch dimension {
+            case .created:
+                if calendar.isDate(bucket.created, inSameDayAs: descriptor.date) {
+                    return true
+                }
+            case .updated:
+                let key = SessionMonthCoverageKey(sessionID: summary.id, monthKey: descriptor.monthKey)
+                if let days = coverage[key], days.contains(descriptor.day) {
+                    return true
+                }
+                if calendar.isDate(bucket.updated, inSameDayAs: descriptor.date) {
+                    return true
+                }
+            }
+        }
+        return false
     }
 
     private func sectionsUsingCache(
@@ -979,6 +1252,8 @@ final class SessionListViewModel: ObservableObject {
         let sortOrder: SessionSortOrder
         let canonicalCache: [String: String]
         let dayIndex: [String: SessionDayIndex]
+        let dayCoverage: [SessionMonthCoverageKey: Set<Int>]
+        let dayDescriptors: [DaySelectionDescriptor]
     }
 
     private struct FilterComputationResult: Sendable {
@@ -1055,7 +1330,7 @@ final class SessionListViewModel: ObservableObject {
             }
             await MainActor.run {
                 self.fulltextMatches = matched
-                self.applyFilters()
+                self.scheduleApplyFilters()
             }
         }
     }
@@ -1144,7 +1419,7 @@ final class SessionListViewModel: ObservableObject {
                         }
                         self.allSessions = Array(map.values)
                         self.rebuildCanonicalCwdCache()
-                        self.applyFilters()
+                        self.scheduleApplyFilters()
                     }
                     updatesBuffer.removeAll(keepingCapacity: true)
                     lastFlushTime = ContinuousClock.now
@@ -1432,7 +1707,8 @@ final class SessionListViewModel: ObservableObject {
         }
         allSessions = Array(map.values)
         rebuildCanonicalCwdCache()
-        applyFilters()
+        scheduleApplyFilters()
+        globalSessionCount = allSessions.count
     }
 
     private func dayOfToday() -> Date { Calendar.current.startOfDay(for: Date()) }
@@ -1465,7 +1741,8 @@ final class SessionListViewModel: ObservableObject {
         sessions: [SessionSummary],
         monthKey: String,
         dimension: DateDimension,
-        dayIndex: [String: SessionDayIndex]
+        dayIndex: [String: SessionDayIndex],
+        coverage: [String: Set<Int>] = [:]
     ) -> [Int: Int] {
         var counts: [Int: Int] = [:]
         for session in sessions {
@@ -1476,7 +1753,11 @@ final class SessionListViewModel: ObservableObject {
                 counts[bucket.createdDay, default: 0] += 1
             case .updated:
                 guard bucket.updatedMonthKey == monthKey else { continue }
-                counts[bucket.updatedDay, default: 0] += 1
+                if let days = coverage[session.id], !days.isEmpty {
+                    for day in days { counts[day, default: 0] += 1 }
+                } else {
+                    counts[bucket.updatedDay, default: 0] += 1
+                }
             }
         }
         return counts
@@ -1496,10 +1777,7 @@ extension SessionListViewModel {
     }
 
     func refreshGlobalCount() async {
-        async let codex = indexer.countAllSessions(root: preferences.sessionsRoot)
-        async let claude = claudeProvider.countAllSessions()
-        let total = await codex + claude
-        await MainActor.run { self.globalSessionCount = total }
+        globalSessionCount = allSessions.count
     }
 
     /// User-driven refresh for usage status (status capsule tap / Command+R fallback).
@@ -1521,18 +1799,19 @@ extension SessionListViewModel {
         }
 
         codexUsageTask = Task { [weak self] in
-            let snapshot = await Task.detached(priority: .utility) { () -> TokenUsageSnapshot? in
-                let loader = SessionTimelineLoader()
-                for session in candidates {
-                    if let snapshot = loader.loadLatestTokenUsageWithFallback(url: session.fileURL) {
-                        return snapshot
-                    }
-                }
-                return nil
-            }.value
+            guard let self else { return }
+            let ripgrepSnapshot = await self.ripgrepStore.latestTokenUsage(in: candidates)
+            let snapshot: TokenUsageSnapshot?
+            if let ripgrepSnapshot {
+                snapshot = ripgrepSnapshot
+            } else {
+                snapshot = await Task.detached(priority: .utility) {
+                    Self.fallbackTokenUsage(from: candidates)
+                }.value
+            }
 
+            guard !Task.isCancelled else { return }
             await MainActor.run {
-                guard let self else { return }
                 let codexStatus = snapshot.map { CodexUsageStatus(snapshot: $0) }
                 self.codexUsageStatus = codexStatus
                 if let codex = codexStatus {
@@ -1552,6 +1831,17 @@ extension SessionListViewModel {
                 }
             }
         }
+    }
+
+    nonisolated private static func fallbackTokenUsage(from sessions: [SessionSummary]) -> TokenUsageSnapshot? {
+        guard !sessions.isEmpty else { return nil }
+        let loader = SessionTimelineLoader()
+        for session in sessions {
+            if let snapshot = loader.loadLatestTokenUsageWithFallback(url: session.fileURL) {
+                return snapshot
+            }
+        }
+        return nil
     }
 
     private func latestCodexSessions(limit: Int) -> [SessionSummary] {
@@ -1695,10 +1985,29 @@ extension SessionListViewModel {
         return (try? loader.load(url: summary.fileURL)) ?? []
     }
 
+    func ripgrepDiagnostics() async -> SessionRipgrepStore.Diagnostics {
+        await ripgrepStore.diagnostics()
+    }
+
+    func rebuildRipgrepIndexes() async {
+        coverageLoadTasks.values.forEach { $0.cancel() }
+        coverageLoadTasks.removeAll()
+        toolMetricsTask?.cancel()
+        await ripgrepStore.resetAll()
+        updatedMonthCoverage.removeAll()
+        monthCountsCache.removeAll()
+        scheduleViewUpdate()
+        scheduleToolMetricsRefresh()
+        if dateDimension == .updated {
+            triggerCoverageLoad(for: sidebarMonthStart, dimension: dateDimension)
+        }
+        scheduleApplyFilters()
+    }
+
     // Invalidate all cached monthly counts; next access will recompute
     func invalidateCalendarCaches() {
         monthCountsCache.removeAll()
-        objectWillChange.send()
+        scheduleViewUpdate()
     }
 
 }

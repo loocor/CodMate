@@ -72,23 +72,13 @@ extension SessionListViewModel {
         let allowed = projects.reduce(into: [String: Set<ProjectSessionSource>]()) {
             $0[$1.id] = $1.sources
         }
-        let dayTargets: Set<Date>
-        if !selectedDays.isEmpty {
-            dayTargets = selectedDays
-        } else if let single = selectedDay {
-            dayTargets = [single]
-        } else {
-            dayTargets = []
-        }
-        let filterByDay = !dayTargets.isEmpty
+        let descriptors = Self.makeDayDescriptors(selectedDays: selectedDays, singleDay: selectedDay)
+        let filterByDay = !descriptors.isEmpty
 
         for session in allSessions {
-            var passesDayFilter = true
-            if filterByDay {
-                let bucket = dayStart(for: session, dimension: dateDimension)
-                passesDayFilter = dayTargets.contains(bucket)
+            if filterByDay && !matchesDayFilters(session, descriptors: descriptors) {
+                continue
             }
-            if !passesDayFilter { continue }
             if let pid = projectMemberships[session.id] {
                 let allowedSources = allowed[pid] ?? ProjectSessionSource.allSet
                 if !allowedSources.contains(session.source.projectSource) { continue }
@@ -138,27 +128,12 @@ extension SessionListViewModel {
             return cached.value
         }
 
+        let descriptors = Self.makeDayDescriptors(selectedDays: selectedDays, singleDay: selectedDay)
         let value: Int
-        if selectedDay == nil && selectedDays.isEmpty {
+        if descriptors.isEmpty {
             value = allSessions.count
         } else {
-            let targets: Set<Date>
-            if !selectedDays.isEmpty {
-                targets = selectedDays
-            } else if let single = selectedDay {
-                targets = [single]
-            } else {
-                targets = []
-            }
-            if targets.isEmpty {
-                value = allSessions.count
-            } else {
-                let matched = allSessions.lazy.filter { [weak self] session in
-                    guard let self else { return false }
-                    return targets.contains(self.dayStart(for: session, dimension: self.dateDimension))
-                }
-                value = matched.count
-            }
+            value = allSessions.filter { matchesDayFilters($0, descriptors: descriptors) }.count
         }
         cachedVisibleCount = (key, value)
         return value
@@ -194,8 +169,12 @@ extension SessionListViewModel {
                 guard bucket.createdMonthKey == monthKey else { continue }
                 days.insert(bucket.createdDay)
             case .updated:
-                guard bucket.updatedMonthKey == monthKey else { continue }
-                days.insert(bucket.updatedDay)
+                let coverageKey = SessionMonthCoverageKey(sessionID: session.id, monthKey: monthKey)
+                if let covered = updatedMonthCoverage[coverageKey], !covered.isEmpty {
+                    days.formUnion(covered)
+                } else if bucket.updatedMonthKey == monthKey {
+                    days.insert(bucket.updatedDay)
+                }
             }
         }
         return days

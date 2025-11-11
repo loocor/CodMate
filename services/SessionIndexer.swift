@@ -696,15 +696,17 @@ actor SessionIndexer {
         var total = 0
         guard
             let enumerator = fileManager.enumerator(
-                at: root, includingPropertiesForKeys: [.isRegularFileKey],
+                at: root, includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey],
                 options: [.skipsHiddenFiles, .skipsPackageDescendants])
         else { return 0 }
 
-        // Collect URLs synchronously first to avoid Swift 6 async/iterator issues
-        let urls = enumerator.compactMap { $0 as? URL }
-
-        for url in urls {
-            if url.pathExtension.lowercased() == "jsonl" { total += 1 }
+        for case let url as URL in enumerator {
+            guard url.pathExtension.lowercased() == "jsonl" else { continue }
+            let name = url.deletingPathExtension().lastPathComponent
+            if name.hasPrefix("agent-") { continue }
+            let values = try? url.resourceValues(forKeys: [.fileSizeKey])
+            if let size = values?.fileSize, size == 0 { continue }
+            total += 1
         }
         return total
     }

@@ -18,7 +18,7 @@ struct SessionSummary: Identifiable, Hashable, Sendable, Codable {
     let approvalPolicy: String?
     let userMessageCount: Int
     let assistantMessageCount: Int
-    let toolInvocationCount: Int
+    var toolInvocationCount: Int
     let responseCounts: [String: Int]
     let turnContextCount: Int
     let eventCount: Int

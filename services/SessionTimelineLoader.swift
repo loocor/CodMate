@@ -392,7 +392,7 @@ struct SessionTimelineLoader {
             guard let row = try? decoder.decode(SessionRow.self, from: Data(slice)) else { continue }
             guard case let .eventMessage(payload) = row.kind else { continue }
             if payload.type.lowercased() == "token_count",
-               let snapshot = makeTokenUsageSnapshot(timestamp: row.timestamp, payload: payload)
+               let snapshot = TokenUsageSnapshotBuilder.build(timestamp: row.timestamp, payload: payload)
             {
                 latest = snapshot
             }
@@ -401,7 +401,22 @@ struct SessionTimelineLoader {
         return latest
     }
 
-    private func makeTokenUsageSnapshot(timestamp: Date, payload: EventMessagePayload) -> TokenUsageSnapshot? {
+}
+
+struct TokenUsageSnapshot: Equatable {
+    let timestamp: Date
+    let totalTokens: Int?
+    let contextWindow: Int?
+    let primaryPercent: Double?
+    let primaryWindowMinutes: Int?
+    let primaryResetAt: Date?
+    let secondaryPercent: Double?
+    let secondaryWindowMinutes: Int?
+    let secondaryResetAt: Date?
+}
+
+struct TokenUsageSnapshotBuilder {
+    static func build(timestamp: Date, payload: EventMessagePayload) -> TokenUsageSnapshot? {
         let info = payload.info
         let totalTokens = info?.value(forKeyPath: ["last_token_usage", "total_tokens"])?.intValue
             ?? info?.value(forKeyPath: ["total_token_usage", "total_tokens"])?.intValue
@@ -430,18 +445,6 @@ struct SessionTimelineLoader {
             secondaryResetAt: secondaryRate.resetDate
         )
     }
-}
-
-struct TokenUsageSnapshot: Equatable {
-    let timestamp: Date
-    let totalTokens: Int?
-    let contextWindow: Int?
-    let primaryPercent: Double?
-    let primaryWindowMinutes: Int?
-    let primaryResetAt: Date?
-    let secondaryPercent: Double?
-    let secondaryWindowMinutes: Int?
-    let secondaryResetAt: Date?
 }
 
 fileprivate struct TokenUsageFallbackParser {

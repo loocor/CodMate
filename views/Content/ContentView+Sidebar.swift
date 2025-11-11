@@ -169,12 +169,12 @@ private struct ToolbarCircleButton: View {
         .background(
           Circle()
             .fill(backgroundColor)
-        )
-        .overlay(
-          Circle()
-            .stroke(borderColor, lineWidth: 1)
-        )
-        .contentShape(Circle())
+      )
+      .overlay(
+        Circle()
+          .stroke(borderColor, lineWidth: 1)
+      )
+      .contentShape(Circle())
     }
     .buttonStyle(.plain)
     .help(help ?? "")

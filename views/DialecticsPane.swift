@@ -6,6 +6,10 @@ struct DialecticsPane: View {
     @ObservedObject var preferences: SessionPreferencesStore
     @StateObject private var vm = DialecticsVM()
     @StateObject private var permissionsManager = SandboxPermissionsManager.shared
+    @EnvironmentObject private var listViewModel: SessionListViewModel
+    @State private var ripgrepReport: SessionRipgrepStore.Diagnostics?
+    @State private var ripgrepLoading = false
+    @State private var ripgrepRebuilding = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
@@ -56,6 +60,47 @@ struct DialecticsPane: View {
                                 .foregroundStyle(vm.sandboxOn ? .green : .secondary)
                                 .frame(maxWidth: .infinity, alignment: .trailing)
                         }
+                        }
+                    }
+                }
+
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Ripgrep Indexes").font(.headline).fontWeight(.semibold)
+                    settingsCard {
+                        if let report = ripgrepReport {
+                            Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 8) {
+                                gridRow(label: "Cached Coverage Entries", value: "\(report.cachedCoverageEntries)")
+                                gridRow(label: "Cached Tool Entries", value: "\(report.cachedToolEntries)")
+                                gridRow(label: "Cached Token Entries", value: "\(report.cachedTokenEntries)")
+                                gridRow(label: "Last Coverage Scan", value: timestampLabel(report.lastCoverageScan))
+                                gridRow(label: "Last Tool Scan", value: timestampLabel(report.lastToolScan))
+                                gridRow(label: "Last Token Scan", value: timestampLabel(report.lastTokenScan))
+                            }
+                        } else {
+                            Text("Ripgrep stats not loaded yet.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Divider()
+                        HStack(spacing: 12) {
+                            Button {
+                                Task { await refreshRipgrepDiagnostics() }
+                            } label: {
+                                Label("Refresh Ripgrep Stats", systemImage: "arrow.clockwise")
+                            }
+                            .buttonStyle(.bordered)
+                            .disabled(ripgrepLoading || ripgrepRebuilding)
+                            if ripgrepLoading {
+                                ProgressView().controlSize(.small)
+                            }
+                            Button {
+                                Task { await rebuildRipgrepIndexes() }
+                            } label: {
+                                Label("Rebuild Coverage", systemImage: "hammer")
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .tint(.orange)
+                            .disabled(ripgrepRebuilding)
                         }
                     }
                 }
@@ -240,6 +285,7 @@ struct DialecticsPane: View {
                 // Removed: Authorization Shortcuts — unify to on-demand authorization in context
             }
             .task { await vm.runAll(preferences: preferences) }
+            .task { await refreshRipgrepDiagnostics() }
     }
 
     // Helper function to create settings card
@@ -270,5 +316,39 @@ extension DialecticsPane {
                 NotificationCenter.default.post(name: .codMateRepoAuthorizationChanged, object: nil)
             }
         }
+    }
+
+    @ViewBuilder
+    private func gridRow(label: String, value: String) -> some View {
+        GridRow {
+            Text(label).font(.subheadline)
+            Text(value)
+                .font(.caption)
+                .frame(maxWidth: .infinity, alignment: .trailing)
+        }
+    }
+
+    private func timestampLabel(_ date: Date?) -> String {
+        guard let date else { return "—" }
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter.string(from: date)
+    }
+
+    private func refreshRipgrepDiagnostics() async {
+        await MainActor.run { ripgrepLoading = true }
+        let report = await listViewModel.ripgrepDiagnostics()
+        await MainActor.run {
+            ripgrepReport = report
+            ripgrepLoading = false
+        }
+    }
+
+    private func rebuildRipgrepIndexes() async {
+        await MainActor.run { ripgrepRebuilding = true }
+        await listViewModel.rebuildRipgrepIndexes()
+        await refreshRipgrepDiagnostics()
+        await MainActor.run { ripgrepRebuilding = false }
     }
 }

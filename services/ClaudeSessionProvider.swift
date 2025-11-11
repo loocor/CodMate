@@ -103,11 +103,15 @@ actor ClaudeSessionProvider {
         guard let root else { return 0 }
         guard let enumerator = fileManager.enumerator(
             at: root,
-            includingPropertiesForKeys: [.isRegularFileKey],
+            includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey],
             options: [.skipsHiddenFiles, .skipsPackageDescendants])
         else { return 0 }
         var total = 0
         for case let url as URL in enumerator where url.pathExtension.lowercased() == "jsonl" {
+            let name = url.deletingPathExtension().lastPathComponent
+            if name.hasPrefix("agent-") { continue }
+            let values = try? url.resourceValues(forKeys: [.fileSizeKey])
+            if let size = values?.fileSize, size == 0 { continue }
             total += 1
         }
         return total
