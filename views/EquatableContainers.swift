@@ -38,9 +38,11 @@ struct EquatableUsageContainer: View, Equatable {
     var codexUpdatedAt: TimeInterval?
     var codexAvailability: Int
     var codexUrgentProgress: Double?
+    var codexOrigin: Int
     var claudeUpdatedAt: TimeInterval?
     var claudeAvailability: Int
     var claudeUrgentProgress: Double?
+    var claudeOrigin: Int
   }
 
   static func == (lhs: EquatableUsageContainer, rhs: EquatableUsageContainer) -> Bool {
@@ -73,8 +75,8 @@ struct EquatableUsageContainer: View, Equatable {
   }
 
   private static func digest(_ snapshots: [UsageProviderKind: UsageProviderSnapshot]) -> UsageDigest {
-    func parts(for provider: UsageProviderKind) -> (TimeInterval?, Int, Double?) {
-      guard let snap = snapshots[provider] else { return (nil, -1, nil) }
+    func parts(for provider: UsageProviderKind) -> (TimeInterval?, Int, Double?, Int) {
+      guard let snap = snapshots[provider] else { return (nil, -1, nil, -1) }
       let updated = snap.updatedAt?.timeIntervalSinceReferenceDate
       let availability: Int
       switch snap.availability {
@@ -83,7 +85,8 @@ struct EquatableUsageContainer: View, Equatable {
       case .comingSoon: availability = 3
       }
       let urgent = snap.urgentMetric()?.progress
-      return (updated, availability, urgent)
+      let origin = snap.origin == .thirdParty ? 1 : 0
+      return (updated, availability, urgent, origin)
     }
     let cdx = parts(for: .codex)
     let cld = parts(for: .claude)
@@ -91,9 +94,11 @@ struct EquatableUsageContainer: View, Equatable {
       codexUpdatedAt: cdx.0,
       codexAvailability: cdx.1,
       codexUrgentProgress: cdx.2,
+      codexOrigin: cdx.3,
       claudeUpdatedAt: cld.0,
       claudeAvailability: cld.1,
-      claudeUrgentProgress: cld.2
+      claudeUrgentProgress: cld.2,
+      claudeOrigin: cld.3
     )
   }
 }

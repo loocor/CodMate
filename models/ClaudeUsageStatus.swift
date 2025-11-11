@@ -100,7 +100,8 @@ struct ClaudeUsageStatus: Equatable {
             availability: .ready,
             metrics: metrics,
             updatedAt: updatedAt,
-            statusMessage: nil
+            statusMessage: nil,
+            origin: .builtin
         )
     }
 

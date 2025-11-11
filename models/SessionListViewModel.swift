@@ -244,6 +244,7 @@ final class SessionListViewModel: ObservableObject {
     var projectsStore: ProjectsStore
     let claudeProvider = ClaudeSessionProvider()
     private let claudeUsageClient = ClaudeUsageAPIClient()
+    private let providersRegistry = ProvidersRegistryService()
     @Published var projects: [Project] = []
     var projectCounts: [String: Int] = [:]
     var projectMemberships: [String: String] = [:]
@@ -451,12 +452,51 @@ final class SessionListViewModel: ObservableObject {
                 self?.awaitingFollowupIDs.insert(id)
             }
         }
+        // React to Active Provider changes to keep usage capsule in sync immediately
+        NotificationCenter.default.addObserver(
+            forName: .codMateActiveProviderChanged,
+            object: nil,
+            queue: .main
+        ) { [weak self] note in
+            guard let self else { return }
+            let consumer = note.userInfo?["consumer"] as? String
+            let providerId = note.userInfo?["providerId"] as? String
+            if consumer == ProvidersRegistryService.Consumer.codex.rawValue {
+                if providerId == nil || providerId?.isEmpty == true {
+                    self.refreshCodexUsageStatus()
+                } else {
+                    self.setUsageSnapshot(.codex, Self.thirdPartyUsageSnapshot(for: .codex))
+                }
+            } else if consumer == ProvidersRegistryService.Consumer.claudeCode.rawValue {
+                if providerId == nil || providerId?.isEmpty == true {
+                    self.refreshClaudeUsageStatus()
+                } else {
+                    self.setUsageSnapshot(.claude, Self.thirdPartyUsageSnapshot(for: .claude))
+                }
+            }
+        }
         startActivityPruneTicker()
         startIntentsCleanupTicker()
-        usageSnapshots[.claude] = UsageProviderSnapshot.placeholder(
-            .claude,
-            message: "Claude Code usage parsing will arrive in a future update."
-        )
+        // Pre-seed usage snapshots based on current Active Provider selection to avoid initial flicker
+        Task { [weak self] in
+            guard let self else { return }
+            let codexOrigin = await self.providerOrigin(for: .codex)
+            let claudeOrigin = await self.providerOrigin(for: .claude)
+            await MainActor.run {
+                if codexOrigin == .thirdParty {
+                    self.setUsageSnapshot(.codex, Self.thirdPartyUsageSnapshot(for: .codex))
+                }
+                if claudeOrigin == .thirdParty {
+                    self.setUsageSnapshot(.claude, Self.thirdPartyUsageSnapshot(for: .claude))
+                } else {
+                    // Keep an initial placeholder for Claude to indicate pending fetch when built-in
+                    self.usageSnapshots[.claude] = UsageProviderSnapshot.placeholder(
+                        .claude,
+                        message: "Fetching usage…"
+                    )
+                }
+            }
+        }
     }
 
     // Immediate apply from UI (e.g., pressing Return in search field)
@@ -1793,13 +1833,20 @@ extension SessionListViewModel {
     private func refreshCodexUsageStatus() {
         codexUsageTask?.cancel()
         let candidates = latestCodexSessions(limit: 12)
-        guard !candidates.isEmpty else {
-            codexUsageStatus = nil
-            return
-        }
-
         codexUsageTask = Task { [weak self] in
             guard let self else { return }
+            let origin = await self.providerOrigin(for: .codex)
+            guard origin == .builtin else {
+                await MainActor.run {
+                    self.codexUsageStatus = nil
+                    self.setUsageSnapshot(.codex, Self.thirdPartyUsageSnapshot(for: .codex))
+                }
+                return
+            }
+            guard !candidates.isEmpty else {
+                await MainActor.run { self.codexUsageStatus = nil }
+                return
+            }
             let ripgrepSnapshot = await self.ripgrepStore.latestTokenUsage(in: candidates)
             let snapshot: TokenUsageSnapshot?
             if let ripgrepSnapshot {
@@ -1825,7 +1872,8 @@ extension SessionListViewModel {
                             availability: .empty,
                             metrics: [],
                             updatedAt: nil,
-                            statusMessage: "No Codex sessions found yet."
+                            statusMessage: "No Codex sessions found yet.",
+                            origin: .builtin
                         )
                     )
                 }
@@ -1856,6 +1904,13 @@ extension SessionListViewModel {
         claudeUsageTask?.cancel()
         claudeUsageTask = Task { [weak self] in
             guard let self else { return }
+            let origin = await self.providerOrigin(for: .claude)
+            guard origin == .builtin else {
+                await MainActor.run {
+                    self.setUsageSnapshot(.claude, Self.thirdPartyUsageSnapshot(for: .claude))
+                }
+                return
+            }
             let client = self.claudeUsageClient
             do {
                 let status = try await client.fetchUsageStatus()
@@ -1904,11 +1959,11 @@ extension SessionListViewModel {
         if let clientError = error as? ClaudeUsageAPIClient.ClientError {
             switch clientError {
             case .credentialNotFound:
-                return "Sign in to Claude Code once to enable usage data."
+                return "Claude usage is available with Subscription login only. API Key mode does not provide usage."
             case .keychainAccessRestricted(let status):
                 return "Allow CodMate to access \"Claude Code-credentials\" in Keychain (status \(status))."
             case .malformedCredential, .missingAccessToken:
-                return "Claude Code credential looks invalid. Try signing out/in again."
+                return "Claude usage requires Subscription login. If you're using API Key mode, usage is not available."
             case .credentialExpired:
                 return "Claude Code credential expired. Please sign in again."
             case .requestFailed(let code):
@@ -1931,6 +1986,7 @@ extension SessionListViewModel {
     }
 
     private static func usageSnapshotCoreEqual(_ a: UsageProviderSnapshot, _ b: UsageProviderSnapshot) -> Bool {
+        if a.origin != b.origin { return false }
         if a.availability != b.availability { return false }
         let au = a.updatedAt?.timeIntervalSinceReferenceDate
         let bu = b.updatedAt?.timeIntervalSinceReferenceDate
@@ -1941,6 +1997,33 @@ extension SessionListViewModel {
         let ar = a.urgentMetric()?.resetDate?.timeIntervalSinceReferenceDate
         let br = b.urgentMetric()?.resetDate?.timeIntervalSinceReferenceDate
         return ar == br
+    }
+
+    private func providerOrigin(for provider: UsageProviderKind) async -> UsageProviderOrigin {
+        let consumer: ProvidersRegistryService.Consumer = {
+            switch provider {
+            case .codex: return .codex
+            case .claude: return .claudeCode
+            }
+        }()
+        let bindings = await providersRegistry.getBindings()
+        if let raw = bindings.activeProvider?[consumer.rawValue]?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !raw.isEmpty {
+            return .thirdParty
+        }
+        return .builtin
+    }
+
+    private static func thirdPartyUsageSnapshot(for provider: UsageProviderKind) -> UsageProviderSnapshot {
+        UsageProviderSnapshot(
+            provider: provider,
+            title: provider.displayName,
+            availability: .empty,
+            metrics: [],
+            updatedAt: nil,
+            statusMessage: "Usage data isn't available while a custom provider is active.",
+            origin: .thirdParty
+        )
     }
 
     // MARK: - Sandbox Permission Helpers

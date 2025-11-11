@@ -21,10 +21,21 @@ struct UsageStatusControl: View {
 
   var body: some View {
     let referenceDate = Date()
+    return Group {
+      if shouldHideAllProviders {
+        EmptyView()
+      } else {
+        content(referenceDate: referenceDate)
+      }
+    }
+  }
+
+  @ViewBuilder
+  private func content(referenceDate: Date) -> some View {
     HStack(spacing: 8) {
       let rows = providerRows(at: referenceDate)
-      let outerProgress = progress(for: .claude, relativeTo: referenceDate)
-      let innerProgress = progress(for: .codex, relativeTo: referenceDate)
+      let outerState = ringState(for: .claude, relativeTo: referenceDate)
+      let innerState = ringState(for: .codex, relativeTo: referenceDate)
       let snapshotForButton = snapshots[selectedProvider] ?? snapshots.values.first
       let providerForButton = snapshotForButton?.provider ?? selectedProvider
 
@@ -33,10 +44,8 @@ struct UsageStatusControl: View {
       } label: {
         HStack(spacing: isHovering ? 8 : 0) {
           DualUsageDonutView(
-            outerProgress: outerProgress,
-            innerProgress: innerProgress,
-            outerColor: providerColor(.claude),
-            innerColor: providerColor(.codex)
+            outerState: outerState,
+            innerState: innerState
           )
           VStack(alignment: .leading, spacing: 0) {
             if rows.isEmpty {
@@ -70,7 +79,9 @@ struct UsageStatusControl: View {
       .focusable(false)
       .onHover { hovering in
         withAnimation(.easeInOut(duration: 0.2)) { isHovering = hovering }
-        if hovering, (snapshotForButton?.availability != .ready) {
+        if hovering,
+           shouldAttemptRefresh(providerForButton),
+           (snapshotForButton?.availability != .ready) {
           onRequestRefresh(providerForButton)
         }
       }
@@ -83,16 +94,32 @@ struct UsageStatusControl: View {
         )
       }
       .onChange(of: showPopover) { _, open in
-        if open, (snapshotForButton?.availability != .ready) {
+        if open,
+           shouldAttemptRefresh(providerForButton),
+           (snapshotForButton?.availability != .ready) {
           onRequestRefresh(providerForButton)
         }
       }
     }
   }
 
+  private var shouldHideAllProviders: Bool {
+    UsageProviderKind.allCases.allSatisfy { provider in
+      snapshots[provider]?.origin == .thirdParty
+    }
+  }
+
+  private func shouldAttemptRefresh(_ provider: UsageProviderKind) -> Bool {
+    guard let snapshot = snapshots[provider] else { return true }
+    return snapshot.origin == .builtin
+  }
+
   private func providerRows(at date: Date) -> [(provider: UsageProviderKind, text: String)] {
     UsageProviderKind.allCases.compactMap { provider in
       guard let snapshot = snapshots[provider] else { return nil }
+      if snapshot.origin == .thirdParty {
+        return (provider, "\(provider.displayName) · Custom provider (usage unavailable)")
+      }
       let urgent = snapshot.urgentMetric(relativeTo: date)
       switch snapshot.availability {
       case .ready:
@@ -114,9 +141,22 @@ struct UsageStatusControl: View {
     }
   }
 
-  private func progress(for provider: UsageProviderKind, relativeTo date: Date) -> Double? {
-    guard let snapshot = snapshots[provider], snapshot.availability == .ready else { return nil }
-    return snapshot.urgentMetric(relativeTo: date)?.progress
+  private func ringState(for provider: UsageProviderKind, relativeTo date: Date) -> UsageRingState {
+    let color = providerColor(provider)
+    guard let snapshot = snapshots[provider] else {
+      return UsageRingState(progress: nil, color: color, disabled: false)
+    }
+    if snapshot.origin == .thirdParty {
+      return UsageRingState(progress: nil, color: color, disabled: true)
+    }
+    guard snapshot.availability == .ready else {
+      return UsageRingState(progress: nil, color: color, disabled: false)
+    }
+    return UsageRingState(
+      progress: snapshot.urgentMetric(relativeTo: date)?.progress,
+      color: color,
+      disabled: false
+    )
   }
 
   private func providerColor(_ provider: UsageProviderKind) -> Color {
@@ -146,33 +186,45 @@ struct UsageStatusControl: View {
   }
 }
 
+private struct UsageRingState {
+  var progress: Double?
+  var color: Color
+  var disabled: Bool
+}
+
 private struct DualUsageDonutView: View {
-  var outerProgress: Double?
-  var innerProgress: Double?
-  var outerColor: Color
-  var innerColor: Color
+  var outerState: UsageRingState
+  var innerState: UsageRingState
 
   var body: some View {
     ZStack {
       Circle()
         .stroke(Color.secondary.opacity(0.25), lineWidth: 4)
         .frame(width: 22, height: 22)
-      if let outerProgress {
+      if outerState.disabled {
+        Circle()
+          .stroke(Color(nsColor: .quaternaryLabelColor), lineWidth: 4)
+          .frame(width: 22, height: 22)
+      } else if let outerProgress = outerState.progress {
         Circle()
           .trim(from: 0, to: CGFloat(max(0, min(outerProgress, 1))))
           .stroke(style: StrokeStyle(lineWidth: 5, lineCap: .round))
-          .foregroundStyle(outerColor)
+          .foregroundStyle(outerState.color)
           .rotationEffect(.degrees(-90))
           .frame(width: 22, height: 22)
       }
       Circle()
         .stroke(Color.secondary.opacity(0.2), lineWidth: 4)
         .frame(width: 10, height: 10)
-      if let innerProgress {
+      if innerState.disabled {
+        Circle()
+          .stroke(Color(nsColor: .quaternaryLabelColor), lineWidth: 4)
+          .frame(width: 10, height: 10)
+      } else if let innerProgress = innerState.progress {
         Circle()
           .trim(from: 0, to: CGFloat(max(0, min(innerProgress, 1))))
           .stroke(style: StrokeStyle(lineWidth: 4, lineCap: .round))
-          .foregroundStyle(innerColor)
+          .foregroundStyle(innerState.color)
           .rotationEffect(.degrees(-90))
           .frame(width: 10, height: 10)
       }
@@ -203,9 +255,7 @@ private struct UsageStatusPopover: View {
           if let snapshot = snapshots[provider] {
             UsageSnapshotView(
               referenceDate: referenceDate,
-              snapshot: snapshot,
-              provider: provider,
-              onRequestRefresh: onRequestRefresh
+              snapshot: snapshot
             )
           } else {
             Text("No usage data available")
@@ -260,8 +310,6 @@ private struct UsageStatusPopover: View {
 private struct UsageSnapshotView: View {
   var referenceDate: Date
   var snapshot: UsageProviderSnapshot
-  var provider: UsageProviderKind
-  var onRequestRefresh: (UsageProviderKind) -> Void
 
   @State private var showReauthAlert = false
 
@@ -273,7 +321,16 @@ private struct UsageSnapshotView: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
-      if snapshot.availability == .ready {
+      if snapshot.origin == .thirdParty {
+        VStack(alignment: .leading, spacing: 8) {
+          Text("Custom provider active")
+            .font(.headline)
+          Text("Usage data isn't available while a custom provider is selected. Switch Active Provider back to (Built-in) to restore usage.")
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+        }
+        .opacity(0.75)
+      } else if snapshot.availability == .ready {
         ForEach(snapshot.metrics.filter { $0.kind != .snapshot && $0.kind != .context }) { metric in
           let state = MetricDisplayState(metric: metric, referenceDate: referenceDate)
           UsageMetricRowView(metric: metric, state: state)

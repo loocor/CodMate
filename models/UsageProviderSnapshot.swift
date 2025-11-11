@@ -36,6 +36,11 @@ struct UsageMetricSnapshot: Identifiable, Equatable {
   fileprivate var priorityDate: Date? { resetDate }
 }
 
+enum UsageProviderOrigin: String, Equatable {
+  case builtin
+  case thirdParty
+}
+
 struct UsageProviderSnapshot: Identifiable, Equatable {
   enum Availability { case ready, empty, comingSoon }
 
@@ -47,6 +52,7 @@ struct UsageProviderSnapshot: Identifiable, Equatable {
   let updatedAt: Date?
   let statusMessage: String?
   let requiresReauth: Bool  // True when user needs to re-authenticate
+  let origin: UsageProviderOrigin
 
   init(
     provider: UsageProviderKind,
@@ -55,7 +61,8 @@ struct UsageProviderSnapshot: Identifiable, Equatable {
     metrics: [UsageMetricSnapshot],
     updatedAt: Date?,
     statusMessage: String? = nil,
-    requiresReauth: Bool = false
+    requiresReauth: Bool = false,
+    origin: UsageProviderOrigin = .builtin
   ) {
     self.provider = provider
     self.title = title
@@ -64,6 +71,7 @@ struct UsageProviderSnapshot: Identifiable, Equatable {
     self.updatedAt = updatedAt
     self.statusMessage = statusMessage
     self.requiresReauth = requiresReauth
+    self.origin = origin
   }
 
   func urgentMetric(relativeTo now: Date = Date()) -> UsageMetricSnapshot? {
@@ -100,7 +108,8 @@ struct UsageProviderSnapshot: Identifiable, Equatable {
       availability: .comingSoon,
       metrics: [],
       updatedAt: nil,
-      statusMessage: message
+      statusMessage: message,
+      origin: .builtin
     )
   }
 }

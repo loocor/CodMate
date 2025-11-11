@@ -136,7 +136,8 @@ extension CodexUsageStatus {
             availability: .ready,
             metrics: metrics,
             updatedAt: updatedAt,
-            statusMessage: nil
+            statusMessage: nil,
+            origin: .builtin
         )
     }
 

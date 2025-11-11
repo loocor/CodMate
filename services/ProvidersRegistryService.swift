@@ -208,6 +208,15 @@ actor ProvidersRegistryService {
         ap[consumer.rawValue] = providerId
         reg.bindings.activeProvider = ap
         try save(reg)
+        // Notify listeners (e.g., SessionListViewModel) so usage capsules update immediately
+        NotificationCenter.default.post(
+            name: .codMateActiveProviderChanged,
+            object: nil,
+            userInfo: [
+                "consumer": consumer.rawValue,
+                "providerId": providerId as Any
+            ]
+        )
     }
 
     func setDefaultModel(_ consumer: Consumer, modelId: String?) throws {
