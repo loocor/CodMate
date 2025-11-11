@@ -45,7 +45,7 @@ extension ContentView {
       ideal: isListHidden ? 0 : 420,
       max: isListHidden ? 0 : 480
     )
-    .allowsHitTesting(!isListHidden)
+    .allowsHitTesting(listAllowsHitTesting)
     .sheet(item: $viewModel.editingSession, onDismiss: { viewModel.cancelEdits() }) { _ in
       EditSessionMetaView(viewModel: viewModel)
     }
@@ -139,15 +139,83 @@ extension ContentView {
     .padding(.vertical, 2)
   }
 
+  @ViewBuilder
   private var searchToolbarButton: some View {
-    ToolbarCircleButton(
+    let button = ToolbarCircleButton(
       systemImage: "magnifyingglass",
-      isActive: globalSearchViewModel.shouldShowPanel,
+      isActive: searchPanelIsActive,
       activeColor: Color.primary.opacity(0.8),
       help: "Open global search (⌘F)"
     ) {
-      focusGlobalSearchPanel()
+      // In popover mode, just toggle the binding; let the binding setter handle side effects
+      if preferences.searchPanelStyle == .popover {
+        isSearchPopoverPresented.toggle()
+      } else {
+        focusGlobalSearchPanel()
+      }
     }
+
+    if preferences.searchPanelStyle == .popover {
+      button.popover(isPresented: searchPopoverBinding, arrowEdge: .top) {
+        GlobalSearchPopoverPanel(
+          viewModel: globalSearchViewModel,
+          size: $searchPopoverSize,
+          minSize: ContentView.searchPopoverMinSize,
+          maxSize: ContentView.searchPopoverMaxSize,
+          onSelect: { handleGlobalSearchSelection($0) },
+          onClose: { dismissGlobalSearchPanel() }
+        )
+      }
+    } else {
+      button
+    }
+  }
+
+  private var searchPopoverBinding: Binding<Bool> {
+    Binding(
+      get: { isSearchPopoverPresented },
+      set: { isPresented in
+        // Update state
+        isSearchPopoverPresented = isPresented
+
+        if isPresented {
+          // Opening popover: prepare the panel
+          clampSearchPopoverSizeIfNeeded()
+          // Send notifications to block other focus targets
+          NotificationCenter.default.post(name: .codMateResignQuickSearch, object: nil)
+          NotificationCenter.default.post(
+            name: .codMateQuickSearchFocusBlocked,
+            object: nil,
+            userInfo: ["active": true]
+          )
+          // Set focus on the search field
+          globalSearchViewModel.setFocus(true)
+        } else {
+          // Closing popover: clean up
+          globalSearchViewModel.dismissPanel()
+          NotificationCenter.default.post(
+            name: .codMateQuickSearchFocusBlocked,
+            object: nil,
+            userInfo: ["active": false]
+          )
+        }
+      }
+    )
+  }
+
+  private var searchPanelIsActive: Bool {
+    if preferences.searchPanelStyle == .popover {
+      return isSearchPopoverPresented
+    }
+    return globalSearchViewModel.shouldShowPanel
+  }
+
+  private var listAllowsHitTesting: Bool {
+    guard !isListHidden else { return false }
+    if preferences.searchPanelStyle == .popover && isSearchPopoverPresented {
+      return false
+    }
+    return true
   }
 }
 

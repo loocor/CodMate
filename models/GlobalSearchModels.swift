@@ -227,6 +227,20 @@ enum GlobalSearchFilter: Hashable, CaseIterable, Identifiable {
   }
 }
 
+enum GlobalSearchPanelStyle: String, CaseIterable, Identifiable, Sendable {
+  case floating
+  case popover
+
+  var id: String { rawValue }
+
+  var title: String {
+    switch self {
+    case .floating: return "Floating"
+    case .popover: return "Popover"
+    }
+  }
+}
+
 extension GlobalSearchFilter {
   var kind: GlobalSearchResultKind? {
     switch self {

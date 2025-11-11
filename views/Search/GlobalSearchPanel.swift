@@ -5,14 +5,15 @@ struct GlobalSearchPanel: View {
   let maxWidth: CGFloat
   let onSelect: (GlobalSearchResult) -> Void
   let onClose: () -> Void
+  var contentHeight: CGFloat? = nil
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 12) {
-      header
-      controls
-      content
-      progressRow
-    }
+    GlobalSearchPanelContent(
+      viewModel: viewModel,
+      onSelect: onSelect,
+      onClose: onClose,
+      contentHeight: contentHeight
+    )
     .padding(16)
     .frame(maxWidth: maxWidth)
     .background(
@@ -24,27 +25,58 @@ struct GlobalSearchPanel: View {
         .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
     )
     .shadow(color: Color.black.opacity(0.2), radius: 22, x: 0, y: 18)
+  }
+}
+
+struct GlobalSearchPopoverPanel: View {
+  @ObservedObject var viewModel: GlobalSearchViewModel
+  @Binding var size: CGSize
+  let minSize: CGSize
+  let maxSize: CGSize
+  let onSelect: (GlobalSearchResult) -> Void
+  let onClose: () -> Void
+
+  var body: some View {
+    GlobalSearchPanelContent(
+      viewModel: viewModel,
+      onSelect: onSelect,
+      onClose: onClose,
+      contentHeight: size.height
+    )
+    .padding(16)
+    .frame(width: size.width)
     .overlay(alignment: .topTrailing) {
-      Button(action: { viewModel.submit() }) {
-        EmptyView()
-      }
-      .keyboardShortcut(.return, modifiers: [])
-      .opacity(0)
-      .frame(width: 0, height: 0)
-      .allowsHitTesting(false)
+      GlobalSearchSubmitProxy(viewModel: viewModel)
+    }
+    .overlay(alignment: .bottomLeading) {
+      PopoverResizeHandle(
+        size: $size,
+        minSize: minSize,
+        maxSize: maxSize,
+        expandFromLeadingEdge: true
+      )
+    }
+  }
+}
+
+private struct GlobalSearchPanelContent: View {
+  @ObservedObject var viewModel: GlobalSearchViewModel
+  let onSelect: (GlobalSearchResult) -> Void
+  let onClose: () -> Void
+  var contentHeight: CGFloat? = nil
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 12) {
+      header
+      controls
+      content
+      progressRow
     }
   }
 
   private var header: some View {
-    HStack(spacing: 10) {
-      Text("Global Search")
-        .font(.system(size: 14, weight: .semibold))
-      Spacer()
-    }
-  }
-
-  private var controls: some View {
-    HStack(spacing: 12) {
+    HStack {
+      Spacer(minLength: 0)
       Picker("Scope", selection: $viewModel.filter) {
         ForEach(GlobalSearchFilter.allCases, id: \.self) { filter in
           Text(filter.title).tag(filter)
@@ -53,8 +85,14 @@ struct GlobalSearchPanel: View {
       .labelsHidden()
       .pickerStyle(.segmented)
       .controlSize(.large)
-      .frame(minHeight: 36)
-      Spacer(minLength: 8)
+      .frame(minWidth: 320, maxWidth: 860)
+      Spacer(minLength: 0)
+    }
+  }
+
+  private var controls: some View {
+    HStack {
+      Spacer(minLength: 0)
       ToolbarSearchField(
         placeholder: "Type to search",
         text: $viewModel.query,
@@ -63,8 +101,10 @@ struct GlobalSearchPanel: View {
         autofocus: viewModel.hasFocus,
         onCancel: onClose
       )
-      .frame(minWidth: 220, minHeight: 36)
+      .frame(minWidth: 320, maxWidth: 860, minHeight: 36)
+      Spacer(minLength: 0)
     }
+    .frame(maxWidth: .infinity)
   }
 
   @ViewBuilder
@@ -82,7 +122,6 @@ struct GlobalSearchPanel: View {
         Text(summary)
           .font(.system(size: 10))
           .foregroundStyle(.secondary)
-        Spacer()
         if !progress.isFinished {
           Button("Cancel") {
             viewModel.cancelBackgroundSearch()
@@ -92,6 +131,7 @@ struct GlobalSearchPanel: View {
         }
       }
       .padding(.vertical, 2)
+      .frame(maxWidth: .infinity, alignment: .trailing)
     }
   }
 
@@ -124,7 +164,7 @@ struct GlobalSearchPanel: View {
           }
         }
       }
-      .frame(height: isEmpty ? 150 : 320)
+      .frame(height: max(contentHeight ?? CGFloat(isEmpty ? 150 : 320), 150))
       .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
       .overlay {
         if isEmpty {
@@ -226,5 +266,62 @@ struct GlobalSearchPanel: View {
 
   private func clean(_ text: String) -> String {
     text.sanitizedSnippetText()
+  }
+}
+
+private struct GlobalSearchSubmitProxy: View {
+  @ObservedObject var viewModel: GlobalSearchViewModel
+
+  var body: some View {
+    Button(action: { viewModel.submit() }) {
+      EmptyView()
+    }
+    .keyboardShortcut(.return, modifiers: [])
+    .opacity(0)
+    .frame(width: 0, height: 0)
+    .allowsHitTesting(false)
+  }
+}
+
+private struct PopoverResizeHandle: View {
+  @Binding var size: CGSize
+  let minSize: CGSize
+  let maxSize: CGSize
+  @State private var dragOrigin: CGSize?
+  var expandFromLeadingEdge = false
+
+  var body: some View {
+    Image(systemName: iconName)
+      .font(.system(size: 10, weight: .semibold))
+      .foregroundStyle(.secondary)
+      .padding(8)
+      .gesture(
+        DragGesture(minimumDistance: 0)
+          .onChanged { value in
+            let origin = dragOrigin ?? size
+            if dragOrigin == nil { dragOrigin = size }
+            let deltaWidth = expandFromLeadingEdge ? -value.translation.width : value.translation.width
+            let proposed = CGSize(
+              width: origin.width + deltaWidth,
+              height: origin.height + value.translation.height
+            )
+            size = CGSize(
+              width: clamp(proposed.width, min: minSize.width, max: maxSize.width),
+              height: clamp(proposed.height, min: minSize.height, max: maxSize.height)
+            )
+          }
+          .onEnded { _ in
+            dragOrigin = nil
+          }
+      )
+      .accessibilityLabel("Resize search popover")
+  }
+
+  private var iconName: String {
+    expandFromLeadingEdge ? "arrow.up.right.and.arrow.down.left" : "arrow.up.left.and.arrow.down.right"
+  }
+
+  private func clamp(_ value: CGFloat, min: CGFloat, max: CGFloat) -> CGFloat {
+    Swift.min(Swift.max(value, min), max)
   }
 }

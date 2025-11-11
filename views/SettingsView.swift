@@ -211,6 +211,40 @@ struct SettingsView: View {
         }
 
         VStack(alignment: .leading, spacing: 10) {
+          Text("Search").font(.headline).fontWeight(.semibold)
+          settingsCard {
+            Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 10) {
+              GridRow {
+                VStack(alignment: .leading, spacing: 2) {
+                  Label("Global search panel", systemImage: "magnifyingglass")
+                    .font(.subheadline).fontWeight(.medium)
+                  Text("Choose how the ⌘F panel appears")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                }
+                Picker("Search panel style", selection: $preferences.searchPanelStyle) {
+                  ForEach(GlobalSearchPanelStyle.allCases) { style in
+                    Text(style.title).tag(style)
+                  }
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+                .padding(2)
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay(
+                  RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(Color.secondary.opacity(0.12), lineWidth: 1)
+                )
+                .frame(maxWidth: .infinity, alignment: .trailing)
+                .gridColumnAlignment(.trailing)
+                .gridCellAnchor(.trailing)
+              }
+            }
+          }
+        }
+
+        VStack(alignment: .leading, spacing: 10) {
           Text("Timeline & Markdown").font(.headline).fontWeight(.semibold)
           settingsCard {
             visibilitySection(

@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 
 struct ContentView: View {
   @ObservedObject var viewModel: SessionListViewModel
+  @ObservedObject var preferences: SessionPreferencesStore
   @StateObject var permissionsManager = SandboxPermissionsManager.shared
   @Environment(\.colorScheme) var colorScheme
   @Environment(\.openWindow) var openWindow
@@ -51,6 +52,11 @@ struct ContentView: View {
   @State var selectedUsageProvider: UsageProviderKind = .codex
   @State var pendingSelectionID: String? = nil
   @State var pendingConversationFilter: (id: String, term: String)? = nil
+  @State var isSearchPopoverPresented = false
+  @State var searchPopoverSize: CGSize = ContentView.defaultSearchPopoverSize
+  static let defaultSearchPopoverSize = CGSize(width: 440, height: 320)
+  static let searchPopoverMinSize = CGSize(width: 380, height: 220)
+  static let searchPopoverMaxSize = CGSize(width: 640, height: 520)
   struct SourcedPrompt: Identifiable, Hashable {
     let id = UUID()
     enum Source: Hashable { case project, user, builtin }
@@ -151,6 +157,7 @@ struct ContentView: View {
 
   init(viewModel: SessionListViewModel) {
     self.viewModel = viewModel
+    _preferences = ObservedObject(wrappedValue: viewModel.preferences)
     _globalSearchViewModel = StateObject(
       wrappedValue: GlobalSearchViewModel(
         preferences: viewModel.preferences,

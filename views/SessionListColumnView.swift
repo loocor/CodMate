@@ -353,6 +353,7 @@ private struct SearchField: NSViewRepresentable {
         win.makeFirstResponder(nil)
       }
     }
+    context.coordinator.configure(field: field)
     return field
   }
 
@@ -365,7 +366,50 @@ private struct SearchField: NSViewRepresentable {
 
   class Coordinator: NSObject, NSSearchFieldDelegate {
     var parent: SearchField
+    weak var field: NSSearchField?
+    private var observers: [NSObjectProtocol] = []
+    private var isFocusBlocked = false
     init(_ parent: SearchField) { self.parent = parent }
+
+    deinit {
+      for observer in observers {
+        NotificationCenter.default.removeObserver(observer)
+      }
+    }
+
+    func configure(field: NSSearchField) {
+      self.field = field
+      field.refusesFirstResponder = isFocusBlocked
+      if observers.isEmpty {
+        let center = NotificationCenter.default
+        let resign = center.addObserver(
+          forName: .codMateResignQuickSearch,
+          object: nil,
+          queue: .main
+        ) { [weak self] _ in self?.resignIfNeeded() }
+        let block = center.addObserver(
+          forName: .codMateQuickSearchFocusBlocked,
+          object: nil,
+          queue: .main
+        ) { [weak self] note in self?.handleFocusBlocked(note: note) }
+        observers.append(contentsOf: [resign, block])
+      }
+    }
+
+    private func resignIfNeeded() {
+      guard let field, let window = field.window else { return }
+      if window.firstResponder === field || window.firstResponder === field.currentEditor() {
+        window.makeFirstResponder(nil)
+      }
+    }
+
+    @MainActor
+    private func handleFocusBlocked(note: Notification) {
+      let active = (note.userInfo?["active"] as? Bool) ?? false
+      isFocusBlocked = active
+      field?.refusesFirstResponder = active
+      if active { resignIfNeeded() }
+    }
 
     @MainActor
     func controlTextDidChange(_ notification: Notification) {

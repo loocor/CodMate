@@ -1,15 +1,18 @@
 import SwiftUI
+#if os(macOS)
+  import AppKit
+#endif
 
 extension ContentView {
   func applyGlobalSearchOverlay<V: View>(to view: V, geometry: GeometryProxy) -> some View {
     view.overlay(alignment: .top) {
-      if globalSearchViewModel.shouldShowPanel {
+      if preferences.searchPanelStyle == .floating && globalSearchViewModel.shouldShowPanel {
         let panelWidth = max(360, min(geometry.size.width * 0.55, 640))
         GlobalSearchPanel(
           viewModel: globalSearchViewModel,
           maxWidth: panelWidth,
           onSelect: { handleGlobalSearchSelection($0) },
-          onClose: { globalSearchViewModel.dismissPanel() }
+          onClose: { dismissGlobalSearchPanel() }
         )
         .frame(maxWidth: .infinity)
         .padding(.top, 24)
@@ -21,11 +24,46 @@ extension ContentView {
   }
 
   func focusGlobalSearchPanel() {
+    if preferences.searchPanelStyle == .popover {
+      // In popover mode, just open the popover; binding setter handles the rest
+      if !isSearchPopoverPresented {
+        isSearchPopoverPresented = true
+      }
+      return
+    }
+
+    // Floating mode: handle focus and notifications directly
+    releasePrimaryFirstResponder()
+    NotificationCenter.default.post(name: .codMateResignQuickSearch, object: nil)
+    NotificationCenter.default.post(
+      name: .codMateQuickSearchFocusBlocked,
+      object: nil,
+      userInfo: ["active": true]
+    )
     globalSearchViewModel.setFocus(true)
   }
 
+  func dismissGlobalSearchPanel() {
+    // In popover mode, state is managed by binding
+    if preferences.searchPanelStyle == .popover {
+      // Just close the popover; the binding setter will handle cleanup
+      if isSearchPopoverPresented {
+        isSearchPopoverPresented = false
+      }
+      return
+    }
+
+    // Floating mode: handle cleanup directly
+    globalSearchViewModel.dismissPanel()
+    NotificationCenter.default.post(
+      name: .codMateQuickSearchFocusBlocked,
+      object: nil,
+      userInfo: ["active": false]
+    )
+  }
+
   func handleGlobalSearchSelection(_ result: GlobalSearchResult) {
-    defer { globalSearchViewModel.dismissPanel() }
+    defer { dismissGlobalSearchPanel() }
     let trimmedTerm = globalSearchViewModel.query.trimmingCharacters(in: .whitespacesAndNewlines)
     switch result.kind {
     case .project:
@@ -118,5 +156,29 @@ extension ContentView {
       notifyConversationFilter(sessionId: filter.id, term: filter.term)
       pendingConversationFilter = nil
     }
+  }
+
+  func clampSearchPopoverSizeIfNeeded() {
+    let clamped = clampedSearchPopoverSize(searchPopoverSize)
+    if abs(clamped.width - searchPopoverSize.width) > .ulpOfOne
+      || abs(clamped.height - searchPopoverSize.height) > .ulpOfOne
+    {
+      searchPopoverSize = clamped
+    }
+  }
+
+  func clampedSearchPopoverSize(_ size: CGSize) -> CGSize {
+    CGSize(
+      width: min(max(size.width, ContentView.searchPopoverMinSize.width), ContentView.searchPopoverMaxSize.width),
+      height: min(max(size.height, ContentView.searchPopoverMinSize.height), ContentView.searchPopoverMaxSize.height)
+    )
+  }
+
+  private func releasePrimaryFirstResponder() {
+    #if os(macOS)
+      if let window = NSApplication.shared.keyWindow {
+        window.makeFirstResponder(nil)
+      }
+    #endif
   }
 }

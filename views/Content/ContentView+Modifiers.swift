@@ -24,6 +24,9 @@ extension ContentView {
     let viewWithNotifications = applyNotificationModifiers(to: viewWithTasks)
     let viewWithDialogs = applyDialogsAndAlerts(to: viewWithNotifications)
     return applyGlobalSearchOverlay(to: viewWithDialogs, geometry: geometry)
+      .onChange(of: preferences.searchPanelStyle) { _, newStyle in
+        handleSearchPanelStyleChange(newStyle)
+      }
   }
 
   func applyTaskAndChangeModifiers<V: View>(to view: V) -> some View {
@@ -137,5 +140,19 @@ extension ContentView {
       ) { result in
         handleFolderSelection(result: result, update: viewModel.updateSessionsRoot)
       }
+  }
+
+  private func handleSearchPanelStyleChange(_ newStyle: GlobalSearchPanelStyle) {
+    switch newStyle {
+    case .popover:
+      clampSearchPopoverSizeIfNeeded()
+      if globalSearchViewModel.shouldShowPanel {
+        isSearchPopoverPresented = true
+      }
+    case .floating:
+      if isSearchPopoverPresented {
+        isSearchPopoverPresented = false
+      }
+    }
   }
 }

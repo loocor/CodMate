@@ -36,6 +36,7 @@ final class SessionPreferencesStore: ObservableObject {
     static let autoAssignNewToSameProject = "codex.projects.autoAssignNewToSame"
     static let timelineVisibleKinds = "codex.timeline.visibleKinds"
     static let markdownVisibleKinds = "codex.markdown.visibleKinds"
+    static let searchPanelStyle = "codmate.search.panelStyle"
     // Claude advanced
     static let claudeDebug = "claude.debug"
     static let claudeDebugFilter = "claude.debug.filter"
@@ -210,6 +211,13 @@ final class SessionPreferencesStore: ObservableObject {
     } else {
       self.markdownVisibleKinds = MessageVisibilityKind.markdownDefault
     }
+    if let storedStyle = defaults.string(forKey: Keys.searchPanelStyle),
+      let style = GlobalSearchPanelStyle(rawValue: storedStyle)
+    {
+      self.searchPanelStyle = style
+    } else {
+      self.searchPanelStyle = .floating
+    }
     // Claude advanced defaults
     self.claudeDebug = defaults.object(forKey: Keys.claudeDebug) as? Bool ?? false
     self.claudeDebugFilter = defaults.string(forKey: Keys.claudeDebugFilter) ?? ""
@@ -364,6 +372,10 @@ final class SessionPreferencesStore: ObservableObject {
       defaults.set(
         Array(markdownVisibleKinds.map { $0.rawValue }), forKey: Keys.markdownVisibleKinds)
     }
+  }
+
+  @Published var searchPanelStyle: GlobalSearchPanelStyle {
+    didSet { defaults.set(searchPanelStyle.rawValue, forKey: Keys.searchPanelStyle) }
   }
 
   var resumeOptions: ResumeOptions {
