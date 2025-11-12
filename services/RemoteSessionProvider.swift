@@ -79,20 +79,30 @@ actor RemoteSessionProvider {
             case .codex:
                 let enumerator = fileManager.enumerator(
                     at: outcome.localRoot,
-                    includingPropertiesForKeys: [.isRegularFileKey],
+                    includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey],
                     options: [.skipsHiddenFiles, .skipsPackageDescendants]
                 )
                 while let url = enumerator?.nextObject() as? URL {
-                    if url.pathExtension.lowercased() == "jsonl" { total += 1 }
+                    guard url.pathExtension.lowercased() == "jsonl" else { continue }
+                    let name = url.deletingPathExtension().lastPathComponent
+                    if name.hasPrefix("agent-") { continue }
+                    if let values = try? url.resourceValues(forKeys: [.fileSizeKey]),
+                       let s = values.fileSize, s == 0 { continue }
+                    total += 1
                 }
             case .claude:
                 let enumerator = fileManager.enumerator(
                     at: outcome.localRoot,
-                    includingPropertiesForKeys: [.isRegularFileKey],
+                    includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey],
                     options: [.skipsHiddenFiles, .skipsPackageDescendants]
                 )
                 while let url = enumerator?.nextObject() as? URL {
-                    if url.pathExtension.lowercased() == "jsonl" { total += 1 }
+                    guard url.pathExtension.lowercased() == "jsonl" else { continue }
+                    let name = url.deletingPathExtension().lastPathComponent
+                    if name.hasPrefix("agent-") { continue }
+                    if let values = try? url.resourceValues(forKeys: [.fileSizeKey]),
+                       let s = values.fileSize, s == 0 { continue }
+                    total += 1
                 }
             }
         }

@@ -1872,7 +1872,9 @@ final class SessionListViewModel: ObservableObject {
         allSessions = Array(map.values)
         rebuildCanonicalCwdCache()
         scheduleApplyFilters()
-        globalSessionCount = allSessions.count
+        // Keep global total based on full scan (Codex + Claude [+ Remote]),
+        // not on currently loaded subset. Recompute asynchronously.
+        Task { await self.refreshGlobalCount() }
     }
 
     private func dayOfToday() -> Date { Calendar.current.startOfDay(for: Date()) }
@@ -1941,10 +1943,28 @@ extension SessionListViewModel {
     }
 
     func refreshGlobalCount() async {
-        async let codex = indexer.countAllSessions(root: preferences.sessionsRoot)
-        async let claude = claudeProvider.countAllSessions()
+        // Prefer content-aware counting for local sources to avoid regressions:
+        // - Codex: fast summary build across all files (dedup by session id)
+        // - Claude: provider returns deduped summaries
+        // - Remote: keep lightweight enumerator-based counts for performance
+        async let codexSummariesResult: [SessionSummary]? = {
+            do {
+                return try await indexer.refreshSessions(
+                    root: preferences.sessionsRoot, scope: .all)
+            } catch {
+                return nil
+            }
+        }()
+        async let claudeSummaries: [SessionSummary] = claudeProvider.sessions(scope: .all)
+
+        var idSet = Set<String>()
+        if let codexSummaries = await codexSummariesResult {
+            for s in codexSummaries { idSet.insert(s.id) }
+        }
+        for s in await claudeSummaries { idSet.insert(s.id) }
+
+        var total = idSet.count
         let enabledHosts = preferences.enabledRemoteHosts
-        var total = await codex + claude
         if !enabledHosts.isEmpty {
             total += await remoteProvider.countSessions(kind: .codex, enabledHosts: enabledHosts)
             total += await remoteProvider.countSessions(kind: .claude, enabledHosts: enabledHosts)

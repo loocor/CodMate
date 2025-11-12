@@ -75,7 +75,6 @@ struct SessionListColumnView: View {
   }
 
   private var emptyStateView: some View {
-    let selected = selectedProject()
     return VStack(spacing: 12) {
           Spacer(minLength: 12)
           ContentUnavailableView(
