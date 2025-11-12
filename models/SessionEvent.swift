@@ -207,7 +207,7 @@ struct SessionSummaryBuilder {
     private(set) var eventCount: Int = 0
     private(set) var lineCount: Int = 0
     private(set) var fileSizeBytes: UInt64?
-    private(set) var source: SessionSource = .codex
+    private(set) var source: SessionSource = .codexLocal
 
     var hasEssentialMetadata: Bool {
         id != nil && startedAt != nil && cliVersion != nil && cwd != nil
@@ -313,7 +313,8 @@ struct SessionSummaryBuilder {
             eventCount: eventCount,
             lineCount: lineCount,
             lastUpdatedAt: lastUpdatedAt,
-            source: source
+            source: source,
+            remotePath: nil
         )
     }
 }

@@ -117,7 +117,7 @@ extension ContentView {
         let loader = SessionTimelineLoader()
         // Claude Code sessions use a different on-disk format; parse via ClaudeSessionParser
         let allTurns: [ConversationTurn] = {
-            if session.source == .claude {
+        if session.source.baseKind == .claude {
                 if let parsed = ClaudeSessionParser().parse(at: session.fileURL) {
                     return loader.turns(from: parsed.rows)
                 }
@@ -139,7 +139,7 @@ extension ContentView {
         // Fallback: if Claude session produced non-empty turns but all filtered out by current preferences,
         // relax filter to include assistant messages to avoid empty exports.
         let finalTurns: [ConversationTurn]
-        if turns.isEmpty, session.source == .claude, !allTurns.isEmpty {
+        if turns.isEmpty, session.source.baseKind == .claude, !allTurns.isEmpty {
             let relaxed: Set<MessageVisibilityKind> = [.user, .assistant]
             finalTurns = allTurns.compactMap { turn in
                 let userAllowed = turn.userMessage.flatMap { relaxed.contains(event: $0) } ?? false

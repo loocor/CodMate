@@ -9,7 +9,10 @@ struct SettingsView: View {
   @StateObject private var codexVM = CodexVM()
   @StateObject private var claudeVM = ClaudeCodeVM()
   @EnvironmentObject private var viewModel: SessionListViewModel
+    @ObservedObject private var permissionsManager = SandboxPermissionsManager.shared
   @State private var showLicensesSheet = false
+    @State private var availableRemoteHosts: [SSHHost] = []
+    @State private var isRequestingSSHAccess = false
 
   init(preferences: SessionPreferencesStore, selection: Binding<SettingCategory>) {
     self._preferences = ObservedObject(wrappedValue: preferences)
@@ -125,6 +128,8 @@ struct SettingsView: View {
       ProvidersSettingsView()
     case .codex:
       codexSettings
+    case .remoteHosts:
+      remoteHostsSettings
     case .gitReview:
       gitReviewSettings
     case .claudeCode:
@@ -799,8 +804,250 @@ struct SettingsView: View {
       .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
       .padding(.top, 24)
       .padding(.horizontal, 24)
-      .padding(.bottom, 24)
+      .padding(.bottom,24)
+    }
+
+    private var remoteHostsSettings: some View {
+        settingsScroll {
+            VStack(alignment: .leading, spacing: 20) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Remote Hosts")
+                        .font(.title2)
+                        .fontWeight(.bold)
+                    Text("Choose which SSH hosts CodMate should mirror for remote Codex/Claude sessions.")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
+
+                let sshPermissionGranted = permissionsManager.hasPermission(for: .sshConfig)
+
+                HStack(alignment: .firstTextBaseline) {
+                    Spacer(minLength: 8)
+                    HStack(spacing: 10) {
+                        Button(role: .none) {
+                            DispatchQueue.main.async {
+                                preferences.enabledRemoteHosts = []
+                            }
+                        } label: {
+                            Text("Clear All")
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(preferences.enabledRemoteHosts.isEmpty)
+                        Button {
+                            Task { await viewModel.syncRemoteHosts(force: true, refreshAfter: true) }
+                        } label: {
+                            Label("Sync Hosts", systemImage: "arrow.triangle.2.circlepath")
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(preferences.enabledRemoteHosts.isEmpty)
+                        Button {
+                            reloadRemoteHosts()
+                        } label: {
+                            Label("Refresh", systemImage: "arrow.clockwise")
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(!sshPermissionGranted)
+                    }
+                }
+
+                if !sshPermissionGranted {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label("Grant Access to ~/.ssh", systemImage: "lock.square")
+                            .font(.headline)
+                        Text("CodMate needs permission to read ~/.ssh/config before it can list your SSH hosts. Grant access once and the app will remember it for future launches.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Button {
+                            guard !isRequestingSSHAccess else { return }
+                            isRequestingSSHAccess = true
+                            Task {
+                                let granted = await permissionsManager.requestPermission(for: .sshConfig)
+                                await MainActor.run {
+                                    isRequestingSSHAccess = false
+                                    if granted { reloadRemoteHosts() }
+                                }
+                            }
+                        } label: {
+                            HStack(spacing: 6) {
+                                if isRequestingSSHAccess {
+                                    ProgressView()
+                                        .controlSize(.small)
+                                }
+                                Text(isRequestingSSHAccess ? "Requesting…" : "Grant Access")
+                            }
+                            .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+                    .padding()
+                    .background(Color(nsColor: .separatorColor).opacity(0.2))
+                    .cornerRadius(10)
+                }
+
+                let hosts = sshPermissionGranted ? availableRemoteHosts : []
+                if sshPermissionGranted {
+                    if hosts.isEmpty {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("No SSH hosts were found in ~/.ssh/config.")
+                                .font(.body)
+                                .foregroundColor(.secondary)
+                            Text("Add host aliases to your SSH config, then refresh to enable remote session mirroring.")
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
+                        }
+                        .padding(.vertical, 12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    } else {
+                    VStack(alignment: .leading, spacing: 10) {
+                        ForEach(hosts, id: \.alias) { host in
+                            VStack(alignment: .leading, spacing: 2) {
+                                Toggle(isOn: bindingForRemoteHost(alias: host.alias)) {
+                                    Text(host.alias)
+                                        .font(.body)
+                                        .fontWeight(.medium)
+                                }
+                                .toggleStyle(.switch)
+                                let (statusText, statusColor) = syncStatusDescription(for: host.alias)
+                                Text(statusText)
+                                    .font(.caption2)
+                                    .foregroundColor(statusColor)
+                            }
+                        }
+                    }
+                    .padding(.vertical, 4)
   }
+                } else {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Grant access above to inspect ~/.ssh/config.")
+                            .font(.body)
+                            .foregroundColor(.secondary)
+                        Text("CodMate cannot mirror remote sessions until it can read your SSH config.")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
+                    .padding(.vertical, 12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                let hostAliases = Set(hosts.map { $0.alias })
+                let dangling = preferences.enabledRemoteHosts.subtracting(hostAliases)
+                if sshPermissionGranted && !dangling.isEmpty {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Unavailable Hosts")
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                        Text("The following host aliases are enabled but not present in your current SSH config:")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        ForEach(Array(dangling).sorted(), id: \.self) { alias in
+                            Text("• \(alias)")
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                    .padding(.vertical, 6)
+                }
+
+                Text("CodMate mirrors only the hosts you enable. Hosts that prompt for passwords will open interactively when needed.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .onAppear {
+                if permissionsManager.hasPermission(for: .sshConfig) && availableRemoteHosts.isEmpty {
+                    DispatchQueue.main.async { reloadRemoteHosts() }
+                }
+            }
+            .onChange(of: permissionsManager.hasPermission(for: .sshConfig)) { _, granted in
+                if granted {
+                    reloadRemoteHosts()
+                } else {
+                    availableRemoteHosts = []
+                }
+            }
+        }
+    }
+
+    @MainActor
+    private func reloadRemoteHosts() {
+        guard permissionsManager.hasPermission(for: .sshConfig) else {
+            availableRemoteHosts = []
+            return
+        }
+        let resolver = SSHConfigResolver()
+        let hosts = resolver.resolvedHosts().sorted { $0.alias.lowercased() < $1.alias.lowercased() }
+        availableRemoteHosts = hosts
+        let hostAliases = Set(hosts.map { $0.alias })
+        let filtered = preferences.enabledRemoteHosts.filter { hostAliases.contains($0) }
+        if filtered.count != preferences.enabledRemoteHosts.count {
+            DispatchQueue.main.async {
+                preferences.enabledRemoteHosts = Set(filtered)
+            }
+        }
+    }
+
+    private func bindingForRemoteHost(alias: String) -> Binding<Bool> {
+        Binding(
+            get: { preferences.enabledRemoteHosts.contains(alias) },
+            set: { isOn in
+                DispatchQueue.main.async {
+                    var hosts = preferences.enabledRemoteHosts
+                    if isOn {
+                        hosts.insert(alias)
+                    } else {
+                        hosts.remove(alias)
+                    }
+                    preferences.enabledRemoteHosts = hosts
+                }
+            }
+        )
+    }
+
+    private static let relativeFormatter: RelativeDateTimeFormatter = {
+        let f = RelativeDateTimeFormatter()
+        f.unitsStyle = .full
+        return f
+    }()
+
+    private func syncStatusDescription(for alias: String) -> (String, Color) {
+        guard let state = viewModel.remoteSyncStates[alias] else {
+            return ("Not synced yet", .secondary)
+        }
+        switch state {
+        case .idle:
+            return ("Not synced yet", .secondary)
+        case .syncing:
+            return ("Syncing…", .secondary)
+        case .succeeded(let date):
+            let relative = Self.relativeFormatter.localizedString(for: date, relativeTo: Date())
+            return ("Last synced \(relative)", .secondary)
+        case .failed(let date, let message):
+            let relative = Self.relativeFormatter.localizedString(for: date, relativeTo: Date())
+            let detail = Self.syncFailureDetail(from: message)
+            if detail.isEmpty {
+                return ("Sync failed \(relative)", .red)
+            }
+            return ("Sync failed \(relative): \(detail)", .red)
+        }
+    }
+
+    private static func syncFailureDetail(from rawMessage: String) -> String {
+        let firstLine = rawMessage
+            .split(whereSeparator: \.isNewline)
+            .first
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) } ?? ""
+        guard !firstLine.isEmpty else { return "" }
+
+        let prefix = "sync failed"
+        if firstLine.lowercased().hasPrefix(prefix) {
+            var separators = CharacterSet.whitespacesAndNewlines
+            separators.insert(charactersIn: ":-–—")
+            let remainder = firstLine.dropFirst(prefix.count)
+            let sanitized = String(remainder).trimmingCharacters(in: separators)
+            return sanitized
+        }
+        return firstLine
+    }
+
 
   private func selectProjectsRoot() {
     let panel = NSOpenPanel()

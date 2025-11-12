@@ -226,7 +226,7 @@ struct ClaudeSessionParser {
         lastTimestamp: Date?
     ) -> SessionSummary? {
         var builder = SessionSummaryBuilder()
-        builder.setSource(.claude)
+        builder.setSource(.claudeLocal)
         builder.setFileSize(fileSize)
 
         builder.observe(metaRow)

@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import Foundation
 #if canImport(Darwin)
 import Darwin
@@ -73,6 +74,7 @@ final class SessionListViewModel: ObservableObject {
     @Published var sidebarMonthStart: Date = SessionListViewModel.normalizeMonthStart(Date())
 
     let preferences: SessionPreferencesStore
+    private var sessionsRoot: URL { preferences.sessionsRoot }
 
     private let indexer: SessionIndexer
     let actions: SessionActions
@@ -181,6 +183,7 @@ final class SessionListViewModel: ObservableObject {
     private var claudeUsageTask: Task<Void, Never>?
     private var pathTreeRefreshTask: Task<Void, Never>?
     private var calendarRefreshTasks: [String: Task<Void, Never>] = [:]
+    private var cancellables = Set<AnyCancellable>()
     private let pathTreeStore = PathTreeStore()
     private var lastPathCounts: [String: Int] = [:]
     private let sidebarStatsDebounceNanoseconds: UInt64 = 150_000_000
@@ -245,6 +248,7 @@ final class SessionListViewModel: ObservableObject {
     let claudeProvider = ClaudeSessionProvider()
     private let claudeUsageClient = ClaudeUsageAPIClient()
     private let providersRegistry = ProvidersRegistryService()
+    let remoteProvider = RemoteSessionProvider()
     @Published var projects: [Project] = []
     var projectCounts: [String: Int] = [:]
     var projectMemberships: [String: String] = [:]
@@ -259,6 +263,7 @@ final class SessionListViewModel: ObservableObject {
     }
     // Sidebar → Project-level New request when using embedded terminal
     @Published var pendingEmbeddedProjectNew: Project? = nil
+    @Published var remoteSyncStates: [String: RemoteSyncState] = [:]
 
     private func pruneDayCache() {
         guard !sessionDayCache.isEmpty else { return }
@@ -441,6 +446,7 @@ final class SessionListViewModel: ObservableObject {
         configureDirectoryMonitor()
         configureClaudeDirectoryMonitor()
         Task { await loadProjects() }
+        Task { await self.performInitialRemoteSyncIfNeeded() }
         // Observe agent completion notifications to surface in list
         NotificationCenter.default.addObserver(
             forName: .codMateAgentCompleted,
@@ -479,6 +485,16 @@ final class SessionListViewModel: ObservableObject {
         }
         startActivityPruneTicker()
         startIntentsCleanupTicker()
+        // Observe remote host enablement changes to trigger sync
+        
+        preferences.$enabledRemoteHosts
+            .removeDuplicates()
+            .dropFirst()
+            .sink { [weak self] _ in
+                guard let self else { return }
+                Task { await self.syncRemoteHosts(force: true, refreshAfter: true) }
+            }
+            .store(in: &cancellables)
         // Pre-seed usage snapshots based on current Active Provider selection to avoid initial flicker
         Task { [weak self] in
             guard let self else { return }
@@ -526,6 +542,7 @@ final class SessionListViewModel: ObservableObject {
 
         do {
             let scope = currentScope()
+            let enabledRemoteHosts = preferences.enabledRemoteHosts
             async let codexTask = indexer.refreshSessions(
                 root: preferences.sessionsRoot, scope: scope)
             async let claudeTask = claudeProvider.sessions(scope: scope)
@@ -536,6 +553,14 @@ final class SessionListViewModel: ObservableObject {
                 let existingIDs = Set(sessions.map(\.id))
                 let filteredClaude = claudeSessions.filter { !existingIDs.contains($0.id) }
                 sessions.append(contentsOf: filteredClaude)
+            }
+            if !enabledRemoteHosts.isEmpty {
+                let remoteCodex = await remoteProvider.codexSessions(
+                    scope: scope, enabledHosts: enabledRemoteHosts)
+                if !remoteCodex.isEmpty { sessions.append(contentsOf: remoteCodex) }
+                let remoteClaude = await remoteProvider.claudeSessions(
+                    scope: scope, enabledHosts: enabledRemoteHosts)
+                if !remoteClaude.isEmpty { sessions.append(contentsOf: remoteClaude) }
             }
             if !sessions.isEmpty {
                 var seen: Set<String> = []
@@ -574,6 +599,30 @@ final class SessionListViewModel: ObservableObject {
             currentMonthDimension = dateDimension
             currentMonthKey = monthKey(for: selectedDay, dimension: dateDimension)
             Task { await self.refreshGlobalCount() }
+            // Refresh path tree to ensure newly created files appear via refresh
+            let enabledRemoteHostsForCounts = enabledRemoteHosts
+            let sessionsRootForCounts = sessionsRoot
+            Task {
+                var counts = await indexer.collectCWDCounts(root: sessionsRootForCounts)
+                let claudeCounts = await claudeProvider.collectCWDCounts()
+                for (key, value) in claudeCounts {
+                    counts[key, default: 0] += value
+                }
+                if !enabledRemoteHostsForCounts.isEmpty {
+                    let remoteCodex = await remoteProvider.collectCWDAggregates(
+                        kind: .codex, enabledHosts: enabledRemoteHostsForCounts)
+                    for (key, value) in remoteCodex {
+                        counts[key, default: 0] += value
+                    }
+                    let remoteClaude = await remoteProvider.collectCWDAggregates(
+                        kind: .claude, enabledHosts: enabledRemoteHostsForCounts)
+                    for (key, value) in remoteClaude {
+                        counts[key, default: 0] += value
+                    }
+                }
+                let tree = counts.buildPathTreeFromCounts()
+                await MainActor.run { self.pathTreeRootPublished = tree }
+            }
             refreshCodexUsageStatus()
             refreshClaudeUsageStatus()
             schedulePathTreeRefresh()
@@ -747,6 +796,66 @@ final class SessionListViewModel: ObservableObject {
         return counts
     }
 
+    private func countsForLoadedMonth(dimension: DateDimension) -> [Int: Int] {
+        guard let key = currentMonthKey else { return [:] }
+        let components = key.split(separator: "|", maxSplits: 1, omittingEmptySubsequences: false)
+        guard components.count == 2 else { return [:] }
+        let monthKey = String(components[1])
+        return Self.computeMonthCounts(
+            sessions: allSessions,
+            monthKey: monthKey,
+            dimension: dimension,
+            dayIndex: sessionDayCache)
+    }
+
+    func ensureCalendarCounts(for monthStart: Date, dimension: DateDimension) {
+        let key = cacheKey(monthStart, dimension)
+        if monthCountsCache[key] != nil { return }
+        if currentMonthDimension == dimension,
+            let currentKey = currentMonthKey,
+            currentKey == key
+        {
+            let counts = countsForLoadedMonth(dimension: dimension)
+            DispatchQueue.main.async { [weak self] in
+                self?.monthCountsCache[key] = counts
+            }
+            return
+        }
+        let enabledHosts = preferences.enabledRemoteHosts
+        let sessionsRoot = preferences.sessionsRoot
+        Task { [weak self, monthStart, dimension, enabledHosts, sessionsRoot] in
+            guard let self else { return }
+            var merged = await self.indexer.computeCalendarCounts(
+                root: sessionsRoot, monthStart: monthStart, dimension: dimension)
+            if !enabledHosts.isEmpty {
+                let remoteCodex = await self.remoteProvider.codexSessions(
+                    scope: .month(monthStart), enabledHosts: enabledHosts)
+                let remoteClaude = await self.remoteProvider.claudeSessions(
+                    scope: .month(monthStart), enabledHosts: enabledHosts)
+                let remoteSessions = remoteCodex + remoteClaude
+                if !remoteSessions.isEmpty {
+                    let calendar = Calendar.current
+                    for session in remoteSessions {
+                        let referenceDate: Date
+                        switch dimension {
+                        case .created:
+                            referenceDate = session.startedAt
+                        case .updated:
+                            referenceDate = session.lastUpdatedAt ?? session.startedAt
+                        }
+                        guard calendar.isDate(referenceDate, equalTo: monthStart, toGranularity: .month)
+                        else { continue }
+                        let day = calendar.component(.day, from: referenceDate)
+                        merged[day, default: 0] += 1
+                    }
+                }
+            }
+            await MainActor.run {
+                self.monthCountsCache[self.cacheKey(monthStart, dimension)] = merged
+            }
+        }
+    }
+
     func cacheKey(_ monthStart: Date, _ dimension: DateDimension) -> String {
         return dimension.rawValue + "|" + Self.monthFormatter.string(from: monthStart)
     }
@@ -763,8 +872,21 @@ final class SessionListViewModel: ObservableObject {
         pathTreeRefreshTask = Task { [weak self] in
             guard let self else { return }
             defer { self.pathTreeRefreshTask = nil }
-            let counts = self.cwdCounts(for: self.allSessions)
+            var counts = self.cwdCounts(for: self.allSessions)
             self.lastPathCounts = counts
+            let enabledHosts = preferences.enabledRemoteHosts
+            if !enabledHosts.isEmpty {
+                let remoteCodex = await remoteProvider.collectCWDAggregates(
+                    kind: .codex, enabledHosts: enabledHosts)
+                for (key, value) in remoteCodex {
+                    counts[key, default: 0] += value
+                }
+                let remoteClaude = await remoteProvider.collectCWDAggregates(
+                    kind: .claude, enabledHosts: enabledHosts)
+                for (key, value) in remoteClaude {
+                    counts[key, default: 0] += value
+                }
+            }
             let tree = await self.pathTreeStore.applySnapshot(counts: counts)
             await MainActor.run { self.pathTreeRootPublished = tree }
         }
@@ -1431,7 +1553,7 @@ final class SessionListViewModel: ObservableObject {
             guard let s = iterator.next() else { return }
             group.addTask { [weak self] in
                 guard let self else { return nil }
-                if s.source == .claude {
+                if s.source.baseKind == .claude {
                     if let enriched = await self.claudeProvider.enrich(summary: s) {
                         return (s.id, enriched)
                     }
@@ -1819,7 +1941,15 @@ extension SessionListViewModel {
     }
 
     func refreshGlobalCount() async {
-        globalSessionCount = allSessions.count
+        async let codex = indexer.countAllSessions(root: preferences.sessionsRoot)
+        async let claude = claudeProvider.countAllSessions()
+        let enabledHosts = preferences.enabledRemoteHosts
+        var total = await codex + claude
+        if !enabledHosts.isEmpty {
+            total += await remoteProvider.countSessions(kind: .codex, enabledHosts: enabledHosts)
+            total += await remoteProvider.countSessions(kind: .claude, enabledHosts: enabledHosts)
+        }
+        await MainActor.run { self.globalSessionCount = total }
     }
 
     /// User-driven refresh for usage status (status capsule tap / Command+R fallback).
@@ -1896,7 +2026,7 @@ extension SessionListViewModel {
 
     private func latestCodexSessions(limit: Int) -> [SessionSummary] {
         let sorted = allSessions
-            .filter { $0.source == .codex }
+            .filter { $0.source == .codexLocal }
             .sorted { ($0.lastUpdatedAt ?? $0.startedAt) > ($1.lastUpdatedAt ?? $1.startedAt) }
         guard !sorted.isEmpty else { return [] }
         return Array(sorted.prefix(limit))
@@ -2049,6 +2179,9 @@ extension SessionListViewModel {
         
         // Try to start access for CodMate directory if needed
         SandboxPermissionsManager.shared.startAccessingIfAuthorized(directory: .codmateData)
+        
+        // Ensure SSH config directory access so remote mirroring can read keys/config
+        SandboxPermissionsManager.shared.startAccessingIfAuthorized(directory: .sshConfig)
     }
     
     /// Get the real user home directory (not sandbox container)
@@ -2063,7 +2196,7 @@ extension SessionListViewModel {
     }
 
     func timeline(for summary: SessionSummary) async -> [ConversationTurn] {
-        if summary.source == .claude {
+        if summary.source.baseKind == .claude {
             return await claudeProvider.timeline(for: summary) ?? []
         }
         let loader = SessionTimelineLoader()
@@ -2093,6 +2226,27 @@ extension SessionListViewModel {
     func invalidateCalendarCaches() {
         monthCountsCache.removeAll()
         scheduleViewUpdate()
+    }
+    private func performInitialRemoteSyncIfNeeded() async {
+        guard !preferences.enabledRemoteHosts.isEmpty else { return }
+        await syncRemoteHosts(force: false, refreshAfter: true)
+    }
+
+    func syncRemoteHosts(force: Bool = true, refreshAfter: Bool = true) async {
+        let enabledHosts = preferences.enabledRemoteHosts
+        guard !enabledHosts.isEmpty else { return }
+        await remoteProvider.syncHosts(enabledHosts, force: force)
+        await updateRemoteSyncStates()
+        if refreshAfter {
+            await refreshSessions(force: true)
+        }
+    }
+
+    private func updateRemoteSyncStates() async {
+        let snapshot = await remoteProvider.syncStatusSnapshot()
+        await MainActor.run {
+            self.remoteSyncStates = snapshot
+        }
     }
 
 }

@@ -262,16 +262,17 @@ struct ContentView: View {
     }
   }
 
-  func startEmbedded(for session: SessionSummary) {
+  func startEmbedded(for session: SessionSummary, using source: SessionSource? = nil) {
+    let target = source.map { session.overridingSource($0) } ?? session
     #if APPSTORE
-      openPreferredExternal(for: session)
+      openPreferredExternal(for: target)
       return
     #else
       // Ensure cwd authorization under App Sandbox (both shell and CLI modes)
-      let cwd = workingDirectory(for: session)
+      let cwd = workingDirectory(for: target)
       let dirURL = URL(fileURLWithPath: cwd, isDirectory: true)
       if !AuthorizationHub.shared.canAccessNow(directory: dirURL) {
-        let toolLabel = session.source == .codex ? "codex" : "claude"
+        let toolLabel = target.source == .codexLocal ? "codex" : "claude"
         let granted = AuthorizationHub.shared.ensureDirectoryAccessOrPromptSync(
           directory: dirURL,
           purpose: .cliConsoleCwd,
@@ -283,20 +284,17 @@ struct ContentView: View {
         }
       }
       // Build the default resume commands for this session so TerminalHostView can inject them
-      embeddedInitialCommands[session.id] = viewModel.buildResumeCommands(session: session)
-      runningSessionIDs.insert(session.id)
-      selectedTerminalKey = session.id
+      embeddedInitialCommands[target.id] = viewModel.buildResumeCommands(session: target)
+      runningSessionIDs.insert(target.id)
+      selectedTerminalKey = target.id
       // Switch detail surface to Terminal when embedded starts
       selectedDetailTab = .terminal
-      sessionDetailTabs[session.id] = .terminal
+      sessionDetailTabs[target.id] = .terminal
       // User has taken over: clear awaiting follow-up highlight
-      viewModel.clearAwaitingFollowup(session.id)
-      // Nudge Codex to redraw only when running in CLI console mode to avoid
-      // visual artifacts from injecting characters into the shell bootstrap.
+      viewModel.clearAwaitingFollowup(target.id)
+      // Nudge Codex to redraw cleanly once it starts, by sending "/" then backspace
       #if canImport(SwiftTerm) && !APPSTORE
-        if viewModel.preferences.useEmbeddedCLIConsole {
-          TerminalSessionManager.shared.scheduleSlashNudge(forKey: session.id, delay: 1.0)
-        }
+        TerminalSessionManager.shared.scheduleSlashNudge(forKey: target.id, delay: 1.0)
       #endif
     #endif
   }
@@ -453,7 +451,7 @@ struct ContentView: View {
     env["LC_ALL"] = "zh_CN.UTF-8"
     env["LC_CTYPE"] = "zh_CN.UTF-8"
     env["TERM"] = "xterm-256color"
-    if source == .codex { env["CODEX_DISABLE_COLOR_QUERY"] = "1" }
+    if source == .codexLocal { env["CODEX_DISABLE_COLOR_QUERY"] = "1" }
     return env
   }
 
@@ -461,7 +459,7 @@ struct ContentView: View {
     if SecurityScopedBookmarks.shared.isSandboxed {
       return nil
     }
-    let exe = (session.source == .codex) ? "codex" : "claude"
+    let exe = (session.source == .codexLocal) ? "codex" : "claude"
     #if canImport(SwiftTerm)
       guard TerminalSessionManager.executableExists(exe) else {
         NSLog("⚠️ [ContentView] CLI executable %@ not found on PATH; falling back to shell", exe)
@@ -501,7 +499,7 @@ struct ContentView: View {
         message: "Authorize this folder for CLI console to run \(exe)"
       )
       return TerminalHostView.ConsoleSpec(
-        executable: exe, args: args, cwd: pending.expectedCwd, env: consoleEnv(for: .codex))
+        executable: exe, args: args, cwd: pending.expectedCwd, env: consoleEnv(for: .codexLocal))
     }
     return nil
   }
@@ -540,7 +538,7 @@ struct ContentView: View {
         "export LC_CTYPE=zh_CN.UTF-8",
         "export TERM=xterm-256color",
       ]
-      if target.source == .codex {
+      if target.source == .codexLocal {
         exportLines.append("export CODEX_DISABLE_COLOR_QUERY=1")
       }
       let exports = exportLines.joined(separator: "; ")
@@ -563,14 +561,14 @@ struct ContentView: View {
           anchorId: anchorId, expectedCwd: canonicalizePath(cwd), t0: Date(), selectOnSuccess: true)
       )
       // Event-driven incremental refresh: set a hint so directory monitor triggers a targeted refresh
-      if target.source == .codex {
+      if target.source == .codexLocal {
         viewModel.setIncrementalHintForCodexToday()
       } else {
         viewModel.setIncrementalHintForClaudeProject(directory: cwd)
       }
       // Proactively trigger a targeted incremental refresh for immediate visibility
       Task {
-        if target.source == .codex {
+        if target.source == .codexLocal {
           await viewModel.refreshIncrementalForNewCodexToday()
           // Follow-up probes to catch late file creation (non-recursive FS monitor)
           try? await Task.sleep(nanoseconds: 600_000_000)
@@ -668,18 +666,23 @@ struct ContentView: View {
     #endif
   }
 
-  func openPreferredExternal(for session: SessionSummary) {
-    viewModel.copyResumeCommandsRespectingProject(session: session)
+  func openPreferredExternal(for session: SessionSummary, using source: SessionSource? = nil) {
+    let target = source.map { session.overridingSource($0) } ?? session
+    viewModel.copyResumeCommandsRespectingProject(session: target)
     let app = viewModel.preferences.defaultResumeExternalApp
-    let dir = workingDirectory(for: session)
+    let dir = workingDirectory(for: target)
     switch app {
     case .iterm2:
-      let cmd = viewModel.buildResumeCLIInvocationRespectingProject(session: session)
+      let cmd = viewModel.buildResumeCLIInvocationRespectingProject(session: target)
       viewModel.openPreferredTerminalViaScheme(app: .iterm2, directory: dir, command: cmd)
     case .warp:
       viewModel.openPreferredTerminalViaScheme(app: .warp, directory: dir)
     case .terminal:
+      if !viewModel.openInTerminal(session: target) {
+        viewModel.copyResumeCommandsRespectingProject(session: target)
       _ = viewModel.openAppleTerminal(at: dir)
+        Task { await SystemNotifier.shared.notify(title: "CodMate", body: "Command copied. Paste it in the opened terminal.") }
+      }
     case .none:
       break
     }
@@ -695,14 +698,14 @@ struct ContentView: View {
     let app = viewModel.preferences.defaultResumeExternalApp
     let dir = workingDirectory(for: session)
     // Event hint for targeted incremental refresh on FS change
-    if session.source == .codex {
+    if session.source == .codexLocal {
       viewModel.setIncrementalHintForCodexToday()
     } else {
       viewModel.setIncrementalHintForClaudeProject(directory: dir)
     }
     // Also proactively refresh the targeted subset for faster UI update
     Task {
-      if session.source == .codex {
+      if session.source == .codexLocal {
         await viewModel.refreshIncrementalForNewCodexToday()
         // Follow-up probes to catch late file creation
         try? await Task.sleep(nanoseconds: 600_000_000)
@@ -770,20 +773,24 @@ struct ContentView: View {
     case .terminal:
       viewModel.recordIntentForDetailNew(anchor: target)
       #if APPSTORE
+        if !viewModel.openNewSession(session: target) {
         viewModel.copyNewSessionCommandsRespectingProject(session: target)
         _ = viewModel.openAppleTerminal(at: workingDirectory(for: target))
         Task {
           await SystemNotifier.shared.notify(
             title: "CodMate",
             body: "Command copied. Paste it in the opened terminal.")
+          }
         }
       #else
+        if !viewModel.openNewSession(session: target) {
         viewModel.copyNewSessionCommandsRespectingProject(session: target)
         _ = viewModel.openAppleTerminal(at: workingDirectory(for: target))
         Task {
           await SystemNotifier.shared.notify(
             title: "CodMate",
             body: "Command copied. Paste it in the opened terminal.")
+          }
         }
       #endif
     case .iterm:
@@ -804,6 +811,48 @@ struct ContentView: View {
     case .embedded:
       viewModel.recordIntentForDetailNew(anchor: target)
       startEmbeddedNew(for: target)
+    }
+  }
+
+  enum ResumeLaunchStyle {
+    case terminal
+    case iterm
+    case warp
+    case embedded
+  }
+
+  func launchResume(
+    for session: SessionSummary,
+    using source: SessionSource,
+    style: ResumeLaunchStyle
+  ) {
+    let target = source == session.source ? session : session.overridingSource(source)
+    switch style {
+    case .terminal:
+      if !viewModel.openInTerminal(session: target) {
+        viewModel.copyResumeCommandsRespectingProject(session: target)
+        _ = viewModel.openAppleTerminal(at: workingDirectory(for: target))
+        Task {
+          await SystemNotifier.shared.notify(
+            title: "CodMate",
+            body: "Command copied. Paste it in the opened terminal.")
+        }
+      }
+    case .iterm:
+      let cmd = viewModel.buildResumeCLIInvocationRespectingProject(session: target)
+      viewModel.openPreferredTerminalViaScheme(
+        app: .iterm2, directory: workingDirectory(for: target), command: cmd)
+    case .warp:
+      viewModel.copyResumeCommandsRespectingProject(session: target)
+      viewModel.openPreferredTerminalViaScheme(
+        app: .warp, directory: workingDirectory(for: target))
+      Task {
+        await SystemNotifier.shared.notify(
+          title: "CodMate",
+          body: "Command copied. Paste it in the opened terminal.")
+      }
+    case .embedded:
+      startEmbedded(for: target)
     }
   }
 

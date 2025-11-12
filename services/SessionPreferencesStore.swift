@@ -21,6 +21,7 @@ final class SessionPreferencesStore: ObservableObject {
   }
 
   private let defaults: UserDefaults
+  private let fileManager: FileManager
   private struct Keys {
     static let sessionsRootPath = "codex.sessions.rootPath"
     static let notesRootPath = "codex.notes.rootPath"
@@ -36,6 +37,7 @@ final class SessionPreferencesStore: ObservableObject {
     static let autoAssignNewToSameProject = "codex.projects.autoAssignNewToSame"
     static let timelineVisibleKinds = "codex.timeline.visibleKinds"
     static let markdownVisibleKinds = "codex.markdown.visibleKinds"
+    static let enabledRemoteHosts = "codex.remote.enabledHosts"
     static let searchPanelStyle = "codmate.search.panelStyle"
     // Claude advanced
     static let claudeDebug = "claude.debug"
@@ -71,6 +73,7 @@ final class SessionPreferencesStore: ObservableObject {
     fileManager: FileManager = .default
   ) {
     self.defaults = defaults
+    self.fileManager = fileManager
     // Get the real user home directory (not sandbox container)
     let homeURL = SessionPreferencesStore.getRealUserHomeURL()
 
@@ -228,19 +231,32 @@ final class SessionPreferencesStore: ObservableObject {
     self.claudeIDE = defaults.object(forKey: Keys.claudeIDE) as? Bool ?? false
     self.claudeStrictMCP = defaults.object(forKey: Keys.claudeStrictMCP) as? Bool ?? false
     self.claudeFallbackModel = defaults.string(forKey: Keys.claudeFallbackModel) ?? ""
-    self.claudeSkipPermissions =
-      defaults.object(forKey: Keys.claudeSkipPermissions) as? Bool ?? false
-    self.claudeAllowSkipPermissions =
-      defaults.object(forKey: Keys.claudeAllowSkipPermissions) as? Bool ?? false
-    self.claudeAllowUnsandboxedCommands =
-      defaults.object(forKey: Keys.claudeAllowUnsandboxedCommands) as? Bool ?? false
-  }
-
+    self.claudeSkipPermissions = defaults.object(forKey: Keys.claudeSkipPermissions) as? Bool ?? false
+    self.claudeAllowSkipPermissions = defaults.object(forKey: Keys.claudeAllowSkipPermissions) as? Bool ?? false
+    self.claudeAllowUnsandboxedCommands = defaults.object(forKey: Keys.claudeAllowUnsandboxedCommands) as? Bool ?? false
+    
+    // Remote hosts
+    let storedHosts = defaults.array(forKey: Keys.enabledRemoteHosts) as? [String] ?? []
+    self.enabledRemoteHosts = Set(storedHosts)
+    
+    // Now that all properties are initialized, ensure directories exist
+    ensureDirectoryExists(sessionsRoot)
+    ensureDirectoryExists(notesRoot)
+    }
   private func persist() {
     defaults.set(sessionsRoot.path, forKey: Keys.sessionsRootPath)
     defaults.set(notesRoot.path, forKey: Keys.notesRootPath)
     defaults.set(projectsRoot.path, forKey: Keys.projectsRootPath)
-    // CLI paths removed – nothing to persist here
+    }
+
+    private func ensureDirectoryExists(_ url: URL) {
+        var isDir: ObjCBool = false
+        if fileManager.fileExists(atPath: url.path, isDirectory: &isDir) {
+            if isDir.boolValue { return }
+            // Remove non-directory item occupying the expected path
+            try? fileManager.removeItem(at: url)
+        }
+        try? fileManager.createDirectory(at: url, withIntermediateDirectories: true)
   }
 
   convenience init(defaults: UserDefaults = .standard) {
@@ -371,6 +387,10 @@ final class SessionPreferencesStore: ObservableObject {
 
   @Published var searchPanelStyle: GlobalSearchPanelStyle {
     didSet { defaults.set(searchPanelStyle.rawValue, forKey: Keys.searchPanelStyle) }
+  }
+
+  @Published var enabledRemoteHosts: Set<String> = [] {
+    didSet { defaults.set(Array(enabledRemoteHosts), forKey: Keys.enabledRemoteHosts) }
   }
 
   var resumeOptions: ResumeOptions {

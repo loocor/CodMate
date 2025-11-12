@@ -16,7 +16,7 @@ extension SessionActions {
             }
 
             // For Claude Code sessions, also delete associated agent-*.jsonl files
-            if summary.source == .claude {
+            if summary.source.baseKind == .claude {
                 deleteAssociatedAgentFiles(for: summary)
             }
         }
@@ -28,8 +28,11 @@ extension SessionActions {
         let directory = summary.fileURL.deletingLastPathComponent()
         guard let enumerator = fileManager.enumerator(
             at: directory,
-            includingPropertiesForKeys: [.isRegularFileKey],
-            options: [.skipsHiddenFiles, .skipsSubdirectoryDescendants]
+            includingPropertiesForKeys: [URLResourceKey.isRegularFileKey],
+            options: [
+                FileManager.DirectoryEnumerationOptions.skipsHiddenFiles,
+                FileManager.DirectoryEnumerationOptions.skipsSubdirectoryDescendants,
+            ]
         ) else { return }
 
         for case let url as URL in enumerator {

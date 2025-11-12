@@ -28,6 +28,7 @@ final class SandboxPermissionsManager: ObservableObject {
         case codexSessions = "~/.codex"
         case claudeSessions = "~/.claude"
         case codmateData = "~/.codmate"
+        case sshConfig = "~/.ssh"
 
         var id: String { rawValue }
 
@@ -36,6 +37,7 @@ final class SandboxPermissionsManager: ObservableObject {
             case .codexSessions: return "Codex Directory"
             case .claudeSessions: return "Claude Code Directory"
             case .codmateData: return "CodMate Data Directory"
+            case .sshConfig: return "SSH Configuration"
             }
         }
 
@@ -47,6 +49,8 @@ final class SandboxPermissionsManager: ObservableObject {
                 return "Access Claude Code projects and sessions"
             case .codmateData:
                 return "Access CodMate configuration, notes, and cache"
+            case .sshConfig:
+                return "Read your ~/.ssh/config file to discover remote hosts"
             }
         }
 
@@ -63,12 +67,14 @@ final class SandboxPermissionsManager: ObservableObject {
             case .codexSessions: return "bookmark.codexSessions"
             case .claudeSessions: return "bookmark.claudeSessions"
             case .codmateData: return "bookmark.codmateData"
+            case .sshConfig: return "bookmark.sshConfig"
             }
         }
     }
 
     private let bookmarks = SecurityScopedBookmarks.shared
     private let defaults = UserDefaults.standard
+    private var didRestorePermissions = false
 
     private init() {
         checkPermissions()
@@ -113,6 +119,7 @@ final class SandboxPermissionsManager: ObservableObject {
                 panel.canChooseDirectories = true
                 panel.allowsMultipleSelection = false
                 panel.canCreateDirectories = true
+                panel.showsHiddenFiles = true
 
                 // Set the default directory to the real user home directory
                 let url = directory.expandedPath
@@ -194,7 +201,7 @@ final class SandboxPermissionsManager: ObservableObject {
         guard bookmarks.isSandboxed else { return }
         
         // Only request if we actually need these directories
-        let criticalDirs: [RequiredDirectory] = [.codexSessions, .claudeSessions]
+        let criticalDirs: [RequiredDirectory] = [.codexSessions, .claudeSessions, .sshConfig]
         
         for dir in criticalDirs {
             // Skip if we already have permission
@@ -217,6 +224,8 @@ final class SandboxPermissionsManager: ObservableObject {
     /// Restore access to all previously authorized directories on app launch
     func restoreAccess() {
         guard bookmarks.isSandboxed else { return }
+        guard !didRestorePermissions else { return }
+        didRestorePermissions = true
 
         for dir in RequiredDirectory.allCases {
             guard let data = defaults.data(forKey: dir.bookmarkKey) else { continue }

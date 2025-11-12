@@ -31,7 +31,7 @@ extension SessionListViewModel {
     }
 
     func copyResumeCommandsRespectingProject(session: SessionSummary) {
-        if session.source != .codex {
+        if session.source != .codexLocal {
             actions.copyResumeCommands(
                 session: session,
                 executableURL: preferredExecutableURL(for: session.source),
@@ -46,12 +46,12 @@ extension SessionListViewModel {
         {
             actions.copyResumeUsingProjectProfileCommands(
                 session: session, project: p,
-                executableURL: preferredExecutableURL(for: .codex),
+                executableURL: preferredExecutableURL(for: .codexLocal),
                 options: preferences.resumeOptions)
         } else {
             actions.copyResumeCommands(
                 session: session,
-                executableURL: preferredExecutableURL(for: .codex),
+                executableURL: preferredExecutableURL(for: .codexLocal),
                 options: preferences.resumeOptions, simplifiedForExternal: true)
         }
     }
@@ -80,7 +80,7 @@ extension SessionListViewModel {
     }
 
     func buildResumeCLIInvocation(session: SessionSummary) -> String {
-        let execName = (session.source == .codex) ? "codex" : "claude"
+        let execName = (session.source == .codexLocal) ? "codex" : "claude"
         return actions.buildResumeCLIInvocation(
             session: session,
             executablePath: execName,
@@ -98,7 +98,14 @@ extension SessionListViewModel {
     }
 
     func buildResumeCLIInvocationRespectingProject(session: SessionSummary) -> String {
-        if session.source == .codex,
+        if session.isRemote,
+           let remote = actions.remoteResumeInvocationForTerminal(
+                session: session,
+                options: preferences.resumeOptions
+            ) {
+            return remote
+        }
+        if session.source == .codexLocal,
             let pid = projectIdForSession(session.id),
             let p = projects.first(where: { $0.id == pid }),
             p.profile != nil || (p.profileId?.isEmpty == false)
@@ -108,7 +115,7 @@ extension SessionListViewModel {
                 options: preferences.resumeOptions)
         }
         return actions.buildResumeCLIInvocation(
-            session: session, executablePath: (session.source == .codex ? "codex" : "claude"), options: preferences.resumeOptions)
+            session: session, executablePath: (session.source == .codexLocal ? "codex" : "claude"), options: preferences.resumeOptions)
     }
 
     func copyNewSessionCommands(session: SessionSummary) {
@@ -126,8 +133,8 @@ extension SessionListViewModel {
         )
     }
 
-    func openNewSession(session: SessionSummary) {
-        _ = actions.openNewSession(
+    func openNewSession(session: SessionSummary) -> Bool {
+        actions.openNewSession(
             session: session,
             executableURL: preferredExecutableURL(for: session.source),
             options: preferences.resumeOptions
@@ -141,7 +148,7 @@ extension SessionListViewModel {
     func copyNewProjectCommands(project: Project) {
         actions.copyNewProjectCommands(
             project: project,
-            executableURL: preferredExecutableURL(for: .codex),
+            executableURL: preferredExecutableURL(for: .codexLocal),
             options: preferences.resumeOptions
         )
     }
@@ -170,7 +177,7 @@ extension SessionListViewModel {
         // External terminal path: copy command and open preferred terminal.
         actions.copyNewProjectCommands(
             project: project,
-            executableURL: preferredExecutableURL(for: .codex),
+            executableURL: preferredExecutableURL(for: .codexLocal),
             options: preferences.resumeOptions
         )
 
@@ -216,7 +223,15 @@ extension SessionListViewModel {
         session: SessionSummary,
         initialPrompt: String? = nil
     ) -> String {
-        if session.source == .codex,
+        if session.isRemote,
+           let remote = actions.remoteNewInvocationForTerminal(
+                session: session,
+                options: preferences.resumeOptions,
+                initialPrompt: initialPrompt
+            ) {
+            return remote
+        }
+        if session.source == .codexLocal,
             let pid = projectIdForSession(session.id),
             let p = projects.first(where: { $0.id == pid }),
             p.profile != nil || (p.profileId?.isEmpty == false)
@@ -234,7 +249,7 @@ extension SessionListViewModel {
     }
 
     func copyNewSessionCommandsRespectingProject(session: SessionSummary) {
-        if session.source == .codex,
+        if session.source == .codexLocal,
             let pid = projectIdForSession(session.id),
             let p = projects.first(where: { $0.id == pid }),
             p.profile != nil || (p.profileId?.isEmpty == false)
@@ -251,7 +266,7 @@ extension SessionListViewModel {
     }
 
     func copyNewSessionCommandsRespectingProject(session: SessionSummary, initialPrompt: String) {
-        if session.source == .codex,
+        if session.source == .codexLocal,
             let pid = projectIdForSession(session.id),
             let p = projects.first(where: { $0.id == pid }),
             p.profile != nil || (p.profileId?.isEmpty == false)
@@ -269,7 +284,7 @@ extension SessionListViewModel {
     }
 
     func openNewSessionRespectingProject(session: SessionSummary) {
-        if session.source == .codex,
+        if session.source == .codexLocal,
             let pid = projectIdForSession(session.id),
             let p = projects.first(where: { $0.id == pid }),
             p.profile != nil || (p.profileId?.isEmpty == false)
@@ -286,7 +301,7 @@ extension SessionListViewModel {
     }
 
     func openNewSessionRespectingProject(session: SessionSummary, initialPrompt: String) {
-        if session.source == .codex,
+        if session.source == .codexLocal,
             let pid = projectIdForSession(session.id),
             let p = projects.first(where: { $0.id == pid }),
             p.profile != nil || (p.profileId?.isEmpty == false)

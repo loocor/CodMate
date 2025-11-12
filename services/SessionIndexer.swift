@@ -228,6 +228,20 @@ actor SessionIndexer {
     return urls
   }
 
+  private func mappedDataIfAvailable(at url: URL) throws -> Data? {
+    do {
+      return try Data(contentsOf: url, options: [.mappedIfSafe])
+    } catch let error as NSError {
+      if error.domain == NSCocoaErrorDomain &&
+        (error.code == NSFileReadNoSuchFileError || error.code == NSFileNoSuchFileError)
+      {
+        logger.debug("File disappeared before reading \(url.path, privacy: .public); skipping.")
+        return nil
+      }
+      throw error
+    }
+  }
+
   // Sidebar: month daily counts without parsing content (fast)
   func computeCalendarCounts(root: URL, monthStart: Date, dimension: DateDimension) async -> [Int:
     Int]
@@ -461,7 +475,7 @@ actor SessionIndexer {
     -> SessionSummary?
   {
     // Memory-map file (fast and low memory overhead)
-    let data = try Data(contentsOf: url, options: [.mappedIfSafe])
+    guard let data = try mappedDataIfAvailable(at: url) else { return nil }
     guard !data.isEmpty else { return nil }
 
     let newline: UInt8 = 0x0A
@@ -503,7 +517,7 @@ actor SessionIndexer {
   private func buildSummaryFull(for url: URL, builder: inout SessionSummaryBuilder) throws
     -> SessionSummary?
   {
-    let data = try Data(contentsOf: url, options: [.mappedIfSafe])
+    guard let data = try mappedDataIfAvailable(at: url) else { return nil }
     guard !data.isEmpty else { return nil }
     let newline: UInt8 = 0x0A
     let carriageReturn: UInt8 = 0x0D
@@ -556,6 +570,7 @@ actor SessionIndexer {
       lineCount: base.lineCount,
       lastUpdatedAt: base.lastUpdatedAt,
       source: base.source,
+      remotePath: base.remotePath,
       userTitle: base.userTitle,
       userComment: base.userComment
     )
