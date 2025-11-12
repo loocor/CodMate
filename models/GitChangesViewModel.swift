@@ -87,10 +87,14 @@ final class GitChangesViewModel: ObservableObject {
     private func assignRepoRoot(to root: URL, reason: String) {
         if SecurityScopedBookmarks.shared.isSandboxed {
             let hasBookmark = SecurityScopedBookmarks.shared.hasDynamicBookmark(for: root)
+            #if DEBUG
             Self.log.info("Repository at \(root.path, privacy: .public) has bookmark: \(hasBookmark, privacy: .public)")
+            #endif
 
             let hasAccess = SecurityScopedBookmarks.shared.startAccessDynamic(for: root)
+            #if DEBUG
             Self.log.info("Started access for \(root.path, privacy: .public): \(hasAccess, privacy: .public)")
+            #endif
 
             if !hasAccess {
                 Self.log.error("Failed to start access for repository at \(root.path, privacy: .public)")
@@ -103,7 +107,9 @@ final class GitChangesViewModel: ObservableObject {
         }
         self.repo = GitService.Repo(root: root)
         self.repoRoot = root
+        #if DEBUG
         Self.log.info("Git repository resolved via \(reason, privacy: .public): \(root.path, privacy: .public)")
+        #endif
     }
 
     private func filesystemGitRoot(startingAt start: URL) -> URL? {

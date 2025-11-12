@@ -23,7 +23,7 @@ extension ContentView {
   var listContent: some View {
     SessionListColumnView(
       sections: viewModel.sections,
-      selection: $selection,
+      selection: guardedListSelectionBinding,
       sortOrder: $viewModel.sortOrder,
       isLoading: viewModel.isLoading,
       isEnriching: viewModel.isEnriching,
@@ -46,6 +46,9 @@ extension ContentView {
       max: isListHidden ? 0 : 480
     )
     .allowsHitTesting(listAllowsHitTesting)
+    .refuseFirstResponder(when: isSearchPopoverPresented || shouldBlockAutoSelection || selection.isEmpty)
+    .environment(\.controlActiveState,
+                ((preferences.searchPanelStyle == .popover && (isSearchPopoverPresented || shouldBlockAutoSelection)) || selection.isEmpty) ? .inactive : .active)
     .sheet(item: $viewModel.editingSession, onDismiss: { viewModel.cancelEdits() }) { _ in
       EditSessionMetaView(viewModel: viewModel)
     }
@@ -55,6 +58,19 @@ extension ContentView {
           .environmentObject(viewModel)
       }
     }
+  }
+
+  private var guardedListSelectionBinding: Binding<Set<SessionSummary.ID>> {
+    Binding(
+      get: { selection },
+      set: { newSel in
+        // Swallow selection sets while search popover is opening/active
+        if preferences.searchPanelStyle == .popover && (isSearchPopoverPresented || shouldBlockAutoSelection) {
+          return
+        }
+        selection = newSel
+      }
+    )
   }
 
   private func makeSidebarDigest(for state: SidebarState) -> SidebarDigest {
@@ -147,9 +163,13 @@ extension ContentView {
       activeColor: Color.primary.opacity(0.8),
       help: "Open global search (⌘F)"
     ) {
-      // In popover mode, just toggle the binding; let the binding setter handle side effects
+      // In popover mode, route through dedicated open/close to ensure focus guards
       if preferences.searchPanelStyle == .popover {
-        isSearchPopoverPresented.toggle()
+        if isSearchPopoverPresented {
+          dismissGlobalSearchPanel()
+        } else {
+          focusGlobalSearchPanel()
+        }
       } else {
         focusGlobalSearchPanel()
       }
@@ -165,6 +185,7 @@ extension ContentView {
           onSelect: { handleGlobalSearchSelection($0) },
           onClose: { dismissGlobalSearchPanel() }
         )
+        .interactiveDismissDisabled(popoverDismissDisabled)
       }
     } else {
       button
@@ -175,29 +196,16 @@ extension ContentView {
     Binding(
       get: { isSearchPopoverPresented },
       set: { isPresented in
-        // Update state
         isSearchPopoverPresented = isPresented
 
         if isPresented {
-          // Opening popover: prepare the panel
+          // Opening: clamp size (focus is handled in focusGlobalSearchPanel)
           clampSearchPopoverSizeIfNeeded()
-          // Send notifications to block other focus targets
-          NotificationCenter.default.post(name: .codMateResignQuickSearch, object: nil)
-          NotificationCenter.default.post(
-            name: .codMateQuickSearchFocusBlocked,
-            object: nil,
-            userInfo: ["active": true]
-          )
-          // Set focus on the search field
-          globalSearchViewModel.setFocus(true)
         } else {
-          // Closing popover: clean up
+          // Closing popover: clean up and re-enable auto-selection
+          shouldBlockAutoSelection = false
+          popoverDismissDisabled = false
           globalSearchViewModel.dismissPanel()
-          NotificationCenter.default.post(
-            name: .codMateQuickSearchFocusBlocked,
-            object: nil,
-            userInfo: ["active": false]
-          )
         }
       }
     )
@@ -212,7 +220,8 @@ extension ContentView {
 
   private var listAllowsHitTesting: Bool {
     guard !isListHidden else { return false }
-    if preferences.searchPanelStyle == .popover && isSearchPopoverPresented {
+    // Block hit testing when popover is presented OR about to be presented
+    if preferences.searchPanelStyle == .popover && (isSearchPopoverPresented || shouldBlockAutoSelection) {
       return false
     }
     return true
@@ -271,3 +280,79 @@ private struct ToolbarCircleButton: View {
     return Color(nsColor: .separatorColor).opacity(hovering ? 0.65 : 0.45)
   }
 }
+
+#if os(macOS)
+import AppKit
+
+// Custom ViewModifier to prevent a view hierarchy from accepting first responder
+private struct RefuseFirstResponderModifier: ViewModifier {
+  let shouldRefuse: Bool
+
+  func body(content: Content) -> some View {
+    content.background(
+      RefuseFirstResponderHelper(shouldRefuse: shouldRefuse)
+    )
+  }
+}
+
+private struct RefuseFirstResponderHelper: NSViewRepresentable {
+  let shouldRefuse: Bool
+
+  func makeNSView(context: Context) -> RefuseFirstResponderView {
+    let view = RefuseFirstResponderView()
+    view.shouldRefuse = shouldRefuse
+    return view
+  }
+
+  func updateNSView(_ nsView: RefuseFirstResponderView, context: Context) {
+    nsView.shouldRefuse = shouldRefuse
+  }
+}
+
+private class RefuseFirstResponderView: NSView {
+  var shouldRefuse: Bool = false {
+    didSet {
+      if shouldRefuse != oldValue {
+        // Traverse the view hierarchy and apply refusal to all subviews
+        applyRefusalToHierarchy(shouldRefuse)
+      }
+    }
+  }
+
+  override var acceptsFirstResponder: Bool {
+    if shouldRefuse {
+      return false
+    }
+    return super.acceptsFirstResponder
+  }
+
+  private func applyRefusalToHierarchy(_ refuse: Bool) {
+    // Walk up to find the root of the list content
+    var current: NSView? = self.superview
+    while let view = current {
+      if let outlineView = view as? NSOutlineView {
+        outlineView.refusesFirstResponder = refuse
+        if refuse, let window = outlineView.window, window.firstResponder === outlineView {
+          window.makeFirstResponder(nil)
+        }
+        return
+      }
+      // Also check for NSTableView (in case List uses it)
+      if let tableView = view as? NSTableView {
+        tableView.refusesFirstResponder = refuse
+        if refuse, let window = tableView.window, window.firstResponder === tableView {
+          window.makeFirstResponder(nil)
+        }
+        return
+      }
+      current = view.superview
+    }
+  }
+}
+
+extension View {
+  func refuseFirstResponder(when condition: Bool) -> some View {
+    self.modifier(RefuseFirstResponderModifier(shouldRefuse: condition))
+  }
+}
+#endif

@@ -86,32 +86,44 @@ final class GlobalSearchViewModel: ObservableObject {
   }
 
   func setFocus(_ active: Bool) {
-    hasFocus = active
-    if active {
-      isPanelVisible = true
-    }
-    if !active, trimmedQuery.isEmpty {
-      results.removeAll()
-      filteredResults.removeAll()
+    // Defer state mutations to the next runloop to avoid "Publishing changes from within view updates"
+    Task { @MainActor [weak self] in
+      guard let self else { return }
+      self.hasFocus = active
+      if active {
+        self.isPanelVisible = true
+      }
+      if !active, self.trimmedQuery.isEmpty {
+        self.results.removeAll()
+        self.filteredResults.removeAll()
+      }
     }
   }
 
   func dismissPanel() {
-    hasFocus = false
-    isPanelVisible = false
+    // Defer to avoid mutating during view updates
+    Task { @MainActor [weak self] in
+      guard let self else { return }
+      self.hasFocus = false
+      self.isPanelVisible = false
+    }
   }
 
   func resetSearchState() {
-    query = ""
-    filter = .all
-    results.removeAll()
-    filteredResults.removeAll()
-    ripgrepProgress = nil
-    errorMessage = nil
-    isSearching = false
-    seenResultKeys.removeAll()
-    isPanelVisible = true
-    hasFocus = true
+    // Reset asynchronously to avoid view-update reentrancy
+    Task { @MainActor [weak self] in
+      guard let self else { return }
+      self.query = ""
+      self.filter = .all
+      self.results.removeAll()
+      self.filteredResults.removeAll()
+      self.ripgrepProgress = nil
+      self.errorMessage = nil
+      self.isSearching = false
+      self.seenResultKeys.removeAll()
+      self.isPanelVisible = true
+      self.hasFocus = true
+    }
   }
 
   private var trimmedQuery: String {

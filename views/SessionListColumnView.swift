@@ -27,6 +27,7 @@ struct SessionListColumnView: View {
   @State private var newProjectAssignIDs: [String] = []
   @State private var lastClickedID: String? = nil
   @State private var containerWidth: CGFloat = 0
+  @FocusState private var quickSearchFocused: Bool
 
   var body: some View {
     VStack(spacing: 0) {
@@ -212,13 +213,41 @@ struct SessionListColumnView: View {
 
   private var header: some View {
     VStack(alignment: .leading, spacing: 8) {
-      // Full-width quick search (title/comment) using native SearchField for unified chrome
-      SearchField(
-        "Search title or comment",
-        text: $viewModel.quickSearchText,
-        onSubmit: { text in viewModel.immediateApplyQuickSearch(text) }
+      // Full-width quick search (title/comment) using pure SwiftUI TextField
+      HStack(spacing: 6) {
+        Image(systemName: "magnifyingglass")
+          .foregroundStyle(.secondary)
+          .padding(.leading, 4)
+        TextField("Search title or comment", text: $viewModel.quickSearchText)
+          .textFieldStyle(.plain)
+          .focused($quickSearchFocused)
+          .onSubmit {
+            viewModel.immediateApplyQuickSearch(viewModel.quickSearchText)
+          }
+        if !viewModel.quickSearchText.isEmpty {
+          Button {
+            viewModel.quickSearchText = ""
+          } label: {
+            Image(systemName: "xmark.circle.fill").foregroundStyle(.tertiary)
+          }
+          .buttonStyle(.plain)
+        }
+      }
+      .padding(.vertical, 6)
+      .padding(.horizontal, 6)
+      .background(
+        RoundedRectangle(cornerRadius: 8, style: .continuous)
+          .fill(Color(nsColor: .textBackgroundColor))
+          .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+              .stroke(Color.secondary.opacity(0.25), lineWidth: 1)
+          )
       )
       .frame(maxWidth: .infinity)
+      // 当全局搜索触发时，确保本地搜索框让出焦点，避免与 Cmd+F 竞争
+      .onReceive(NotificationCenter.default.publisher(for: .codMateFocusGlobalSearch)) { _ in
+        quickSearchFocused = false
+      }
 
       EqualWidthSegmentedControl(
         items: Array(SessionSortOrder.allCases),

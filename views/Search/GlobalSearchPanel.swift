@@ -12,7 +12,8 @@ struct GlobalSearchPanel: View {
       viewModel: viewModel,
       onSelect: onSelect,
       onClose: onClose,
-      contentHeight: contentHeight
+      contentHeight: contentHeight,
+      isFloating: true
     )
     .padding(16)
     .frame(maxWidth: maxWidth)
@@ -41,7 +42,8 @@ struct GlobalSearchPopoverPanel: View {
       viewModel: viewModel,
       onSelect: onSelect,
       onClose: onClose,
-      contentHeight: size.height
+      contentHeight: size.height,
+      isFloating: false
     )
     .padding(16)
     .frame(width: size.width)
@@ -64,6 +66,7 @@ private struct GlobalSearchPanelContent: View {
   let onSelect: (GlobalSearchResult) -> Void
   let onClose: () -> Void
   var contentHeight: CGFloat? = nil
+  var isFloating: Bool = false
 
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
@@ -177,6 +180,13 @@ private struct GlobalSearchPanelContent: View {
               .font(.system(size: 12))
               .foregroundStyle(.tertiary)
               .multilineTextAlignment(.center)
+            if isFloating {
+              Text("Press Esc to close")
+                .font(.system(size: 11))
+                .foregroundStyle(.tertiary)
+                .multilineTextAlignment(.center)
+                .padding(.top, 2)
+            }
           }
           .frame(maxWidth: .infinity, maxHeight: .infinity)
         }

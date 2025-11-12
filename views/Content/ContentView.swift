@@ -54,6 +54,8 @@ struct ContentView: View {
   @State var pendingConversationFilter: (id: String, term: String)? = nil
   @State var isSearchPopoverPresented = false
   @State var searchPopoverSize: CGSize = ContentView.defaultSearchPopoverSize
+  @State var shouldBlockAutoSelection = false
+  @State var popoverDismissDisabled = false
   static let defaultSearchPopoverSize = CGSize(width: 440, height: 320)
   static let searchPopoverMinSize = CGSize(width: 380, height: 220)
   static let searchPopoverMaxSize = CGSize(width: 640, height: 520)
@@ -200,7 +202,9 @@ struct ContentView: View {
     let validIDs = Set(orderedIDs)
     let original = selection
     selection.formIntersection(validIDs)
-    if selection.isEmpty, let first = orderedIDs.first {
+
+    // Don't auto-select first item when blocked (e.g., when search popover is about to open)
+    if selection.isEmpty, let first = orderedIDs.first, !shouldBlockAutoSelection {
       selection.insert(first)
     }
     // Avoid unnecessary churn if nothing changed

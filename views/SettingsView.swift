@@ -19,7 +19,7 @@ struct SettingsView: View {
   var body: some View {
     ZStack(alignment: .topLeading) {
       WindowConfigurator { window in
-        window.isMovableByWindowBackground = true
+        window.isMovableByWindowBackground = false
         if window.toolbar == nil {
           let toolbar = NSToolbar(identifier: "CodMateSettingsToolbar")
           SettingsToolbarCoordinator.shared.configure(toolbar: toolbar)
@@ -236,6 +236,7 @@ struct SettingsView: View {
                   RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .stroke(Color.secondary.opacity(0.12), lineWidth: 1)
                 )
+                .disabled(true)
                 .frame(maxWidth: .infinity, alignment: .trailing)
                 .gridColumnAlignment(.trailing)
                 .gridCellAnchor(.trailing)

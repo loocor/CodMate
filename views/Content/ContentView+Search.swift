@@ -25,25 +25,40 @@ extension ContentView {
 
   func focusGlobalSearchPanel() {
     if preferences.searchPanelStyle == .popover {
-      // In popover mode, just open the popover; binding setter handles the rest
+      // In popover mode, open the popover and set focus with minimal side-effects
       if !isSearchPopoverPresented {
+        // Block auto-selection during open to prevent list interference
+        shouldBlockAutoSelection = true
+        popoverDismissDisabled = true
+
+        // Open the popover first so refusal/inactive states can apply before releasing focus
         isSearchPopoverPresented = true
+
+        // Next runloop: release current first responder, then focus the popover field
+        DispatchQueue.main.async { [weak globalSearchViewModel] in
+          releasePrimaryFirstResponder()
+          // Delay focus slightly to allow window hierarchy to settle
+          DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            globalSearchViewModel?.setFocus(true)
+          }
+          DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+            globalSearchViewModel?.setFocus(true)
+          }
+        }
+        // Keep interactive dismissal disabled for the entire lifetime; re-enable on close only
       }
       return
     }
 
     // Floating mode: handle focus and notifications directly
     releasePrimaryFirstResponder()
-    NotificationCenter.default.post(name: .codMateResignQuickSearch, object: nil)
-    NotificationCenter.default.post(
-      name: .codMateQuickSearchFocusBlocked,
-      object: nil,
-      userInfo: ["active": true]
-    )
     globalSearchViewModel.setFocus(true)
   }
 
   func dismissGlobalSearchPanel() {
+    // Re-enable auto-selection when closing
+    shouldBlockAutoSelection = false
+
     // In popover mode, state is managed by binding
     if preferences.searchPanelStyle == .popover {
       // Just close the popover; the binding setter will handle cleanup
@@ -55,11 +70,6 @@ extension ContentView {
 
     // Floating mode: handle cleanup directly
     globalSearchViewModel.dismissPanel()
-    NotificationCenter.default.post(
-      name: .codMateQuickSearchFocusBlocked,
-      object: nil,
-      userInfo: ["active": false]
-    )
   }
 
   func handleGlobalSearchSelection(_ result: GlobalSearchResult) {
@@ -146,6 +156,7 @@ extension ContentView {
   }
 
   func applyPendingSelectionIfNeeded() {
+    if shouldBlockAutoSelection { return }
     guard let pending = pendingSelectionID else { return }
     let visibleIDs = viewModel.sections.flatMap { $0.sessions.map(\.id) }
     guard visibleIDs.contains(pending) else { return }
@@ -174,7 +185,7 @@ extension ContentView {
     )
   }
 
-  private func releasePrimaryFirstResponder() {
+  @MainActor func releasePrimaryFirstResponder() {
     #if os(macOS)
       if let window = NSApplication.shared.keyWindow {
         window.makeFirstResponder(nil)

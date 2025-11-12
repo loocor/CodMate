@@ -50,11 +50,28 @@ struct ToolbarSearchField: NSViewRepresentable {
     }
 
     let shouldAutofocus = autofocus
+
     if shouldAutofocus && !isFirstResponder {
+      // Robust focusing for popover presentation: try now and re-try shortly after
       DispatchQueue.main.async { [weak nsView] in
         guard shouldAutofocus, let nsView, let window = nsView.window else { return }
         if let editor = nsView.currentEditor(), window.firstResponder === editor { return }
         window.makeFirstResponder(nsView)
+
+        // Re-try after the popover finishes becoming key to avoid focus races
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { [weak nsView] in
+          guard shouldAutofocus, let nsView = nsView, let window = nsView.window else { return }
+          let editor = nsView.currentEditor()
+          let isFocused = (editor != nil && window.firstResponder === editor) || window.firstResponder === nsView
+          if !isFocused { window.makeFirstResponder(nsView) }
+        }
+        // Final retry for stubborn focus contention
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.16) { [weak nsView] in
+          guard shouldAutofocus, let nsView = nsView, let window = nsView.window else { return }
+          let editor = nsView.currentEditor()
+          let isFocused = (editor != nil && window.firstResponder === editor) || window.firstResponder === nsView
+          if !isFocused { window.makeFirstResponder(nsView) }
+        }
       }
     }
   }

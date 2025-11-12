@@ -307,7 +307,9 @@ actor GitService {
     private func runGit(_ args: [String], cwd: URL) async throws -> ProcOut {
         var lastError: ProcOut? = nil
         let home = Self.realHomeDirectory
+        #if DEBUG
         Self.log.debug("Running git \(args.joined(separator: " "), privacy: .public) in \(cwd.path, privacy: .public)")
+        #endif
 
         let candidates = gitCandidates + ["/usr/bin/env"]
         for path in candidates {
@@ -351,7 +353,9 @@ actor GitService {
             do {
                 try proc.run()
             } catch {
+                #if DEBUG
                 Self.log.debug("Failed to launch \(path, privacy: .public): \(error.localizedDescription, privacy: .public)")
+                #endif
                 if path != "/usr/bin/env" {
                     blockedExecutables.insert(path)
                 }
@@ -364,10 +368,14 @@ actor GitService {
             let stderr = String(data: errData, encoding: .utf8) ?? ""
             let out = ProcOut(stdout: stdout, stderr: stderr, exitCode: proc.terminationStatus)
             if out.exitCode == 0 {
+                #if DEBUG
                 Self.log.debug("git succeeded via \(path, privacy: .public)")
+                #endif
                 return out
             }
+            #if DEBUG
             Self.log.debug("git via \(path, privacy: .public) exited with code \(out.exitCode, privacy: .public)")
+            #endif
             if path != "/usr/bin/env",
                out.stderr.contains("App Sandbox") || out.stderr.contains("xcrun: error")
             {

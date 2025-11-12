@@ -24,6 +24,11 @@ extension ContentView {
     let viewWithNotifications = applyNotificationModifiers(to: viewWithTasks)
     let viewWithDialogs = applyDialogsAndAlerts(to: viewWithNotifications)
     return applyGlobalSearchOverlay(to: viewWithDialogs, geometry: geometry)
+      .background(
+        GlobalFindKeyInterceptor {
+          NotificationCenter.default.post(name: .codMateFocusGlobalSearch, object: nil)
+        }
+      )
       .onChange(of: preferences.searchPanelStyle) { _, newStyle in
         handleSearchPanelStyleChange(newStyle)
       }
@@ -32,12 +37,22 @@ extension ContentView {
   func applyTaskAndChangeModifiers<V: View>(to view: V) -> some View {
     let v1 = view.task { await viewModel.refreshSessions(force: true) }
     let v2 = v1.onChange(of: viewModel.sections) { _, _ in
-      applyPendingSelectionIfNeeded()
-      normalizeSelection()
+      // Avoid mutating selection while search popover is opening/active to prevent focus loss/auto-dismiss
+      if !shouldBlockAutoSelection {
+        applyPendingSelectionIfNeeded()
+        normalizeSelection()
+      }
       reconcilePendingEmbeddedRekeys()
     }
     let v3 = v2.onChange(of: selection) { _, newSel in
-      normalizeSelection()
+      // 当搜索弹出开启时，立即释放并回拉焦点；否则不要在选择变化时强制归一化，
+      // 以免点击空白导致又被选中首项。
+      if shouldBlockAutoSelection && preferences.searchPanelStyle == .popover {
+        releasePrimaryFirstResponder()
+        DispatchQueue.main.async { [weak globalSearchViewModel] in
+          if isSearchPopoverPresented { globalSearchViewModel?.setFocus(true) }
+        }
+      }
       let added = newSel.subtracting(lastSelectionSnapshot)
       if let justAdded = added.first { selectionPrimaryId = justAdded }
       if let primary = selectionPrimaryId, !newSel.contains(primary) {
@@ -156,3 +171,46 @@ extension ContentView {
     }
   }
 }
+
+#if os(macOS)
+import AppKit
+
+// Intercepts Command+F at the window level and routes it to global search,
+// swallowing the event so focused text fields don't consume it first.
+private struct GlobalFindKeyInterceptor: NSViewRepresentable {
+  var onFind: () -> Void
+
+  func makeCoordinator() -> Coordinator { Coordinator(onFind: onFind) }
+
+  func makeNSView(context: Context) -> NSView {
+    let view = NSView(frame: .zero)
+    context.coordinator.installMonitor()
+    return view
+  }
+
+  func updateNSView(_ nsView: NSView, context: Context) {}
+
+  final class Coordinator {
+    let onFind: () -> Void
+    var monitor: Any?
+
+    init(onFind: @escaping () -> Void) { self.onFind = onFind }
+
+    func installMonitor() {
+      if monitor != nil { return }
+      monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { [weak self] event in
+        guard let self, event.modifierFlags.contains(.command) else { return event }
+        if let chars = event.charactersIgnoringModifiers?.lowercased(), chars == "f" {
+          self.onFind()
+          return nil // swallow so first responder doesn't handle it
+        }
+        return event
+      }
+    }
+
+    deinit {
+      if let monitor { NSEvent.removeMonitor(monitor) }
+    }
+  }
+}
+#endif

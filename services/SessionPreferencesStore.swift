@@ -211,13 +211,8 @@ final class SessionPreferencesStore: ObservableObject {
     } else {
       self.markdownVisibleKinds = MessageVisibilityKind.markdownDefault
     }
-    if let storedStyle = defaults.string(forKey: Keys.searchPanelStyle),
-      let style = GlobalSearchPanelStyle(rawValue: storedStyle)
-    {
-      self.searchPanelStyle = style
-    } else {
-      self.searchPanelStyle = .floating
-    }
+    // Enforce floating style as the default and ignore any previously stored value
+    self.searchPanelStyle = .floating
     // Claude advanced defaults
     self.claudeDebug = defaults.object(forKey: Keys.claudeDebug) as? Bool ?? false
     self.claudeDebugFilter = defaults.string(forKey: Keys.claudeDebugFilter) ?? ""
