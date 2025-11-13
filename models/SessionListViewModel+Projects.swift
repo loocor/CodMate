@@ -2,6 +2,7 @@ import Foundation
 
 @MainActor
 extension SessionListViewModel {
+    static let otherProjectId = "__other__"
     func loadProjects() async {
         var list = await projectsStore.listProjects()
         if list.isEmpty {
@@ -15,11 +16,12 @@ extension SessionListViewModel {
         let memberships = await projectsStore.membershipsSnapshot()
         await MainActor.run {
             self.projects = list
+            self.projectStructureVersion &+= 1
             self.projectCounts = counts
             self.setProjectMemberships(memberships)
             self.recomputeProjectCounts()
             self.invalidateProjectVisibleCountsCache()
-            self.applyFilters()
+            self.scheduleApplyFilters()
         }
     }
 
@@ -51,8 +53,8 @@ extension SessionListViewModel {
             self.projectCounts = counts
             self.setProjectMemberships(memberships)
             self.recomputeProjectCounts()
+            self.scheduleApplyFilters()
         }
-        applyFilters()
     }
 
     func projectCountsFromStore() -> [String: Int] { projectCounts }
@@ -75,6 +77,7 @@ extension SessionListViewModel {
         let descriptors = Self.makeDayDescriptors(selectedDays: selectedDays, singleDay: selectedDay)
         let filterByDay = !descriptors.isEmpty
 
+        var other = 0
         for session in allSessions {
             if filterByDay && !matchesDayFilters(session, descriptors: descriptors) {
                 continue
@@ -83,8 +86,11 @@ extension SessionListViewModel {
                 let allowedSources = allowed[pid] ?? ProjectSessionSource.allSet
                 if !allowedSources.contains(session.source.projectSource) { continue }
                 visible[pid, default: 0] += 1
+            } else {
+                other += 1
             }
         }
+        if other > 0 { visible[Self.otherProjectId] = other }
         cachedProjectVisibleCounts = (key, visible)
         return visible
     }
@@ -92,6 +98,28 @@ extension SessionListViewModel {
     func projectCountsDisplay() -> [String: (visible: Int, total: Int)] {
         let directVisible = visibleProjectCountsForDateScope()
         let directTotal = projectCounts
+
+        // Build cache key
+        let visibleKey = ProjectVisibleKey(
+            dimension: dateDimension,
+            selectedDay: selectedDay,
+            selectedDays: selectedDays,
+            sessionCount: allSessions.count,
+            membershipVersion: projectMembershipsVersion
+        )
+        let totalCountsHash = directTotal.values.reduce(0) { $0 ^ $1 }
+        let cacheKey = ProjectAggregatedKey(
+            visibleKey: visibleKey,
+            totalCountsHash: totalCountsHash,
+            structureVersion: projectStructureVersion
+        )
+
+        // Check cache
+        if let cached = cachedProjectAggregated, cached.key == cacheKey {
+            return cached.value
+        }
+
+        // Cache miss - compute aggregated counts
         var children: [String: [String]] = [:]
         for p in projects {
             if let parent = p.parentId { children[parent, default: []].append(p.id) }
@@ -114,6 +142,15 @@ extension SessionListViewModel {
             let (v, t) = aggregate(for: p.id, using: &memo)
             out[p.id] = (v, t)
         }
+        // Add synthetic Other bucket
+        let otherVisible = directVisible[Self.otherProjectId] ?? 0
+        let otherTotal = directTotal[Self.otherProjectId] ?? otherVisible
+        if otherVisible > 0 || otherTotal > 0 {
+            out[Self.otherProjectId] = (otherVisible, otherTotal)
+        }
+
+        // Cache the result
+        cachedProjectAggregated = (cacheKey, out)
         return out
     }
 
@@ -160,9 +197,14 @@ extension SessionListViewModel {
 
         var days: Set<Int> = []
         for session in allSessions {
-            guard let assigned = projectMemberships[session.id], allowedProjects.contains(assigned) else { continue }
-            let allowed = allowedSourcesByProject[assigned] ?? ProjectSessionSource.allSet
-            if !allowed.contains(session.source.projectSource) { continue }
+            if let assigned = projectMemberships[session.id] {
+                guard allowedProjects.contains(assigned) else { continue }
+                let allowed = allowedSourcesByProject[assigned] ?? ProjectSessionSource.allSet
+                if !allowed.contains(session.source.projectSource) { continue }
+            } else {
+                // Include unassigned only when Other is selected
+                guard allowedProjects.contains(Self.otherProjectId) else { continue }
+            }
             let bucket = dayIndex(for: session)
             switch dimension {
             case .created:
@@ -201,7 +243,7 @@ extension SessionListViewModel {
         if selectedProjectIDs.contains(id) {
             selectedProjectIDs.remove(id)
         }
-        applyFilters()
+        scheduleApplyFilters()
     }
 
     func deleteProjectCascade(id: String) async {
@@ -212,7 +254,7 @@ extension SessionListViewModel {
         if !selectedProjectIDs.isDisjoint(with: ids) {
             selectedProjectIDs.subtract(ids)
         }
-        applyFilters()
+        scheduleApplyFilters()
     }
 
     func deleteProjectMoveChildrenUp(id: String) async {
@@ -227,7 +269,32 @@ extension SessionListViewModel {
         if selectedProjectIDs.contains(id) {
             selectedProjectIDs.remove(id)
         }
-        applyFilters()
+        scheduleApplyFilters()
+    }
+
+    func changeProjectParent(projectId: String, newParentId: String?) async {
+        // Don't allow changing the Other synthetic project
+        guard projectId != Self.otherProjectId else { return }
+        // Don't allow setting Other as a parent
+        guard newParentId != Self.otherProjectId else { return }
+
+        let list = await projectsStore.listProjects()
+        guard let project = list.first(where: { $0.id == projectId }) else { return }
+
+        // No-op if already has the same parent
+        if project.parentId == newParentId { return }
+
+        // Prevent circular dependency: can't make a project its own parent or descendant
+        if let newParent = newParentId {
+            if newParent == projectId { return }
+            let descendants = collectDescendants(of: projectId, in: list)
+            if descendants.contains(newParent) { return }
+        }
+
+        var updated = project
+        updated.parentId = newParentId
+        await projectsStore.upsertProject(updated)
+        await loadProjects()
     }
 
     func collectDescendants(of id: String, in list: [Project]) -> [String] {
@@ -260,17 +327,41 @@ extension SessionListViewModel {
 
     @MainActor
     func recomputeProjectCounts() {
+        // Optimize: use visibleProjectCountsForDateScope if it's for current filter state
+        // to avoid re-traversing all sessions
+        let currentKey = ProjectVisibleKey(
+            dimension: dateDimension,
+            selectedDay: selectedDay,
+            selectedDays: selectedDays,
+            sessionCount: allSessions.count,
+            membershipVersion: projectMembershipsVersion
+        )
+
+        // If we have cached visible counts for current state, reuse them as total counts
+        // (when no date filter is active)
+        if selectedDay == nil && selectedDays.isEmpty,
+           let cached = cachedProjectVisibleCounts, cached.key == currentKey {
+            projectCounts = cached.value
+            return
+        }
+
+        // Otherwise compute from scratch
         var counts: [String: Int] = [:]
+        var other = 0
         let allowed = projects.reduce(into: [String: Set<ProjectSessionSource>]()) {
             $0[$1.id] = $1.sources
         }
         for session in allSessions {
-            guard let pid = projectMemberships[session.id] else { continue }
-            let allowedSources = allowed[pid] ?? ProjectSessionSource.allSet
-            if allowedSources.contains(session.source.projectSource) {
-                counts[pid, default: 0] += 1
+            if let pid = projectMemberships[session.id] {
+                let allowedSources = allowed[pid] ?? ProjectSessionSource.allSet
+                if allowedSources.contains(session.source.projectSource) {
+                    counts[pid, default: 0] += 1
+                }
+            } else {
+                other += 1
             }
         }
+        if other > 0 { counts[Self.otherProjectId] = other }
         projectCounts = counts
     }
 

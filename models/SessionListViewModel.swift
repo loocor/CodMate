@@ -29,15 +29,22 @@ final class SessionListViewModel: ObservableObject {
     @Published var selectedPath: String? = nil {
         didSet {
             guard !suppressFilterNotifications, oldValue != selectedPath else { return }
+            // Path filtering works on already-loaded sessions (filters by cwd field),
+            // so we don't need to refresh files from disk - just reapply filters
             scheduleFiltersUpdate()
-            scheduleFilterRefresh(force: false)
         }
     }
     @Published var selectedDay: Date? = nil {
         didSet {
             guard !suppressFilterNotifications, oldValue != selectedDay else { return }
             invalidateVisibleCountCache()
-            scheduleFilterRefresh(force: true)
+            // In Updated mode, sessions are already loaded - just refilter
+            // In Created mode, only refresh if crossing month boundary
+            if shouldRefreshSessionsForDateChange(oldValue: oldValue, newValue: selectedDay) {
+                scheduleFilterRefresh(force: true)
+            } else {
+                scheduleApplyFilters()
+            }
         }
     }
     @Published var dateDimension: DateDimension = .updated {
@@ -68,7 +75,13 @@ final class SessionListViewModel: ObservableObject {
                 }
             }
             invalidateVisibleCountCache()
-            scheduleFilterRefresh(force: true)
+            // In Updated mode, sessions are already loaded - just refilter
+            // In Created mode, only refresh if crossing month boundary
+            if shouldRefreshSessionsForDaysChange(oldValue: oldValue, newValue: selectedDays) {
+                scheduleFilterRefresh(force: true)
+            } else {
+                scheduleApplyFilters()
+            }
         }
     }
     @Published var sidebarMonthStart: Date = SessionListViewModel.normalizeMonthStart(Date())
@@ -117,6 +130,7 @@ final class SessionListViewModel: ObservableObject {
     private let ripgrepStore = SessionRipgrepStore()
     private var coverageLoadTasks: [String: Task<Void, Never>] = [:]
     private var pendingCoverageMonths: Set<String> = []
+    private var coverageDebounceTasks: [String: Task<Void, Never>] = [:]  // Per-key debounce
     private var toolMetricsTask: Task<Void, Never>?
     private var pendingToolMetricsRefresh = false
     struct SessionDayIndex: Equatable {
@@ -253,10 +267,23 @@ final class SessionListViewModel: ObservableObject {
     var projectCounts: [String: Int] = [:]
     var projectMemberships: [String: String] = [:]
     var projectMembershipsVersion: UInt64 = 0
+    var projectStructureVersion: UInt64 = 0  // Incremented when projects/parentIds change
+
+    struct ProjectAggregatedKey: Equatable {
+        var visibleKey: ProjectVisibleKey
+        var totalCountsHash: Int
+        var structureVersion: UInt64
+    }
+    var cachedProjectAggregated: (key: ProjectAggregatedKey, value: [String: (visible: Int, total: Int)])?
     @Published var selectedProjectIDs: Set<String> = [] {
         didSet {
             guard !suppressFilterNotifications, oldValue != selectedProjectIDs else { return }
-            if !selectedProjectIDs.isEmpty { selectedPath = nil }
+            if !selectedProjectIDs.isEmpty {
+                // Defer selectedPath modification to avoid "Publishing changes from within view updates"
+                Task { @MainActor [weak self] in
+                    self?.selectedPath = nil
+                }
+            }
             invalidateProjectVisibleCountsCache()
             scheduleFiltersUpdate()
         }
@@ -284,6 +311,7 @@ final class SessionListViewModel: ObservableObject {
 
     func invalidateProjectVisibleCountsCache() {
         cachedProjectVisibleCounts = nil
+        cachedProjectAggregated = nil
     }
 
     private func scheduleViewUpdate() {
@@ -296,7 +324,7 @@ final class SessionListViewModel: ObservableObject {
         }
     }
 
-    private func scheduleApplyFilters() {
+    func scheduleApplyFilters() {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.applyFilters()
@@ -391,6 +419,14 @@ final class SessionListViewModel: ObservableObject {
         let normalized = Self.normalizeMonthStart(date)
         if normalized == sidebarMonthStart { return }
         sidebarMonthStart = normalized
+
+        // Cancel unrelated coverage load tasks to reduce CPU usage when switching months
+        let currentKey = cacheKey(normalized, dateDimension)
+        for (key, task) in coverageLoadTasks where key != currentKey {
+            task.cancel()
+        }
+        coverageLoadTasks.removeAll(keepingCapacity: true)
+
         _ = calendarCounts(for: normalized, dimension: dateDimension)
 
         // In Created mode, changing the viewed month requires reloading data
@@ -791,7 +827,8 @@ final class SessionListViewModel: ObservableObject {
         currentMonthKey = key
         currentMonthDimension = dimension
         if dimension == .updated {
-            triggerCoverageLoad(for: monthStart, dimension: dimension)
+            // Use current selected path for accurate cache key
+            triggerCoverageLoad(for: monthStart, dimension: dimension, projectPath: selectedPath)
         }
         return counts
     }
@@ -860,6 +897,14 @@ final class SessionListViewModel: ObservableObject {
         return dimension.rawValue + "|" + Self.monthFormatter.string(from: monthStart)
     }
 
+    private func coverageCacheKey(_ monthStart: Date, _ dimension: DateDimension, projectPath: String? = nil) -> String {
+        var key = dimension.rawValue + "|" + Self.monthFormatter.string(from: monthStart)
+        if let path = projectPath {
+            key += "|" + path
+        }
+        return key
+    }
+
     var pathTreeRoot: PathTreeNode? { pathTreeRootPublished }
 
     func ensurePathTree() {
@@ -916,7 +961,22 @@ final class SessionListViewModel: ObservableObject {
         }
         guard !allSessions.isEmpty else { return }
         pendingToolMetricsRefresh = false
-        let sessions = allSessions
+
+        // Optimize: only scan visible sessions instead of all sessions
+        // Extract unique sessions from current sections
+        var visibleSessions: [SessionSummary] = []
+        var seenIDs = Set<String>()
+        for section in sections {
+            for summary in section.sessions {
+                if seenIDs.insert(summary.id).inserted {
+                    visibleSessions.append(summary)
+                }
+            }
+        }
+
+        // Fallback to all sessions if no visible sessions (e.g., during initial load)
+        let sessions = visibleSessions.isEmpty ? allSessions : visibleSessions
+
         toolMetricsTask = Task.detached(priority: .utility) { [weak self] in
             guard let self else { return }
             let counts = await self.ripgrepStore.toolInvocationCounts(for: sessions)
@@ -967,32 +1027,60 @@ final class SessionListViewModel: ObservableObject {
         }
     }
 
-    private func triggerCoverageLoad(for monthStart: Date, dimension: DateDimension) {
+    private func triggerCoverageLoad(
+        for monthStart: Date,
+        dimension: DateDimension,
+        projectPath: String? = nil,
+        forceRefresh: Bool = false
+    ) {
         guard dimension == .updated else { return }
-        let key = cacheKey(monthStart, dimension)
-        if coverageLoadTasks[key] != nil {
-            pendingCoverageMonths.insert(key)
-            return
+        let key = coverageCacheKey(monthStart, dimension, projectPath: projectPath)
+
+        // Force refresh: invalidate cache for this scope
+        if forceRefresh {
+            let monthKey = Self.monthFormatter.string(from: monthStart)
+            Task {
+                await ripgrepStore.invalidateCoverage(monthKey: monthKey, projectPath: projectPath)
+            }
+            pendingCoverageMonths.remove(key)
         }
-        let targets = sessionsIntersecting(monthStart: monthStart)
-        guard !targets.isEmpty else { return }
-        coverageLoadTasks[key] = Task.detached(priority: .utility) { [weak self] in
-            guard let self else { return }
-            let data = await self.ripgrepStore.dayCoverage(for: monthStart, sessions: targets)
+
+        // Cancel only this specific key's debounce task (not all of them!)
+        coverageDebounceTasks[key]?.cancel()
+
+        // Debounce: delay execution to avoid triggering too many scans during rapid month switching
+        // Each key has its own debounce task, so switching between different months won't cancel each other
+        coverageDebounceTasks[key] = Task { @MainActor in
+            defer { coverageDebounceTasks.removeValue(forKey: key) }
+            try? await Task.sleep(nanoseconds: 150_000_000)  // 150ms debounce
             guard !Task.isCancelled else { return }
-            await MainActor.run {
-                self.coverageLoadTasks[key]?.cancel()
-                self.coverageLoadTasks.removeValue(forKey: key)
-                if data.isEmpty {
-                    if !targets.isEmpty {
-                        self.pendingCoverageMonths.insert(key)
-                        self.rebuildMonthCounts(for: monthStart, dimension: dimension)
+
+            if coverageLoadTasks[key] != nil {
+                pendingCoverageMonths.insert(key)
+                return
+            }
+            // Precise query scope: filter by month AND project path
+            let targets = sessionsIntersecting(monthStart: monthStart, projectPath: projectPath)
+            guard !targets.isEmpty else { return }
+
+            coverageLoadTasks[key] = Task.detached(priority: .background) { [weak self] in
+                guard let self else { return }
+                let data = await self.ripgrepStore.dayCoverage(for: monthStart, sessions: targets)
+                guard !Task.isCancelled else { return }
+                await MainActor.run {
+                    self.coverageLoadTasks[key]?.cancel()
+                    self.coverageLoadTasks.removeValue(forKey: key)
+                    if data.isEmpty {
+                        if !targets.isEmpty {
+                            self.pendingCoverageMonths.insert(key)
+                            self.rebuildMonthCounts(for: monthStart, dimension: dimension, skipUIUpdate: true)
+                        }
+                    } else {
+                        self.applyCoverage(monthStart: monthStart, coverage: data)
                     }
-                } else {
-                    self.applyCoverage(monthStart: monthStart, coverage: data)
-                }
-                if self.pendingCoverageMonths.remove(key) != nil {
-                    self.triggerCoverageLoad(for: monthStart, dimension: dimension)
+                    if self.pendingCoverageMonths.remove(key) != nil {
+                        self.triggerCoverageLoad(for: monthStart, dimension: dimension, projectPath: projectPath)
+                    }
                 }
             }
         }
@@ -1001,25 +1089,34 @@ final class SessionListViewModel: ObservableObject {
     private func requestCoverageIfNeeded(for day: Date) {
         guard dateDimension == .updated else { return }
         let monthStart = Self.normalizeMonthStart(day)
-        triggerCoverageLoad(for: monthStart, dimension: .updated)
+        // Use current selected path for accurate cache key
+        triggerCoverageLoad(for: monthStart, dimension: .updated, projectPath: selectedPath)
     }
 
-    private func sessionsIntersecting(monthStart: Date) -> [SessionSummary] {
+    private func sessionsIntersecting(monthStart: Date, projectPath: String? = nil) -> [SessionSummary] {
         let calendar = Calendar.current
         guard let monthEnd = calendar.date(byAdding: DateComponents(month: 1), to: monthStart) else {
             return []
         }
         return allSessions.filter { summary in
+            // Date range filter
             let start = summary.startedAt
             let end = summary.lastUpdatedAt ?? summary.startedAt
-            return end >= monthStart && start < monthEnd
+            guard end >= monthStart && start < monthEnd else { return false }
+
+            // Project path filter (if specified)
+            if let projectPath = projectPath {
+                return summary.fileURL.path.hasPrefix(projectPath)
+            }
+
+            return true
         }
     }
 
     @MainActor
     private func applyCoverage(monthStart: Date, coverage: [String: Set<Int>]) {
         guard !coverage.isEmpty else {
-            rebuildMonthCounts(for: monthStart, dimension: .updated)
+            rebuildMonthCounts(for: monthStart, dimension: .updated, skipUIUpdate: true)
             return
         }
         let monthKey = monthKey(for: monthStart)
@@ -1036,11 +1133,9 @@ final class SessionListViewModel: ObservableObject {
         if changed {
             invalidateVisibleCountCache()
         }
-        rebuildMonthCounts(for: monthStart, dimension: .updated)
+        rebuildMonthCounts(for: monthStart, dimension: .updated, skipUIUpdate: !changed)
         if changed {
             scheduleApplyFilters()
-        } else {
-            scheduleViewUpdate()
         }
     }
 
@@ -1052,7 +1147,7 @@ final class SessionListViewModel: ObservableObject {
         return map
     }
 
-    private func rebuildMonthCounts(for monthStart: Date, dimension: DateDimension) {
+    private func rebuildMonthCounts(for monthStart: Date, dimension: DateDimension, skipUIUpdate: Bool = false) {
         let key = cacheKey(monthStart, dimension)
         let monthKey = monthKey(for: monthStart)
         let coverage = dimension == .updated ? monthCoverageMap(for: monthKey) : [:]
@@ -1065,7 +1160,9 @@ final class SessionListViewModel: ObservableObject {
         monthCountsCache[key] = counts
         currentMonthKey = key
         currentMonthDimension = dimension
-        scheduleViewUpdate()
+        if !skipUIUpdate {
+            scheduleViewUpdate()
+        }
     }
 
     // MARK: - Filter state management
@@ -1162,7 +1259,10 @@ final class SessionListViewModel: ObservableObject {
 
         guard !allSessions.isEmpty else {
             filterTask = nil
-            sections = []
+            // Defer sections modification to avoid "Publishing changes from within view updates"
+            Task { @MainActor [weak self] in
+                self?.sections = []
+            }
             return
         }
 
@@ -1216,7 +1316,8 @@ final class SessionListViewModel: ObservableObject {
             return .init(
                 memberships: projectMemberships,
                 allowedProjects: allowedProjects,
-                allowedSourcesByProject: allowedSources
+                allowedSourcesByProject: allowedSources,
+                includeUnassigned: allowedProjects.contains(Self.otherProjectId)
             )
         }()
 
@@ -1280,11 +1381,11 @@ final class SessionListViewModel: ObservableObject {
             var matches: [SessionSummary] = []
             matches.reserveCapacity(filtered.count)
             for summary in filtered {
-                guard let assigned = memberships[summary.id], allowedProjects.contains(assigned) else {
-                    continue
-                }
-                let allowedSet = allowedSources[assigned] ?? ProjectSessionSource.allSet
-                if allowedSet.contains(summary.source.projectSource) {
+                if let assigned = memberships[summary.id] {
+                    guard allowedProjects.contains(assigned) else { continue }
+                    let allowedSet = allowedSources[assigned] ?? ProjectSessionSource.allSet
+                    if allowedSet.contains(summary.source.projectSource) { matches.append(summary) }
+                } else if projectFilter.includeUnassigned {
                     matches.append(summary)
                 }
             }
@@ -1404,6 +1505,7 @@ final class SessionListViewModel: ObservableObject {
             let memberships: [String: String]
             let allowedProjects: Set<String>
             let allowedSourcesByProject: [String: Set<ProjectSessionSource>]
+            let includeUnassigned: Bool
         }
 
         let sessions: [SessionSummary]
@@ -1752,11 +1854,39 @@ final class SessionListViewModel: ObservableObject {
             isLoading = true
         }
         scheduledFilterRefresh = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 10_000_000)
+            // Use longer debounce delay for non-force refreshes to reduce frequency
+            // force=true: 10ms (user-initiated, responsive)
+            // force=false: 300ms (auto-triggered, debounced)
+            let debounceNanoseconds: UInt64 = force ? 10_000_000 : 300_000_000
+            try? await Task.sleep(nanoseconds: debounceNanoseconds)
             guard let self, !Task.isCancelled else { return }
             await self.refreshSessions(force: force)
             self.scheduledFilterRefresh = nil
         }
+    }
+
+    private func shouldRefreshSessionsForDateChange(oldValue: Date?, newValue: Date?) -> Bool {
+        // In Updated mode, all sessions are already loaded - no need to refresh
+        guard dateDimension == .created else { return false }
+
+        // In Created mode, only refresh if crossing month boundary
+        guard let old = oldValue, let new = newValue else {
+            return true  // Clearing or first selection
+        }
+
+        let oldMonth = Self.normalizeMonthStart(old)
+        let newMonth = Self.normalizeMonthStart(new)
+        return oldMonth != newMonth  // Only refresh when crossing months
+    }
+
+    private func shouldRefreshSessionsForDaysChange(oldValue: Set<Date>, newValue: Set<Date>) -> Bool {
+        // In Updated mode, all sessions are already loaded - no need to refresh
+        guard dateDimension == .created else { return false }
+
+        // In Created mode, only refresh if any selected day crosses month boundary
+        let oldMonths = Set(oldValue.map { Self.normalizeMonthStart($0) })
+        let newMonths = Set(newValue.map { Self.normalizeMonthStart($0) })
+        return oldMonths != newMonths  // Only refresh when month set changes
     }
 
     // MARK: - Quick pulse: cheap, low-latency activity tracking via file mtime
@@ -2228,6 +2358,8 @@ extension SessionListViewModel {
     }
 
     func rebuildRipgrepIndexes() async {
+        coverageDebounceTasks.values.forEach { $0.cancel() }
+        coverageDebounceTasks.removeAll()
         coverageLoadTasks.values.forEach { $0.cancel() }
         coverageLoadTasks.removeAll()
         toolMetricsTask?.cancel()
@@ -2237,9 +2369,43 @@ extension SessionListViewModel {
         scheduleViewUpdate()
         scheduleToolMetricsRefresh()
         if dateDimension == .updated {
-            triggerCoverageLoad(for: sidebarMonthStart, dimension: dateDimension)
+            // Use current selected path for accurate cache key
+            triggerCoverageLoad(for: sidebarMonthStart, dimension: dateDimension, projectPath: selectedPath)
         }
         scheduleApplyFilters()
+    }
+
+    /// Force refresh coverage for current view scope (Cmd+R)
+    func forceRefreshCurrentScope() async {
+        let projectPath = selectedPath
+        let monthStart = sidebarMonthStart
+
+        // Cancel ongoing tasks for this scope
+        let key = coverageCacheKey(monthStart, dateDimension, projectPath: projectPath)
+        coverageDebounceTasks[key]?.cancel()
+        coverageDebounceTasks.removeValue(forKey: key)
+        coverageLoadTasks[key]?.cancel()
+        coverageLoadTasks.removeValue(forKey: key)
+
+        // Clear cache for this scope
+        monthCountsCache.removeValue(forKey: cacheKey(monthStart, dateDimension))
+
+        // Trigger fresh scan
+        if dateDimension == .updated {
+            triggerCoverageLoad(
+                for: monthStart,
+                dimension: dateDimension,
+                projectPath: projectPath,
+                forceRefresh: true
+            )
+        }
+
+        scheduleApplyFilters()
+    }
+
+    /// Notify that a session file has been modified (for incremental cache invalidation)
+    func notifySessionFileModified(at fileURL: URL) async {
+        await ripgrepStore.markFileModified(fileURL.path)
     }
 
     // Invalidate all cached monthly counts; next access will recompute
