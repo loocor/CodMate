@@ -6,6 +6,8 @@ import AppKit
 struct SessionNavigationView<ProjectsContent: View>: View {
     let state: SidebarState
     let actions: SidebarActions
+    let projectWorkspaceMode: ProjectWorkspaceMode
+    let isAllOrOtherSelected: Bool
     @ViewBuilder var projectsContent: () -> ProjectsContent
 
     var body: some View {
@@ -37,10 +39,26 @@ struct SessionNavigationView<ProjectsContent: View>: View {
             .padding(.top, 8)
             .frame(maxHeight: .infinity)
 
-            calendarSection
-                .padding(.top, 8)
+            // Calendar only visible in Overview/Tasks modes, or Sessions mode (for Others)
+            if shouldShowCalendar {
+                calendarSection
+                    .padding(.top, 8)
+            }
         }
         .frame(idealWidth: 240)
+    }
+
+    // Show calendar only for Overview, Tasks, or Sessions (Others)
+    private var shouldShowCalendar: Bool {
+        switch projectWorkspaceMode {
+        case .overview, .tasks:
+            return true
+        case .sessions:
+            // Sessions mode is only used for "Others" project
+            return isAllOrOtherSelected
+        case .review, .agents, .memory, .settings:
+            return false
+        }
     }
 
     private func scopeAllRow(
@@ -208,7 +226,12 @@ private enum SidebarMode: Hashable { case directories, projects }
         toggleSelectedDay: { _ in }
     )
 
-    return SessionNavigationView(state: state, actions: actions) {
+    return SessionNavigationView(
+        state: state,
+        actions: actions,
+        projectWorkspaceMode: .tasks,
+        isAllOrOtherSelected: true
+    ) {
         EmptyView()
     }
     .frame(width: 280, height: 600)
@@ -238,8 +261,15 @@ private enum SidebarMode: Hashable { case directories, projects }
         toggleSelectedDay: { _ in }
     )
 
-    return SessionNavigationView(state: state, actions: actions) { EmptyView() }
-        .frame(width: 280, height: 600)
+    return SessionNavigationView(
+        state: state,
+        actions: actions,
+        projectWorkspaceMode: .overview,
+        isAllOrOtherSelected: true
+    ) {
+        EmptyView()
+    }
+    .frame(width: 280, height: 600)
 }
 
 #Preview("Calendar Day Selected") {
@@ -267,8 +297,15 @@ private enum SidebarMode: Hashable { case directories, projects }
         toggleSelectedDay: { _ in }
     )
 
-    return SessionNavigationView(state: state, actions: actions) { EmptyView() }
-        .frame(width: 280, height: 600)
+    return SessionNavigationView(
+        state: state,
+        actions: actions,
+        projectWorkspaceMode: .tasks,
+        isAllOrOtherSelected: false
+    ) {
+        EmptyView()
+    }
+    .frame(width: 280, height: 600)
 }
 
 #Preview("Path Selected") {
@@ -294,6 +331,13 @@ private enum SidebarMode: Hashable { case directories, projects }
         toggleSelectedDay: { _ in }
     )
 
-    return SessionNavigationView(state: state, actions: actions) { EmptyView() }
-        .frame(width: 280, height: 600)
+    return SessionNavigationView(
+        state: state,
+        actions: actions,
+        projectWorkspaceMode: .review,
+        isAllOrOtherSelected: false
+    ) {
+        EmptyView()
+    }
+    .frame(width: 280, height: 600)
 }

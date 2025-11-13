@@ -115,6 +115,7 @@ struct SidebarDigest: Equatable {
   var calendarCountsHash: Int
   var enabledDaysHash: Int
   var visibleAllCount: Int
+  var projectWorkspaceMode: ProjectWorkspaceMode
 }
 
 // Equatable wrapper for the Sidebar content to minimize diffs while keeping

@@ -4,10 +4,15 @@ extension ContentView {
   func sidebarContent(sidebarMaxWidth: CGFloat) -> some View {
     let state = viewModel.sidebarStateSnapshot
     let digest = makeSidebarDigest(for: state)
+    let isAllSelected = viewModel.selectedProjectIDs.isEmpty
+    let isOtherSelected = viewModel.selectedProjectIDs.count == 1
+      && viewModel.selectedProjectIDs.first == SessionListViewModel.otherProjectId
     return EquatableSidebarContainer(key: digest) {
       SessionNavigationView(
         state: state,
-        actions: makeSidebarActions()
+        actions: makeSidebarActions(),
+        projectWorkspaceMode: viewModel.projectWorkspaceMode,
+        isAllOrOtherSelected: isAllSelected || isOtherSelected
       ) {
         ProjectsListView()
           .environmentObject(viewModel)
@@ -111,7 +116,8 @@ extension ContentView {
       monthStartInterval: state.monthStart.timeIntervalSinceReferenceDate,
       calendarCountsHash: hashCounts(state.calendarCounts),
       enabledDaysHash: hashEnabled(state.enabledProjectDays),
-      visibleAllCount: state.visibleAllCount
+      visibleAllCount: state.visibleAllCount,
+      projectWorkspaceMode: viewModel.projectWorkspaceMode
     )
   }
 

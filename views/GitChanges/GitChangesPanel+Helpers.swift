@@ -139,6 +139,29 @@ extension GitChangesPanel {
             )
     }
 
+    /// Expand all parent directories for a given file path in browser mode
+    func ensureBrowserPathExpanded(_ filePath: String) {
+        // Get all parent directory paths
+        var pathComponents = filePath.split(separator: "/").map(String.init)
+        pathComponents.removeLast() // Remove the file name itself
+
+        var currentPath = ""
+        for component in pathComponents {
+            if !currentPath.isEmpty {
+                currentPath += "/"
+            }
+            currentPath += component
+
+            // Add to expanded set if not already expanded
+            if !expandedDirsBrowser.contains(currentPath) {
+                expandedDirsBrowser.insert(currentPath)
+            }
+        }
+
+        // Rebuild the display to show expanded tree
+        rebuildBrowserDisplayed()
+    }
+
 #if canImport(AppKit)
     func revealInFinder(path: String, isDirectory: Bool) {
         let base = vm.repoRoot ?? projectDirectory ?? workingDirectory

@@ -5,8 +5,12 @@ extension GitChangesPanel {
     var header: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
-                Label("Changes", systemImage: "arrow.triangle.branch")
-                    .font(.headline)
+                // Dynamic title and icon based on mode
+                Label(
+                    mode == .browser ? "Explorer" : "Changes",
+                    systemImage: mode == .browser ? "folder" : "arrow.triangle.branch"
+                )
+                .font(.headline)
                 let rootURL = vm.repoRoot ?? projectDirectory ?? workingDirectory
                 let authorized = SecurityScopedBookmarks.shared.isSandboxed
                     ? SecurityScopedBookmarks.shared.hasDynamicBookmark(for: rootURL)
@@ -36,18 +40,18 @@ extension GitChangesPanel {
                     }
                 }
                 Spacer()
-                if mode == .diff {
-                    Picker("", selection: $vm.showPreviewInsteadOfDiff) {
-                        Text("Diff").tag(false)
-                        Text("Preview").tag(true)
+
+                // Mode switcher: Diff / Explorer (only show when repo exists)
+                if vm.repoRoot != nil {
+                    Picker("", selection: $mode) {
+                        Text("Diff").tag(ReviewPanelState.Mode.diff)
+                        Text("Explorer").tag(ReviewPanelState.Mode.browser)
                     }
                     .pickerStyle(.segmented)
-                    .frame(width: 116)
+                    .frame(width: 140)
                     .controlSize(.small)
                     .labelsHidden()
                 }
-
-                // (wand button moved into commit message box overlay)
 
                 // Hidden keyboard shortcut to trigger commit confirmation via ⌘⏎
                 Button("") {
@@ -57,14 +61,6 @@ extension GitChangesPanel {
                 .keyboardShortcut(.return, modifiers: .command)
                 .frame(width: 0, height: 0)
                 .opacity(0)
-
-                Button {
-                    Task { await vm.refreshStatus() }
-                } label: {
-                    Image(systemName: vm.isLoading ? "hourglass" : "arrow.clockwise")
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
             }
             if vm.repoRoot == nil {
                 HStack(spacing: 6) {

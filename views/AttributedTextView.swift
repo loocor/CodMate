@@ -231,7 +231,7 @@ struct AttributedTextView: NSViewRepresentable {
                 let digits = max(2, String(targetMax).count)
                 let sample = String(repeating: "8", count: digits) as NSString
                 let numWidth = sample.size(withAttributes: [.font: font]).width
-                let gap: CGFloat = 3 // spacing between numbers and separator
+                let gap: CGFloat = 8 // spacing between numbers and text start
                 let leftPad: CGFloat = 5 // inner left padding inside gutter
                 let minGutter: CGFloat = 36
                 let gutter = max(minGutter, ceil(numWidth + gap + leftPad))
@@ -478,7 +478,7 @@ final class LineNumberLayoutManager: NSLayoutManager {
             let num = numString as NSString
             let size = num.size(withAttributes: attrs)
             let padding = textView.textContainer?.lineFragmentPadding ?? 0
-            let gap: CGFloat = 3 // spacing between numbers and text start
+            let gap: CGFloat = 8 // spacing between numbers and text start
             let x = origin.x + padding - gap - size.width
             num.draw(at: NSPoint(x: x, y: y), withAttributes: attrs)
             lastDrawnLogicalLine = logicalLine

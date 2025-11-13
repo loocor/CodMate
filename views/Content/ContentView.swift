@@ -444,6 +444,49 @@ struct ContentView: View {
     }
   }
 
+  func ensureRepoAccessForProjectReview(directory: String) {
+    // Non-sandboxed builds don't require bookmark authorization
+    if SecurityScopedBookmarks.shared.isSandboxed == false { return }
+    let startURL = URL(fileURLWithPath: directory, isDirectory: true)
+
+    func findRepoRootByFS(from start: URL) -> URL? {
+      let fm = FileManager.default
+      var cur = start.standardizedFileURL
+      var guardCounter = 0
+      while guardCounter < 200 {
+        let gitDir = cur.appendingPathComponent(".git", isDirectory: true)
+        var isDir: ObjCBool = false
+        if fm.fileExists(atPath: gitDir.path, isDirectory: &isDir) {
+          return cur
+        }
+        let parent = cur.deletingLastPathComponent()
+        if parent.path == cur.path { break }
+        cur = parent
+        guardCounter += 1
+      }
+      return nil
+    }
+
+    let repoRoot = findRepoRootByFS(from: startURL) ?? startURL
+
+    if SecurityScopedBookmarks.shared.hasDynamicBookmark(for: repoRoot) {
+      _ = SecurityScopedBookmarks.shared.startAccessDynamic(for: repoRoot)
+      return
+    }
+
+    let success = AuthorizationHub.shared.ensureDirectoryAccessOrPromptSync(
+      directory: repoRoot,
+      purpose: .gitReviewRepo,
+      message: "Authorize the repository folder (the one containing .git) for Git Review"
+    )
+
+    if success {
+      print("[ContentView] Project Git review authorization successful for: \(repoRoot.path)")
+    } else {
+      print("[ContentView] Project Git review authorization failed or cancelled")
+    }
+  }
+
   // MARK: - Embedded CLI console specs (DEV)
   private func consoleEnv(for source: SessionSource) -> [String: String] {
     var env: [String: String] = [:]

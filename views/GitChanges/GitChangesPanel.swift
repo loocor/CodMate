@@ -169,6 +169,15 @@ struct GitChangesPanel: View {
                     }
                 }
             }
+            .onChange(of: mode) { oldMode, newMode in
+                if newMode == .browser {
+                    reloadBrowserTreeIfNeeded()
+                    // Auto-expand and select the currently selected file in explorer tree
+                    if let selectedPath = vm.selectedPath {
+                        ensureBrowserPathExpanded(selectedPath)
+                    }
+                }
+            }
             .modifier(LifecycleModifier(
                 expandedDirsStaged: $expandedDirsStaged,
                 expandedDirsUnstaged: $expandedDirsUnstaged,

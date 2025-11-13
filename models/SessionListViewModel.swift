@@ -45,6 +45,7 @@ final class SessionListViewModel: ObservableObject {
             } else {
                 scheduleApplyFilters()
             }
+            windowStateStore.saveCalendarSelection(selectedDay: selectedDay, selectedDays: selectedDays)
         }
     }
     @Published var dateDimension: DateDimension = .updated {
@@ -82,6 +83,7 @@ final class SessionListViewModel: ObservableObject {
             } else {
                 scheduleApplyFilters()
             }
+            windowStateStore.saveCalendarSelection(selectedDay: selectedDay, selectedDays: selectedDays)
         }
     }
     @Published var sidebarMonthStart: Date = SessionListViewModel.normalizeMonthStart(Date())
@@ -231,6 +233,18 @@ final class SessionListViewModel: ObservableObject {
     // Persist Review (Git Changes) panel UI state per session so toggling
     // between Conversation, Terminal and Review preserves context.
     @Published var reviewPanelStates: [String: ReviewPanelState] = [:]
+    // Project-level Git Review panel state per project id
+    @Published var projectReviewPanelStates: [String: ReviewPanelState] = [:]
+
+    // Project workspace mode (toolbar segmented): Tasks | Review
+    @Published var projectWorkspaceMode: ProjectWorkspaceMode = .tasks {
+        didSet {
+            guard oldValue != projectWorkspaceMode else { return }
+            windowStateStore.saveWorkspaceMode(projectWorkspaceMode)
+        }
+    }
+
+    let windowStateStore = WindowStateStore()
 
     // Auto-assign: pending intents created when user clicks New
     struct PendingAssignIntent: Identifiable, Sendable, Hashable {
@@ -286,6 +300,7 @@ final class SessionListViewModel: ObservableObject {
             }
             invalidateProjectVisibleCountsCache()
             scheduleFiltersUpdate()
+            windowStateStore.saveProjectSelection(selectedProjectIDs)
         }
     }
     // Sidebar → Project-level New request when using embedded terminal
@@ -471,13 +486,28 @@ final class SessionListViewModel: ObservableObject {
             membershipsURL: pr.appendingPathComponent("memberships.json", isDirectory: false)
         )
         self.projectsStore = ProjectsStore(paths: p)
-        // Default at startup: All Sessions (no directory filter) + today
-        let today = Date()
-        let cal = Calendar.current
+
         suppressFilterNotifications = true
-        let start = cal.startOfDay(for: today)
-        self.selectedDay = start
-        self.selectedDays = [start]
+
+        // Restore window state from previous session
+        let calendar = windowStateStore.restoreCalendarSelection()
+        if let restoredDay = calendar.selectedDay, !calendar.selectedDays.isEmpty {
+            // Use restored calendar state
+            self.selectedDay = restoredDay
+            self.selectedDays = calendar.selectedDays
+        } else {
+            // Default at startup: today
+            let today = Date()
+            let cal = Calendar.current
+            let start = cal.startOfDay(for: today)
+            self.selectedDay = start
+            self.selectedDays = [start]
+        }
+
+        // Restore project selection and workspace mode
+        self.selectedProjectIDs = windowStateStore.restoreProjectSelection()
+        self.projectWorkspaceMode = windowStateStore.restoreWorkspaceMode()
+
         suppressFilterNotifications = false
         configureDirectoryMonitor()
         configureClaudeDirectoryMonitor()

@@ -2,6 +2,57 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 extension ContentView {
+  fileprivate func canProjectWorkspaceReview() -> Bool {
+    guard viewModel.selectedProjectIDs.count == 1,
+          let pid = viewModel.selectedProjectIDs.first,
+          let p = viewModel.projects.first(where: { $0.id == pid }),
+          let dir = p.directory?.trimmingCharacters(in: .whitespacesAndNewlines), !dir.isEmpty
+    else { return false }
+    return true
+  }
+
+  fileprivate func syncListHiddenForWorkspaceMode() {
+    // Show session list only in Tasks and Sessions modes
+    let shouldHide = (viewModel.projectWorkspaceMode != .tasks && viewModel.projectWorkspaceMode != .sessions)
+    if shouldHide {
+      if !isListHidden { isListHidden = true }
+    } else {
+      if isListHidden { isListHidden = false }
+    }
+  }
+  fileprivate func navigationTitleForSelection() -> String {
+    if isAllSelection() {
+      return "Overview"
+    } else if isOtherSelection() {
+      return "Sessions"
+    } else {
+      return ""
+    }
+  }
+
+  fileprivate func isAllSelection() -> Bool {
+    return viewModel.selectedProjectIDs.isEmpty
+  }
+
+  fileprivate func isOtherSelection() -> Bool {
+    if viewModel.selectedProjectIDs.count == 1,
+       let pid = viewModel.selectedProjectIDs.first,
+       pid == SessionListViewModel.otherProjectId {
+      return true
+    }
+    return false
+  }
+
+  fileprivate func enforceWorkspaceModeForSelection() {
+    // "All" is forced to Overview
+    if isAllSelection() && viewModel.projectWorkspaceMode != .overview {
+      viewModel.projectWorkspaceMode = .overview
+    }
+    // "Other" is forced to Sessions mode (for managing unassigned sessions)
+    else if isOtherSelection() && viewModel.projectWorkspaceMode != .sessions {
+      viewModel.projectWorkspaceMode = .sessions
+    }
+  }
   func navigationSplitView(geometry: GeometryProxy) -> some View {
     let sidebarMaxWidth = geometry.size.width * 0.25
     _ = storeSidebarHidden
@@ -14,11 +65,34 @@ extension ContentView {
       detailColumn
     }
     .navigationSplitViewStyle(.prominentDetail)
+    .navigationTitle(navigationTitleForSelection())
     .onAppear {
       applyVisibilityFromStorage(animated: false)
       permissionsManager.restoreAccess()
       SecurityScopedBookmarks.shared.restoreAllDynamicBookmarks()
       Task { await permissionsManager.ensureCriticalDirectoriesAccess() }
+
+      // Restore session selection from previous launch
+      let restored = viewModel.windowStateStore.restoreSessionSelection()
+      if !restored.selectedIDs.isEmpty {
+        selection = restored.selectedIDs
+        selectionPrimaryId = restored.primaryId
+      }
+
+      // On initial launch, ensure workspace mode matches the current selection.
+      // We dispatch to next runloop to avoid racing with view initialization.
+      DispatchQueue.main.async {
+        enforceWorkspaceModeForSelection()
+        syncListHiddenForWorkspaceMode()
+      }
+    }
+    .onChange(of: selection) { _, newSelection in
+      // Save session selection whenever it changes
+      viewModel.windowStateStore.saveSessionSelection(selectedIDs: newSelection, primaryId: selectionPrimaryId)
+    }
+    .onChange(of: selectionPrimaryId) { _, newPrimaryId in
+      // Save primary ID whenever it changes
+      viewModel.windowStateStore.saveSessionSelection(selectedIDs: selection, primaryId: newPrimaryId)
     }
     let viewWithTasks = applyTaskAndChangeModifiers(to: baseView)
     let viewWithNotifications = applyNotificationModifiers(to: viewWithTasks)
@@ -31,6 +105,18 @@ extension ContentView {
       )
       .onChange(of: preferences.searchPanelStyle) { _, newStyle in
         handleSearchPanelStyleChange(newStyle)
+      }
+      .onChange(of: viewModel.projectWorkspaceMode) { _, _ in
+        syncListHiddenForWorkspaceMode()
+      }
+      .onChange(of: viewModel.selectedProjectIDs) { _, _ in
+        // Enforce Overview only when the selection truly is All/Other.
+        // Dispatching to the next run loop avoids racing with List(selection:)
+        // rebinds that momentarily emit an empty selection while re-rendering.
+        DispatchQueue.main.async {
+          enforceWorkspaceModeForSelection()
+          syncListHiddenForWorkspaceMode()
+        }
       }
   }
 
@@ -71,7 +157,28 @@ extension ContentView {
       viewModel.pendingEmbeddedProjectNew = nil
     }
     let v6 = v5.toolbar {
-      ToolbarItem(placement: .primaryAction) { refreshToolbarContent }
+      // Project workspace mode segmented (toolbar leading) — AppKit-backed for icon+text in one segment
+      ToolbarItem(placement: .navigation) {
+        // Only show segmented control for specific projects (not All/Other)
+        if viewModel.selectedProjectIDs.count == 1 && !isAllSelection() && !isOtherSelection() {
+          let items: [SegmentedIconPicker<ProjectWorkspaceMode>.Item] = [
+            .init(title: "Overview", systemImage: "square.grid.2x2", tag: .overview),
+            .init(title: "Tasks", systemImage: "checklist", tag: .tasks),
+            .init(title: "Review", systemImage: "doc.text.magnifyingglass", tag: .review),
+            .init(title: "Agents", systemImage: "book.pages", tag: .agents),
+            .init(title: "Memory", systemImage: "brain", tag: .memory),
+            .init(title: "Settings", systemImage: "slider.horizontal.3", tag: .settings)
+          ]
+          SegmentedIconPicker(items: items, selection: $viewModel.projectWorkspaceMode)
+            .help("Project workspace mode")
+        } else {
+          EmptyView()
+        }
+      }
+
+      ToolbarItem(placement: .primaryAction) {
+        refreshToolbarContent
+      }
     }
     return AnyView(v6)
   }

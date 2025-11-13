@@ -72,85 +72,71 @@ extension GitChangesPanel {
                             }
                         }
                     }
-                    Button {
-                        guard vm.repoRoot != nil else { return }
-                        mode = (mode == .browser) ? .diff : .browser
-                        if mode == .browser {
-                            reloadBrowserTreeIfNeeded()
-                        }
-                    } label: {
-                        Image(systemName: mode == .browser ? "folder" : "arrow.triangle.branch")
-                            .font(.system(size: 12))
-                            .foregroundStyle(vm.repoRoot == nil ? Color.secondary.opacity(0.4) : .secondary)
-                    }
-                    .buttonStyle(.plain)
-                    .frame(width: 28, height: 28)
-                    .contentShape(Rectangle())
-                    .disabled(vm.repoRoot == nil)
-                    .help(vm.repoRoot == nil ? "Explorer mode only: repository not found" : (mode == .browser ? "Switch to Diff" : "Switch to Explorer"))
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .frame(height: 32)
 
-            // Inline commit message (one line, auto-grow; no button)
-            GeometryReader { gr in
-                ZStack(alignment: .topLeading) {
-                    TextEditor(text: $vm.commitMessage)
-                        .font(.system(.body))
-                        .textEditorStyle(.plain)
-                        .frame(minHeight: 20)
-                        .frame(height: min(200, max(20, commitInlineHeight)))
-                        .padding(.leading, 6)
-                        .padding(.top, 6)
-                        .padding(.bottom, 6)
-                        .padding(.trailing, wandReservedTrailing)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 6)
-                                .stroke(Color.secondary.opacity(0.25))
-                        )
-                    .onChange(of: vm.commitMessage) { _, _ in
-                        // account for trailing reserve space
-                        let w = max(10, gr.size.width - 12 - wandReservedTrailing)
-                        commitInlineHeight = measureCommitHeight(vm.commitMessage, width: w)
-                    }
-                    if vm.commitMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        Text("Press Command+Return to commit")
-                            .foregroundStyle(.tertiary)
+            // Inline commit message (one line, auto-grow; no button) - only in Diff mode
+            if mode == .diff {
+                GeometryReader { gr in
+                    ZStack(alignment: .topLeading) {
+                        TextEditor(text: $vm.commitMessage)
+                            .font(.system(.body))
+                            .textEditorStyle(.plain)
+                            .frame(minHeight: 20)
+                            .frame(height: min(200, max(20, commitInlineHeight)))
+                            .padding(.leading, 6)
                             .padding(.top, 6)
-                            .padding(.leading, 10)
-                            .allowsHitTesting(false)
-                    }
-
-                    // Wand button at top-right of the commit message box
-                    HStack { Spacer() }
-                        .overlay(alignment: .topTrailing) {
-                            Button {
-                                vm.generateCommitMessage(providerId: preferences.commitProviderId, modelId: preferences.commitModelId)
-                            } label: {
-                                ZStack(alignment: .bottomTrailing) {
-                                    Circle()
-                                        .fill(hoverWand ? Color.accentColor.opacity(0.15) : Color.clear)
-                                        .frame(width: wandButtonSize - 1, height: wandButtonSize - 1)
-                                    Image(systemName: "sparkles")
-                                        .font(.system(size: 15, weight: .semibold))
-                                        .foregroundStyle(hoverWand ? Color.accentColor : Color.secondary)
-                                }
-                            }
-                            .buttonStyle(.plain)
-                            .frame(width: wandButtonSize, height: wandButtonSize)
-                            .contentShape(Rectangle())
-                            .padding(.top, 4) // keep top-anchored; don't move when TextEditor grows
-                            .padding(.trailing, 4)
-                            .onHover { hoverWand = $0 }
-                            .opacity((vm.isGenerating && vm.generatingRepoPath == vm.repoRoot?.path) ? 0.4 : 1.0)
-                            .animation((vm.isGenerating && vm.generatingRepoPath == vm.repoRoot?.path) ? .easeInOut(duration: 0.8).repeatForever(autoreverses: true) : .default, value: vm.isGenerating)
-                            .disabled(vm.isGenerating && vm.generatingRepoPath == vm.repoRoot?.path)
-                            .help("AI generate commit message from staged changes")
+                            .padding(.bottom, 6)
+                            .padding(.trailing, wandReservedTrailing)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 6)
+                                    .stroke(Color.secondary.opacity(0.25))
+                            )
+                        .onChange(of: vm.commitMessage) { _, _ in
+                            // account for trailing reserve space
+                            let w = max(10, gr.size.width - 12 - wandReservedTrailing)
+                            commitInlineHeight = measureCommitHeight(vm.commitMessage, width: w)
                         }
+                        if vm.commitMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            Text("Press Command+Return to commit")
+                                .foregroundStyle(.tertiary)
+                                .padding(.top, 6)
+                                .padding(.leading, 10)
+                                .allowsHitTesting(false)
+                        }
+
+                        // Wand button at top-right of the commit message box
+                        HStack { Spacer() }
+                            .overlay(alignment: .topTrailing) {
+                                Button {
+                                    vm.generateCommitMessage(providerId: preferences.commitProviderId, modelId: preferences.commitModelId)
+                                } label: {
+                                    ZStack(alignment: .bottomTrailing) {
+                                        Circle()
+                                            .fill(hoverWand ? Color.accentColor.opacity(0.15) : Color.clear)
+                                            .frame(width: wandButtonSize - 1, height: wandButtonSize - 1)
+                                        Image(systemName: "sparkles")
+                                            .font(.system(size: 15, weight: .semibold))
+                                            .foregroundStyle(hoverWand ? Color.accentColor : Color.secondary)
+                                    }
+                                }
+                                .buttonStyle(.plain)
+                                .frame(width: wandButtonSize, height: wandButtonSize)
+                                .contentShape(Rectangle())
+                                .padding(.top, 4) // keep top-anchored; don't move when TextEditor grows
+                                .padding(.trailing, 4)
+                                .onHover { hoverWand = $0 }
+                                .opacity((vm.isGenerating && vm.generatingRepoPath == vm.repoRoot?.path) ? 0.4 : 1.0)
+                                .animation((vm.isGenerating && vm.generatingRepoPath == vm.repoRoot?.path) ? .easeInOut(duration: 0.8).repeatForever(autoreverses: true) : .default, value: vm.isGenerating)
+                                .disabled(vm.isGenerating && vm.generatingRepoPath == vm.repoRoot?.path)
+                                .help("AI generate commit message from staged changes")
+                            }
+                    }
                 }
+                .frame(height: min(200, max(20, commitInlineHeight)) + 12)
             }
-            .frame(height: min(200, max(20, commitInlineHeight)) + 12)
 
             // Trees in VS Code-style sections
             ScrollView {
