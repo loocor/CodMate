@@ -78,7 +78,7 @@ extension SessionListViewModel {
                 self.projectCounts = counts
                 self.setProjectMemberships(memberships)
                 self.recomputeProjectCounts()
-                self.applyFilters()
+                self.scheduleApplyFilters()
             }
             await SystemNotifier.shared.notify(
                 title: "CodMate", body: "Assigned to \(best.intent.projectId)")

@@ -64,10 +64,16 @@ struct SessionListColumnView: View {
   private var contentView: some View {
     if sections.isEmpty {
       if isLoading {
-        ProgressView("Scanning…")
-          .padding(.vertical)
+        VStack {
+          Spacer()
+          ProgressView("Scanning…")
+          Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(.horizontal, -2)
       } else {
         emptyStateView
+          .padding(.horizontal, -2)
       }
     } else {
       sessionsListView
@@ -75,18 +81,31 @@ struct SessionListColumnView: View {
   }
 
   private var emptyStateView: some View {
+    let selected = selectedProject()
+    let isOtherProject = selected?.id == SessionListViewModel.otherProjectId
+
     return VStack(spacing: 12) {
           Spacer(minLength: 12)
-          ContentUnavailableView(
-            "No Sessions", systemImage: "tray",
-            description: Text(
-              "Adjust directories or launch Codex CLI to generate new session logs.")
-          )
-          .frame(maxWidth: .infinity)
 
-          // Primary action: New (match Detail action bar style and behavior)
-          let selected = selectedProject()
-          if let project = selected {
+          // Different message for Other project bucket
+          if isOtherProject {
+            ContentUnavailableView(
+              "No Unassigned Sessions", systemImage: "tray",
+              description: Text(
+                "Sessions can only be created within a project. Select a project from the sidebar to start a new session.")
+            )
+            .frame(maxWidth: .infinity)
+          } else {
+            ContentUnavailableView(
+              "No Sessions", systemImage: "tray",
+              description: Text(
+                "Adjust directories or launch Codex CLI to generate new session logs.")
+            )
+            .frame(maxWidth: .infinity)
+          }
+
+          // Primary action: New (hidden for Other project, shown for regular projects)
+          if let project = selected, !isOtherProject {
             let embeddedPreferredNew =
               viewModel.preferences.defaultResumeUseEmbeddedTerminal && !AppSandbox.isEnabled
             SplitPrimaryMenuButton(
@@ -103,7 +122,7 @@ struct SessionListColumnView: View {
               items: buildProjectNewMenuItems(for: project)
             )
             .help("Start a new session in \(projectDisplayName(project))")
-          } else {
+          } else if !isOtherProject {
             SplitPrimaryMenuButton(
               title: "New",
               systemImage: "plus",
@@ -293,6 +312,23 @@ extension SessionListColumnView {
     guard viewModel.selectedProjectIDs.count == 1,
       let pid = viewModel.selectedProjectIDs.first
     else { return nil }
+
+    // Check if it's the synthetic Other project
+    if pid == SessionListViewModel.otherProjectId {
+      return Project(
+        id: SessionListViewModel.otherProjectId,
+        name: "Other",
+        directory: nil,
+        trustLevel: nil,
+        overview: nil,
+        instructions: nil,
+        profileId: nil,
+        profile: nil,
+        parentId: nil,
+        sources: ProjectSessionSource.allSet
+      )
+    }
+
     return viewModel.projects.first(where: { $0.id == pid })
   }
 

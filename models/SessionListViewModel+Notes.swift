@@ -33,7 +33,7 @@ extension SessionListViewModel {
             updated.userComment = commentValue
             return updated
         }
-        applyFilters()
+        scheduleApplyFilters()
         cancelEdits()
     }
 
