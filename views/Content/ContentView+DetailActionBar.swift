@@ -10,7 +10,6 @@ extension ContentView {
         #if canImport(SwiftTerm) && !APPSTORE
           let items: [SegmentedIconPicker<ContentView.DetailTab>.Item] = [
             .init(title: "Timeline", systemImage: "clock", tag: .timeline),
-            .init(title: "Git Review", systemImage: "arrow.triangle.branch", tag: .review),
             .init(title: "Terminal", systemImage: "terminal", tag: .terminal),
           ]
           let selection = Binding<ContentView.DetailTab>(
@@ -37,8 +36,7 @@ extension ContentView {
           SegmentedIconPicker(items: items, selection: selection)
         #else
           let items: [SegmentedIconPicker<ContentView.DetailTab>.Item] = [
-            .init(title: "Timeline", systemImage: "clock", tag: .timeline),
-            .init(title: "Git Review", systemImage: "arrow.triangle.branch", tag: .review),
+            .init(title: "Timeline", systemImage: "clock", tag: .timeline)
           ]
           SegmentedIconPicker(items: items, selection: $selectedDetailTab)
         #endif
@@ -85,45 +83,51 @@ extension ContentView {
                   kind: .action(title: "\(currentName) with Warp") {
                     launchNewSession(for: focused, using: currentSrc, style: .warp)
                   }))
-                            
-                // Add remote options for current provider
-                let enabledRemoteHosts = viewModel.preferences.enabledRemoteHosts
-                if !enabledRemoteHosts.isEmpty {
-                    items.append(.init(kind: .separator))
-                    for host in enabledRemoteHosts.sorted() {
-                        let remoteSrc: SessionSource
-                        if currentKind == .codex {
-                            remoteSrc = .codexRemote(host: host)
-                        } else {
-                            remoteSrc = .claudeRemote(host: host)
-                        }
-                        let remoteName = remoteSrc.branding.displayName
-                        items.append(.init(kind: .action(title: "\(remoteName) with Terminal") {
-                            launchNewSession(for: focused, using: remoteSrc, style: .terminal)
-                        }))
-                        items.append(.init(kind: .action(title: "\(remoteName) with iTerm2") {
-                            launchNewSession(for: focused, using: remoteSrc, style: .iterm)
-                        }))
-                        items.append(.init(kind: .action(title: "\(remoteName) with Warp") {
-                            launchNewSession(for: focused, using: remoteSrc, style: .warp)
-                        }))
-                    }
+
+              // Add remote options for current provider
+              let enabledRemoteHosts = viewModel.preferences.enabledRemoteHosts
+              if !enabledRemoteHosts.isEmpty {
+                items.append(.init(kind: .separator))
+                for host in enabledRemoteHosts.sorted() {
+                  let remoteSrc: SessionSource
+                  if currentKind == .codex {
+                    remoteSrc = .codexRemote(host: host)
+                  } else {
+                    remoteSrc = .claudeRemote(host: host)
+                  }
+                  let remoteName = remoteSrc.branding.displayName
+                  items.append(
+                    .init(
+                      kind: .action(title: "\(remoteName) with Terminal") {
+                        launchNewSession(for: focused, using: remoteSrc, style: .terminal)
+                      }))
+                  items.append(
+                    .init(
+                      kind: .action(title: "\(remoteName) with iTerm2") {
+                        launchNewSession(for: focused, using: remoteSrc, style: .iterm)
+                      }))
+                  items.append(
+                    .init(
+                      kind: .action(title: "\(remoteName) with Warp") {
+                        launchNewSession(for: focused, using: remoteSrc, style: .warp)
+                      }))
                 }
-                            
+              }
+
               // Divider
               items.append(.init(kind: .separator))
               // Lower group: alternate provider quick targets
               let allowed = viewModel.allowedSources(for: focused)
               // Compute alternate src from allowed set; fallback to opposite of current
               let altSrc: SessionSource? = {
-                  let desiredKind: ProjectSessionSource = (currentKind == .codex) ? .claude : .codex
-                  if allowed.contains(desiredKind) {
-                      return desiredKind.sessionSource
-                  }
-                  if let otherKind = allowed.first(where: { $0 != currentKind }) {
-                      return otherKind.sessionSource
-                  }
+                let desiredKind: ProjectSessionSource = (currentKind == .codex) ? .claude : .codex
+                if allowed.contains(desiredKind) {
                   return desiredKind.sessionSource
+                }
+                if let otherKind = allowed.first(where: { $0 != currentKind }) {
+                  return otherKind.sessionSource
+                }
+                return desiredKind.sessionSource
               }()
               if let alt = altSrc {
                 let altName = alt.branding.displayName
@@ -142,29 +146,35 @@ extension ContentView {
                     kind: .action(title: "\(altName) with Warp") {
                       launchNewSession(for: focused, using: alt, style: .warp)
                     }))
-                                
-                  // Add remote options for alternate provider
-                  if !enabledRemoteHosts.isEmpty {
-                      items.append(.init(kind: .separator))
-                      for host in enabledRemoteHosts.sorted() {
-                          let remoteSrc: SessionSource
-                          if alt.projectSource == .codex {
-                              remoteSrc = .codexRemote(host: host)
-                          } else {
-                              remoteSrc = .claudeRemote(host: host)
-                          }
-                          let remoteName = remoteSrc.branding.displayName
-                          items.append(.init(kind: .action(title: "\(remoteName) with Terminal") {
-                              launchNewSession(for: focused, using: remoteSrc, style: .terminal)
-                          }))
-                          items.append(.init(kind: .action(title: "\(remoteName) with iTerm2") {
-                              launchNewSession(for: focused, using: remoteSrc, style: .iterm)
-                          }))
-                          items.append(.init(kind: .action(title: "\(remoteName) with Warp") {
-                              launchNewSession(for: focused, using: remoteSrc, style: .warp)
-                          }))
-                      }
+
+                // Add remote options for alternate provider
+                if !enabledRemoteHosts.isEmpty {
+                  items.append(.init(kind: .separator))
+                  for host in enabledRemoteHosts.sorted() {
+                    let remoteSrc: SessionSource
+                    if alt.projectSource == .codex {
+                      remoteSrc = .codexRemote(host: host)
+                    } else {
+                      remoteSrc = .claudeRemote(host: host)
+                    }
+                    let remoteName = remoteSrc.branding.displayName
+                    items.append(
+                      .init(
+                        kind: .action(title: "\(remoteName) with Terminal") {
+                          launchNewSession(for: focused, using: remoteSrc, style: .terminal)
+                        }))
+                    items.append(
+                      .init(
+                        kind: .action(title: "\(remoteName) with iTerm2") {
+                          launchNewSession(for: focused, using: remoteSrc, style: .iterm)
+                        }))
+                    items.append(
+                      .init(
+                        kind: .action(title: "\(remoteName) with Warp") {
+                          launchNewSession(for: focused, using: remoteSrc, style: .warp)
+                        }))
                   }
+                }
               }
               // Third group: New With Context…
               items.append(.init(kind: .separator))
@@ -200,16 +210,22 @@ extension ContentView {
               for app in apps {
                 switch app {
                 case .terminal:
-                      items.append(.init(kind: .action(title: "Terminal") {
-                          launchResume(for: focused, using: focused.source, style: .terminal)
+                  items.append(
+                    .init(
+                      kind: .action(title: "Terminal") {
+                        launchResume(for: focused, using: focused.source, style: .terminal)
                       }))
                 case .iterm2:
-                      items.append(.init(kind: .action(title: "iTerm2") {
-                          launchResume(for: focused, using: focused.source, style: .iterm)
+                  items.append(
+                    .init(
+                      kind: .action(title: "iTerm2") {
+                        launchResume(for: focused, using: focused.source, style: .iterm)
                       }))
                 case .warp:
-                      items.append(.init(kind: .action(title: "Warp") {
-                          launchResume(for: focused, using: focused.source, style: .warp)
+                  items.append(
+                    .init(
+                      kind: .action(title: "Warp") {
+                        launchResume(for: focused, using: focused.source, style: .warp)
                       }))
                 default:
                   break
@@ -217,30 +233,40 @@ extension ContentView {
               }
               let enabledRemoteHosts = viewModel.preferences.enabledRemoteHosts
               if !enabledRemoteHosts.isEmpty {
-                  items.append(.init(kind: .separator))
-                      let currentKind = focused.source.projectSource
-                      for host in enabledRemoteHosts.sorted() {
-                          let remoteSrc: SessionSource =
-                              (currentKind == .codex)
-                              ? .codexRemote(host: host)
-                              : .claudeRemote(host: host)
-                          let remoteName = remoteSrc.branding.displayName
-                          items.append(.init(kind: .action(title: "\(remoteName) with Terminal") {
-                              launchResume(for: focused, using: remoteSrc, style: .terminal)
-                          }))
-                          items.append(.init(kind: .action(title: "\(remoteName) with iTerm2") {
-                              launchResume(for: focused, using: remoteSrc, style: .iterm)
-                          }))
-                          items.append(.init(kind: .action(title: "\(remoteName) with Warp") {
-                              launchResume(for: focused, using: remoteSrc, style: .warp)
-                          }))
-                      }
-                  }
-                  if !embeddedPreferred && viewModel.preferences.defaultResumeUseEmbeddedTerminal && !AppSandbox.isEnabled {
-                      items.append(.init(kind: .separator))
-                      items.append(.init(kind: .action(title: "Embedded") {
-                          launchResume(for: focused, using: focused.source, style: .embedded)
-                }))
+                items.append(.init(kind: .separator))
+                let currentKind = focused.source.projectSource
+                for host in enabledRemoteHosts.sorted() {
+                  let remoteSrc: SessionSource =
+                    (currentKind == .codex)
+                    ? .codexRemote(host: host)
+                    : .claudeRemote(host: host)
+                  let remoteName = remoteSrc.branding.displayName
+                  items.append(
+                    .init(
+                      kind: .action(title: "\(remoteName) with Terminal") {
+                        launchResume(for: focused, using: remoteSrc, style: .terminal)
+                      }))
+                  items.append(
+                    .init(
+                      kind: .action(title: "\(remoteName) with iTerm2") {
+                        launchResume(for: focused, using: remoteSrc, style: .iterm)
+                      }))
+                  items.append(
+                    .init(
+                      kind: .action(title: "\(remoteName) with Warp") {
+                        launchResume(for: focused, using: remoteSrc, style: .warp)
+                      }))
+                }
+              }
+              if !embeddedPreferred && viewModel.preferences.defaultResumeUseEmbeddedTerminal
+                && !AppSandbox.isEnabled
+              {
+                items.append(.init(kind: .separator))
+                items.append(
+                  .init(
+                    kind: .action(title: "Embedded") {
+                      launchResume(for: focused, using: focused.source, style: .embedded)
+                    }))
               }
               return items
             }()
@@ -248,7 +274,7 @@ extension ContentView {
         }
 
         // Reveal in Finder (chromed icon)
-          ChromedIconButton(systemImage: "macwindow", help: "Reveal in Finder") {
+        ChromedIconButton(systemImage: "macwindow", help: "Reveal in Finder") {
           viewModel.reveal(session: focused)
         }
 
@@ -296,7 +322,7 @@ extension ContentView {
 }
 
 // MARK: - SegmentedIconPicker (AppKit-backed)
-private struct SegmentedIconPicker<Selection: Hashable>: NSViewRepresentable {
+struct SegmentedIconPicker<Selection: Hashable>: NSViewRepresentable {
   struct Item {
     let title: String
     let systemImage: String
@@ -314,40 +340,44 @@ private struct SegmentedIconPicker<Selection: Hashable>: NSViewRepresentable {
   let items: [Item]
   @Binding var selection: Selection
   var isInteractive: Bool = true
+  var iconScale: CGFloat = 1
 
-  func makeCoordinator() -> Coordinator { Coordinator(self) }
+  func makeCoordinator() -> Coordinator {
+    Coordinator(selection: $selection, items: items, iconScale: iconScale)
+  }
 
-  func makeNSView(context: Context) -> NSView {
-    let container = NSView()
-    container.translatesAutoresizingMaskIntoConstraints = false
+  func makeNSView(context: Context) -> NSSegmentedControl {
     let control = NSSegmentedControl()
-    control.translatesAutoresizingMaskIntoConstraints = false
-    control.segmentStyle = .rounded
+    control.translatesAutoresizingMaskIntoConstraints = true
+    control.segmentStyle = .automatic
     control.controlSize = .regular
     control.trackingMode = .selectOne
     control.target = context.coordinator
     control.action = #selector(Coordinator.changed(_:))
+    control.setContentHuggingPriority(.required, for: .horizontal)
+    control.setContentCompressionResistancePriority(.required, for: .horizontal)
     rebuild(control)
-    // Left align: only pin leading/top/bottom
-    container.addSubview(control)
-    NSLayoutConstraint.activate([
-      control.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-      control.topAnchor.constraint(equalTo: container.topAnchor),
-      control.bottomAnchor.constraint(equalTo: container.bottomAnchor),
-    ])
     context.coordinator.control = control
     context.coordinator.isInteractive = isInteractive
-    return container
+    return control
   }
 
-  func updateNSView(_ nsView: NSView, context: Context) {
-    guard let control = context.coordinator.control else { return }
+  func updateNSView(_ control: NSSegmentedControl, context: Context) {
+    // Update coordinator's items to ensure it has the latest data
+    context.coordinator.items = items
+    context.coordinator.iconScale = iconScale
+
     if control.segmentCount != items.count { rebuild(control) }
     for (i, it) in items.enumerated() {
       control.setLabel(it.title, forSegment: i)
       if let img = NSImage(systemSymbolName: it.systemImage, accessibilityDescription: nil) {
-        control.setImage(img, forSegment: i)
-        control.setImageScaling(.scaleProportionallyDown, forSegment: i)
+        // Use template mode to allow proper tinting in selected state
+        img.isTemplate = true
+
+        // Apply icon scaling
+        let scaledImg = scaleImage(img, scale: iconScale)
+        control.setImage(scaledImg, forSegment: i)
+        control.setImageScaling(.scaleNone, forSegment: i)
       }
       control.setEnabled(it.isEnabled, forSegment: i)
     }
@@ -359,13 +389,36 @@ private struct SegmentedIconPicker<Selection: Hashable>: NSViewRepresentable {
     context.coordinator.isInteractive = isInteractive
   }
 
+  private func scaleImage(_ image: NSImage, scale: CGFloat) -> NSImage {
+    let originalSize = image.size
+    let scaledSize = NSSize(width: originalSize.width * scale, height: originalSize.height * scale)
+
+    // Add left padding to the icon
+    let leftPadding: CGFloat = 4
+    let newSize = NSSize(width: scaledSize.width + leftPadding, height: scaledSize.height)
+
+    let scaledImage = NSImage(size: newSize)
+    scaledImage.isTemplate = true  // Preserve template mode for proper tinting
+    scaledImage.lockFocus()
+    image.draw(
+      in: NSRect(x: leftPadding, y: 0, width: scaledSize.width, height: scaledSize.height),
+      from: NSRect(origin: .zero, size: originalSize),
+      operation: .copy,
+      fraction: 1.0)
+    scaledImage.unlockFocus()
+    return scaledImage
+  }
+
   private func rebuild(_ control: NSSegmentedControl) {
     control.segmentCount = items.count
     for (i, it) in items.enumerated() {
       control.setLabel(it.title, forSegment: i)
       if let img = NSImage(systemSymbolName: it.systemImage, accessibilityDescription: nil) {
-        control.setImage(img, forSegment: i)
-        control.setImageScaling(.scaleProportionallyDown, forSegment: i)
+        // Use template mode to allow proper tinting in selected state
+        img.isTemplate = true
+        let scaledImg = scaleImage(img, scale: iconScale)
+        control.setImage(scaledImg, forSegment: i)
+        control.setImageScaling(.scaleNone, forSegment: i)
       }
       control.setEnabled(it.isEnabled, forSegment: i)
     }
@@ -373,14 +426,23 @@ private struct SegmentedIconPicker<Selection: Hashable>: NSViewRepresentable {
 
   final class Coordinator: NSObject {
     weak var control: NSSegmentedControl?
-    var parent: SegmentedIconPicker
+    var selection: Binding<Selection>
+    var items: [Item]
     var isInteractive: Bool = true
-    init(_ parent: SegmentedIconPicker) { self.parent = parent }
+    var iconScale: CGFloat = 1.0
+
+    init(selection: Binding<Selection>, items: [Item], iconScale: CGFloat = 1.0) {
+      self.selection = selection
+      self.items = items
+      self.iconScale = iconScale
+    }
+
     @objc func changed(_ sender: NSSegmentedControl) {
       guard isInteractive else { return }
       let idx = sender.selectedSegment
-      guard idx >= 0 && idx < parent.items.count else { return }
-      parent.selection = parent.items[idx].tag
+      guard idx >= 0 && idx < items.count else { return }
+      // Directly update the binding
+      selection.wrappedValue = items[idx].tag
     }
   }
 }
