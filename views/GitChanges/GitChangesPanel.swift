@@ -53,6 +53,9 @@ struct GitChangesPanel: View {
     @State var pendingDiscardPaths: [String] = []
     @State var showDiscardAlert: Bool = false
     @State var showCommitConfirm: Bool = false
+    // Graph view toggle + model
+    @State var showGraph: Bool = false
+    @StateObject var graphVM = GitGraphViewModel()
     // Use an optional Int for segmented momentary actions: 0=collapse, 1=expand
     // @State private var treeToggleIndex: Int? = nil
     // Layout constraints
@@ -199,6 +202,8 @@ struct GitChangesPanel: View {
             }
             .onAppear {
                 diffModePreviewPreference = vm.showPreviewInsteadOfDiff
+                // Restore mode; if persisted Graph, picker will reflect it
+                mode = savedState.mode
             }
             .onChange(of: vm.showPreviewInsteadOfDiff) { _, newValue in
                 if mode == .diff {
@@ -206,14 +211,17 @@ struct GitChangesPanel: View {
                 }
             }
             .onChange(of: mode) { _, newMode in
-                if newMode == .browser {
+                switch newMode {
+                case .browser:
                     diffModePreviewPreference = vm.showPreviewInsteadOfDiff
-                    if !vm.showPreviewInsteadOfDiff {
-                        vm.showPreviewInsteadOfDiff = true
-                    }
-                } else {
+                    if !vm.showPreviewInsteadOfDiff { vm.showPreviewInsteadOfDiff = true }
+                case .diff:
                     vm.showPreviewInsteadOfDiff = diffModePreviewPreference
+                case .graph:
+                    // no-op; detail rendering managed by Graph container
+                    break
                 }
+                savedState.mode = newMode
             }
             .onChange(of: vm.repoRoot) { _, newRoot in
                 if newRoot == nil {
@@ -235,6 +243,7 @@ struct GitChangesPanel: View {
                     }
                 }
             }
+            .onChange(of: vm.selectedPath) { _, _ in }
     }
 
     private var contentWithPresentation: some View {
@@ -255,18 +264,23 @@ struct GitChangesPanel: View {
     private var baseContent: some View {
         VStack(alignment: .leading, spacing: 8) {
             header
-            VSplitView {
-                GeometryReader { geo in
-                    splitContent(totalWidth: geo.size.width)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .onAppear {
-                            if leftColumnWidth == 0 {
-                                leftColumnWidth = clampLeftWidth(geo.size.width * 0.25, total: geo.size.width)
+            if mode == .graph {
+                // Hide left pane; use full width for Graph
+                graphDetailView
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                VSplitView {
+                    GeometryReader { geo in
+                        splitContent(totalWidth: geo.size.width)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .onAppear {
+                                if leftColumnWidth == 0 {
+                                    leftColumnWidth = clampLeftWidth(geo.size.width * 0.25, total: geo.size.width)
+                                }
                             }
-                        }
+                    }
+                    // (Commit box moved to left pane top)
                 }
-
-                // (Commit box moved to left pane top)
             }
         }
     }

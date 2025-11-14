@@ -47,6 +47,8 @@ extension GitChangesPanel {
                             }
                         }
 
+                        // (Graph toggle moved to header segmented control)
+
                         // Expand All button
                         Button {
                             if mode == .browser {

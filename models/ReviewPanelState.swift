@@ -6,6 +6,7 @@ struct ReviewPanelState: Equatable {
     enum Mode: Equatable {
         case diff
         case browser
+        case graph
     }
 
     // Legacy combined set (pre-branching); still read for backward restore.
@@ -18,8 +19,12 @@ struct ReviewPanelState: Equatable {
     var selectedSideStaged: Bool? = nil
     var showPreview: Bool = false
     var commitMessage: String = ""
-    var mode: Mode = .diff
+    var mode: Mode = .browser
     var expandedDirsBrowser: Set<String> = []
+    // Whether the Git Graph view is visible in the right detail area.
+    // This is a lightweight UI flag; it is safe if not restored.
+    // Kept here to allow persistence across app runs if desired.
+    var showGraph: Bool = false
 }
 
 extension ReviewPanelState.Mode {

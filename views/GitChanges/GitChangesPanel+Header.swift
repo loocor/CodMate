@@ -6,10 +6,21 @@ extension GitChangesPanel {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
                 // Dynamic title and icon based on mode
-                Label(
-                    mode == .browser ? "Explorer" : "Changes",
-                    systemImage: mode == .browser ? "folder" : "arrow.triangle.branch"
-                )
+                let title: String = {
+                    switch mode {
+                    case .browser: return "Explorer"
+                    case .diff: return "Changes"
+                    case .graph: return "History"
+                    }
+                }()
+                let icon: String = {
+                    switch mode {
+                    case .browser: return "folder"
+                    case .diff: return "arrow.triangle.branch"
+                    case .graph: return "clock"
+                    }
+                }()
+                Label(title, systemImage: icon)
                 .font(.headline)
                 let rootURL = vm.repoRoot ?? projectDirectory ?? workingDirectory
                 let authorized = SecurityScopedBookmarks.shared.isSandboxed
@@ -41,14 +52,15 @@ extension GitChangesPanel {
                 }
                 Spacer()
 
-                // Mode switcher: Diff / Explorer (only show when repo exists)
+                // Mode switcher: Explorer / History / Diff (only show when repo exists)
                 if vm.repoRoot != nil {
                     Picker("", selection: $mode) {
-                        Text("Diff").tag(ReviewPanelState.Mode.diff)
                         Text("Explorer").tag(ReviewPanelState.Mode.browser)
+                        Text("History").tag(ReviewPanelState.Mode.graph)
+                        Text("Diff").tag(ReviewPanelState.Mode.diff)
                     }
                     .pickerStyle(.segmented)
-                    .frame(width: 140)
+                    .frame(width: 220)
                     .controlSize(.small)
                     .labelsHidden()
                 }

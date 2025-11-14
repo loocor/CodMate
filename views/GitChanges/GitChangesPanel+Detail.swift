@@ -7,7 +7,9 @@ extension GitChangesPanel {
     // MARK: - Detail view (diff/preview pane)
     var detailView: some View {
         detailContainer {
-            if let path = vm.selectedPath, isImagePath(path) {
+            if mode == .graph {
+                graphDetailView
+            } else if let path = vm.selectedPath, isImagePath(path) {
                 imagePreviewContent
             } else {
                 AttributedTextView(

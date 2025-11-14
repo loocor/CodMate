@@ -99,6 +99,13 @@ extension GitChangesPanel {
                 }
             )
 
+            // Persist Graph visibility flag when it changes
+            view = AnyView(
+                view.onChange(of: savedState.showGraph) { _, _ in
+                    // No-op: wiring point retained for completeness
+                }
+            )
+
             return view
         }
 

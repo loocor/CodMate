@@ -295,6 +295,157 @@ actor GitService {
         return out?.exitCode ?? -1
     }
 
+    // MARK: - History APIs (lightweight)
+    struct Commit: Identifiable, Sendable, Hashable {
+        let id: String            // full SHA
+        let shortId: String       // short SHA
+        let author: String
+        let date: String          // human friendly (relative)
+        let subject: String
+    }
+
+    struct GraphCommit: Identifiable, Sendable, Hashable {
+        let id: String
+        let shortId: String
+        let author: String
+        let date: String
+        let subject: String
+        let parents: [String]   // full SHAs
+        let decorations: [String] // branch/tag names from %D
+    }
+
+    /// Return recent commits for the repository, newest first.
+    func logCommits(in repo: Repo, limit: Int = 200) async -> [Commit] {
+        // Print one commit per line; fields separated by 0x1F (Unit Separator).
+        // Avoid NULs in arguments and output to keep parsing simple and safe.
+        let fmt = "%H%x1f%h%x1f%an%x1f%ad%x1f%s"
+        let args = [
+            "log",
+            "--no-color",
+            "--date=relative",
+            "--pretty=format:\(fmt)",
+            "-n", String(max(1, limit))
+        ]
+        guard let out = try? await runGit(args, cwd: repo.root), out.exitCode == 0 else {
+            return []
+        }
+        let lines = out.stdout.split(separator: "\n")
+        var commits: [Commit] = []
+        commits.reserveCapacity(lines.count)
+        for line in lines {
+            let parts = line.split(separator: "\u{001f}", omittingEmptySubsequences: false).map(String.init)
+            if parts.count >= 5 {
+                commits.append(Commit(id: parts[0], shortId: parts[1], author: parts[2], date: parts[3], subject: parts[4]))
+            }
+        }
+        return commits
+    }
+
+    /// Files changed in a given commit. Returns repository-relative paths.
+    func filesChanged(in repo: Repo, commitId: String) async -> [String] {
+        // --name-only prints a flat list; ignore commit headers via empty format
+        let args = ["show", "--pretty=format:", "--name-only", commitId]
+        guard let out = try? await runGit(args, cwd: repo.root), out.exitCode == 0 else {
+            return []
+        }
+        return out.stdout
+            .split(separator: "\n")
+            .map(String.init)
+            .filter { !$0.isEmpty }
+    }
+
+    /// Unified diff patch for a specific commit against its first parent.
+    func commitPatch(in repo: Repo, commitId: String) async -> String {
+        // --pretty=format: to suppress commit header; we render header in UI.
+        // --no-ext-diff to avoid external diff tools, --no-color for clean parsing.
+        let args = ["show", "--pretty=format:", "--no-ext-diff", "--no-color", commitId]
+        guard let out = try? await runGit(args, cwd: repo.root), out.exitCode == 0 else { return "" }
+        return out.stdout
+    }
+
+    /// Full graph-friendly commit list with parents and decorations. Optional inclusion of remotes.
+    /// If `singleRef` is provided, only that ref is listed (overrides other branch toggles).
+    func logGraphCommits(
+        in repo: Repo,
+        limit: Int = 300,
+        includeAllBranches: Bool = true,
+        includeRemoteBranches: Bool = true,
+        singleRef: String? = nil
+    ) async -> [GraphCommit] {
+        var revArgs: [String] = []
+        if let single = singleRef, !single.isEmpty {
+            revArgs = [single]
+        } else if includeAllBranches {
+            revArgs.append(includeRemoteBranches ? "--all" : "--branches")
+        } else {
+            // default HEAD current branch only; explicit to be safe
+            revArgs.append("HEAD")
+        }
+
+        let fmt = "%H%x1f%h%x1f%an%x1f%ad%x1f%s%x1f%P%x1f%D"
+        var args = [
+            "log",
+            "--no-color",
+            "--date=relative",
+            "--decorate=short",
+            "--topo-order",
+            "--pretty=format:\(fmt)",
+            "-n", String(max(1, limit))
+        ]
+        args += revArgs
+
+        guard let out = try? await runGit(args, cwd: repo.root), out.exitCode == 0 else {
+            return []
+        }
+        let lines = out.stdout.split(separator: "\n")
+        var list: [GraphCommit] = []
+        list.reserveCapacity(lines.count)
+        for line in lines {
+            let parts = line.split(separator: "\u{001f}", omittingEmptySubsequences: false).map(String.init)
+            if parts.count >= 7 {
+                let parents = parts[5].split(separator: " ").map(String.init)
+                let decosRaw = parts[6]
+                let decorations: [String] = decosRaw.split(separator: ",").map { s in
+                    var t = s.trimmingCharacters(in: .whitespaces)
+                    if t.hasPrefix("HEAD -> ") { t = String(t.dropFirst("HEAD -> ".count)) }
+                    return t
+                }.filter { !$0.isEmpty }
+                list.append(GraphCommit(
+                    id: parts[0], shortId: parts[1], author: parts[2], date: parts[3], subject: parts[4],
+                    parents: parents, decorations: decorations
+                ))
+            }
+        }
+        return list
+    }
+
+    /// List branches. Returns short names. Optionally include remote branches.
+    func listBranches(in repo: Repo, includeRemoteBranches: Bool = false) async -> [String] {
+        // Local branches
+        let localArgs = [
+            "for-each-ref",
+            "--format=%(refname:short)",
+            "refs/heads"
+        ]
+        var names: [String] = []
+        if let out = try? await runGit(localArgs, cwd: repo.root), out.exitCode == 0 {
+            names.append(contentsOf: out.stdout.split(separator: "\n").map(String.init))
+        }
+        if includeRemoteBranches {
+            let remoteArgs = [
+                "for-each-ref",
+                "--format=%(refname:short)",
+                "refs/remotes"
+            ]
+            if let out = try? await runGit(remoteArgs, cwd: repo.root), out.exitCode == 0 {
+                names.append(contentsOf: out.stdout.split(separator: "\n").map(String.init))
+            }
+        }
+        // De-duplicate and sort natural-ish
+        let unique = Array(Set(names)).filter { !$0.isEmpty }
+        return unique.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+    }
+
     // MARK: - Helpers
     private struct ProcOut { let stdout: String; let stderr: String; let exitCode: Int32 }
 
