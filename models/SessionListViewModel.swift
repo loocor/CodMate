@@ -246,6 +246,9 @@ final class SessionListViewModel: ObservableObject {
 
     let windowStateStore = WindowStateStore()
 
+    // Project workspace view model for managing tasks
+    private(set) var workspaceVM: ProjectWorkspaceViewModel?
+
     // Auto-assign: pending intents created when user clicks New
     struct PendingAssignIntent: Identifiable, Sendable, Hashable {
         let id = UUID()
@@ -509,6 +512,10 @@ final class SessionListViewModel: ObservableObject {
         self.projectWorkspaceMode = windowStateStore.restoreWorkspaceMode()
 
         suppressFilterNotifications = false
+
+        // Initialize workspace view model after self is fully initialized
+        self.workspaceVM = ProjectWorkspaceViewModel(sessionListViewModel: self)
+
         configureDirectoryMonitor()
         configureClaudeDirectoryMonitor()
         Task { await loadProjects() }

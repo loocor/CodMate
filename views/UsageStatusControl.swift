@@ -495,7 +495,7 @@ private struct UsageProgressBar: View {
   }
 }
 
-private struct DarkModeInvertModifier: ViewModifier {
+struct DarkModeInvertModifier: ViewModifier {
   var active: Bool
 
   func body(content: Content) -> some View {

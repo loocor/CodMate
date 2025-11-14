@@ -31,6 +31,9 @@ struct SessionSummary: Identifiable, Hashable, Sendable, Codable {
     var userTitle: String? = nil
     var userComment: String? = nil
 
+    // Task association (optional - nil means standalone session)
+    var taskId: UUID? = nil
+
     var duration: TimeInterval {
         if let activeDuration { return activeDuration }
         guard let end = endedAt ?? lastUpdatedAt else { return 0 }
@@ -183,7 +186,8 @@ extension SessionSummary {
             source: newSource,
             remotePath: remotePath ?? self.remotePath,
             userTitle: userTitle,
-            userComment: userComment
+            userComment: userComment,
+            taskId: taskId
         )
     }
 

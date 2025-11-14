@@ -62,21 +62,39 @@ struct SessionListColumnView: View {
 
   @ViewBuilder
   private var contentView: some View {
-    if sections.isEmpty {
-      if isLoading {
-        VStack {
-          Spacer()
-          ProgressView("Scanning…")
-          Spacer()
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(.horizontal, -2)
-      } else {
-        emptyStateView
-          .padding(.horizontal, -2)
-      }
+    // In Tasks mode, show TaskListView instead of regular sessions list
+    if viewModel.projectWorkspaceMode == .tasks, let workspaceVM = viewModel.workspaceVM {
+      TaskListView(
+        viewModel: viewModel,
+        workspaceVM: workspaceVM,
+        selection: $selection,
+        onResume: onResume,
+        onReveal: onReveal,
+        onDeleteRequest: onDeleteRequest,
+        onExportMarkdown: onExportMarkdown,
+        isRunning: isRunning,
+        isUpdating: isUpdating,
+        isAwaitingFollowup: isAwaitingFollowup,
+        onPrimarySelect: onPrimarySelect
+      )
     } else {
-      sessionsListView
+      // Regular sessions list for other modes
+      if sections.isEmpty {
+        if isLoading {
+          VStack {
+            Spacer()
+            ProgressView("Scanning…")
+            Spacer()
+          }
+          .frame(maxWidth: .infinity, maxHeight: .infinity)
+          .padding(.horizontal, -2)
+        } else {
+          emptyStateView
+            .padding(.horizontal, -2)
+        }
+      } else {
+        sessionsListView
+      }
     }
   }
 
@@ -85,65 +103,66 @@ struct SessionListColumnView: View {
     let isOtherProject = selected?.id == SessionListViewModel.otherProjectId
 
     return VStack(spacing: 12) {
-          Spacer(minLength: 12)
+      Spacer(minLength: 12)
 
-          // Different message for Other project bucket
-          if isOtherProject {
-            ContentUnavailableView(
-              "No Unassigned Sessions", systemImage: "tray",
-              description: Text(
-                "Sessions can only be created within a project. Select a project from the sidebar to start a new session.")
-            )
-            .frame(maxWidth: .infinity)
-          } else {
-            ContentUnavailableView(
-              "No Sessions", systemImage: "tray",
-              description: Text(
-                "Adjust directories or launch Codex CLI to generate new session logs.")
-            )
-            .frame(maxWidth: .infinity)
-          }
+      // Different message for Other project bucket
+      if isOtherProject {
+        ContentUnavailableView(
+          "No Unassigned Sessions", systemImage: "tray",
+          description: Text(
+            "Sessions can only be created within a project. Select a project from the sidebar to start a new session."
+          )
+        )
+        .frame(maxWidth: .infinity)
+      } else {
+        ContentUnavailableView(
+          "No Sessions", systemImage: "tray",
+          description: Text(
+            "Adjust directories or launch Codex CLI to generate new session logs.")
+        )
+        .frame(maxWidth: .infinity)
+      }
 
-          // Primary action: New (hidden for Other project, shown for regular projects)
-          if let project = selected, !isOtherProject {
-            let embeddedPreferredNew =
-              viewModel.preferences.defaultResumeUseEmbeddedTerminal && !AppSandbox.isEnabled
-            SplitPrimaryMenuButton(
-              title: "New",
-              systemImage: "plus",
-              primary: {
-                if embeddedPreferredNew {
-                  // Defer to shared embedded flow (exactly as detail bar does)
-                  viewModel.newSession(project: project)
-                } else {
-                  startExternalNewForProject(project)
-                }
-              },
-              items: buildProjectNewMenuItems(for: project)
-            )
-            .help("Start a new session in \(projectDisplayName(project))")
-          } else if !isOtherProject {
-            SplitPrimaryMenuButton(
-              title: "New",
-              systemImage: "plus",
-              primary: {},
-              items: []
-            )
-            .opacity(0.6)
-            .help("Select a project in the sidebar to start a new session")
-          }
+      // Primary action: New (hidden for Other project, shown for regular projects)
+      if let project = selected, !isOtherProject {
+        let embeddedPreferredNew =
+          viewModel.preferences.defaultResumeUseEmbeddedTerminal && !AppSandbox.isEnabled
+        SplitPrimaryMenuButton(
+          title: "New",
+          systemImage: "plus",
+          primary: {
+            if embeddedPreferredNew {
+              // Defer to shared embedded flow (exactly as detail bar does)
+              viewModel.newSession(project: project)
+            } else {
+              startExternalNewForProject(project)
+            }
+          },
+          items: buildProjectNewMenuItems(for: project)
+        )
+        .help("Start a new session in \(projectDisplayName(project))")
+      } else if !isOtherProject {
+        SplitPrimaryMenuButton(
+          title: "New",
+          systemImage: "plus",
+          primary: {},
+          items: []
+        )
+        .opacity(0.6)
+        .help("Select a project in the sidebar to start a new session")
+      }
 
-          Spacer()
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+      Spacer()
+    }
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
   }
 
   @ViewBuilder
   private var sessionsListView: some View {
-        List(selection: $selection) {
-          ForEach(sections) { section in
-            Section {
-              ForEach(section.sessions, id: \.id) { session in
+    List(selection: $selection) {
+      ForEach(sections) { section in
+        Section {
+          ForEach(section.sessions, id: \.id) { session in
             sessionRow(for: session)
           }
         } header: {
@@ -171,27 +190,28 @@ struct SessionListColumnView: View {
                   isUpdating: isUpdating?(session) ?? false,
                   awaitingFollowup: isAwaitingFollowup?(session) ?? false,
                   inProject: viewModel.projectIdForSession(session.id) != nil,
-                  projectTip: projectTip(for: session)
+                  projectTip: projectTip(for: session),
+                  inTaskContainer: false
                 )
-                .tag(session.id)
-                .contentShape(Rectangle())
-                .onTapGesture(count: 2) {
-                  selection = [session.id]
-                  onPrimarySelect?(session)
-                  Task { await viewModel.beginEditing(session: session) }
-                }
-                .onTapGesture { handleClick(on: session) }
-                .onDrag {
-                  let ids: [String]
-                  if selectionContains(session.id) && selection.count > 1 {
-                    ids = Array(selection)
-                  } else {
-                    ids = [session.id]
-                  }
+    .tag(session.id)
+    .contentShape(Rectangle())
+    .onTapGesture(count: 2) {
+      selection = [session.id]
+      onPrimarySelect?(session)
+      Task { await viewModel.beginEditing(session: session) }
+    }
+    .onTapGesture { handleClick(on: session) }
+    .onDrag {
+      let ids: [String]
+      if selectionContains(session.id) && selection.count > 1 {
+        ids = Array(selection)
+      } else {
+        ids = [session.id]
+      }
       return NSItemProvider(object: ids.joined(separator: "\n") as NSString)
-                }
-                .listRowInsets(EdgeInsets())
-                .contextMenu {
+    }
+    .listRowInsets(EdgeInsets())
+    .contextMenu {
       sessionContextMenu(for: session)
     }
   }
@@ -199,53 +219,53 @@ struct SessionListColumnView: View {
   @ViewBuilder
   private func sessionContextMenu(for session: SessionSummary) -> some View {
     if session.source == .codexLocal {
-                    Button {
-                      onResume(session)
-                    } label: {
-                      Label("Resume", systemImage: "play.fill")
-                    }
-                  }
-                  Divider()
-                  Button {
-                    Task { await viewModel.beginEditing(session: session) }
-                  } label: {
-                    Label("Edit Title & Comment", systemImage: "pencil")
-                  }
-                  if !viewModel.projects.isEmpty {
-                    Menu {
-                      Button("New Project…") {
-                        newProjectPrefill = prefillForProject(from: session)
-                        newProjectAssignIDs = [session.id]
-                        showNewProjectSheet = true
-                      }
-                      Divider()
-                      ForEach(viewModel.projects) { p in
-                        Button(p.name.isEmpty ? p.id : p.name) {
-                          Task { await viewModel.assignSessions(to: p.id, ids: [session.id]) }
-                        }
-                      }
-                    } label: {
-                      Label("Assign to Project…", systemImage: "rectangle.stack.badge.plus")
-                    }
-                  }
-                  Button {
-                    onReveal(session)
-                  } label: {
-                    Label("Reveal in Finder", systemImage: "finder")
-                  }
-                  Button {
-                    onExportMarkdown(session)
-                  } label: {
-                    Label("Export Markdown", systemImage: "square.and.arrow.up")
-                  }
-                  Divider()
-                  Button(role: .destructive) {
-                    if !selectionContains(session.id) {
-                      selection = [session.id]
-                    }
-                    onDeleteRequest(session)
-                  } label: {
-                    let isBatchDelete = selectionContains(session.id) && selection.count > 1
+      Button {
+        onResume(session)
+      } label: {
+        Label("Resume", systemImage: "play.fill")
+      }
+    }
+    Divider()
+    Button {
+      Task { await viewModel.beginEditing(session: session) }
+    } label: {
+      Label("Edit Title & Comment", systemImage: "pencil")
+    }
+    if !viewModel.projects.isEmpty {
+      Menu {
+        Button("New Project…") {
+          newProjectPrefill = prefillForProject(from: session)
+          newProjectAssignIDs = [session.id]
+          showNewProjectSheet = true
+        }
+        Divider()
+        ForEach(viewModel.projects) { p in
+          Button(p.name.isEmpty ? p.id : p.name) {
+            Task { await viewModel.assignSessions(to: p.id, ids: [session.id]) }
+          }
+        }
+      } label: {
+        Label("Assign to Project…", systemImage: "rectangle.stack.badge.plus")
+      }
+    }
+    Button {
+      onReveal(session)
+    } label: {
+      Label("Reveal in Finder", systemImage: "finder")
+    }
+    Button {
+      onExportMarkdown(session)
+    } label: {
+      Label("Export Markdown", systemImage: "square.and.arrow.up")
+    }
+    Divider()
+    Button(role: .destructive) {
+      if !selectionContains(session.id) {
+        selection = [session.id]
+      }
+      onDeleteRequest(session)
+    } label: {
+      let isBatchDelete = selectionContains(session.id) && selection.count > 1
       Label(isBatchDelete ? "Delete Sessions" : "Delete Session", systemImage: "trash")
     }
   }
@@ -288,12 +308,34 @@ struct SessionListColumnView: View {
         quickSearchFocused = false
       }
 
-      EqualWidthSegmentedControl(
-        items: Array(SessionSortOrder.allCases),
-        selection: $sortOrder,
-        title: { $0.title }
-      )
-      .frame(maxWidth: .infinity)
+      HStack(spacing: 8) {
+        EqualWidthSegmentedControl(
+          items: Array(SessionSortOrder.allCases),
+          selection: $sortOrder,
+          title: { $0.title }
+        )
+        .frame(maxWidth: .infinity)
+
+        if canCreateTaskInCurrentContext {
+          Button {
+            createNewTaskForCurrentProject()
+          } label: {
+            Image(systemName: "plus")
+              .font(.system(size: 11, weight: .semibold))
+              .frame(width: 24, height: 22)
+          }
+          .buttonStyle(.plain)
+          .background(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+              .fill(Color(nsColor: .textBackgroundColor))
+              .overlay(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                  .stroke(Color.secondary.opacity(0.25), lineWidth: 1)
+              )
+          )
+          .help("Create a new task for this project")
+        }
+      }
       .transition(.opacity.combined(with: .move(edge: .leading)))
     }
     .frame(maxWidth: .infinity)
@@ -308,6 +350,31 @@ private struct ListColumnWidthKey: PreferenceKey {
 }
 
 extension SessionListColumnView {
+  private var canCreateTaskInCurrentContext: Bool {
+    guard viewModel.projectWorkspaceMode == .tasks,
+      viewModel.selectedProjectIDs.count == 1,
+      let pid = viewModel.selectedProjectIDs.first,
+      pid != SessionListViewModel.otherProjectId
+    else {
+      return false
+    }
+    return viewModel.workspaceVM != nil
+  }
+
+  private func createNewTaskForCurrentProject() {
+    guard let pid = viewModel.selectedProjectIDs.first,
+      pid != SessionListViewModel.otherProjectId,
+      let workspaceVM = viewModel.workspaceVM
+    else { return }
+    Task {
+      await workspaceVM.createTask(
+        title: "New Task",
+        description: nil,
+        projectId: pid
+      )
+    }
+  }
+
   private func selectedProject() -> Project? {
     guard viewModel.selectedProjectIDs.count == 1,
       let pid = viewModel.selectedProjectIDs.first
