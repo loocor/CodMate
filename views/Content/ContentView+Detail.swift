@@ -4,8 +4,8 @@ extension ContentView {
   var detailColumn: some View {
     VStack(spacing: 0) {
       if viewModel.projectWorkspaceMode == .review, let project = currentSelectedProject(), let dir = project.directory, !dir.isEmpty {
-        // Project-level Review takes over the detail area. No session action bar here.
-        projectReviewContent(project: project, directory: dir)
+        // Project-level Review: detail renders right-only (header + diff/preview)
+        reviewRightColumn(project: project, directory: dir)
           .frame(maxWidth: .infinity, maxHeight: .infinity)
       } else if viewModel.projectWorkspaceMode == .overview {
         projectOverviewContent()
@@ -88,7 +88,34 @@ extension ContentView {
       savedState: stateBinding
     )
     .frame(maxWidth: .infinity, maxHeight: .infinity)
-    .padding(16)
+    // Match Tasks detail layout: no extra outer padding; header/content provide their own
+  }
+
+  @ViewBuilder
+  func reviewRightColumn(project: Project, directory: String) -> some View {
+    let ws = directory
+    let stateBinding = Binding<ReviewPanelState>(
+      get: { viewModel.projectReviewPanelStates[project.id] ?? ReviewPanelState() },
+      set: { viewModel.projectReviewPanelStates[project.id] = $0 }
+    )
+    let vm = projectReviewVM(for: project.id)
+    EquatableGitChangesContainer(
+      key: .init(
+        workingDirectoryPath: ws,
+        projectDirectoryPath: ws,
+        state: stateBinding.wrappedValue
+      ),
+      workingDirectory: URL(fileURLWithPath: ws, isDirectory: true),
+      projectDirectory: URL(fileURLWithPath: ws, isDirectory: true),
+      presentation: .full,
+      regionLayout: .rightOnly,
+      preferences: viewModel.preferences,
+      onRequestAuthorization: { ensureRepoAccessForProjectReview(directory: ws) },
+      externalVM: vm,
+      savedState: stateBinding
+    )
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
+    // Match Tasks detail layout: no extra outer padding; header/content provide their own
   }
 
   @ViewBuilder

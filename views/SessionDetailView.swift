@@ -283,9 +283,8 @@ struct SessionDetailView: View {
 
             Button {
                 withAnimation(.easeInOut(duration: 0.2)) {
+                    // Expand/collapse conversation without altering sidebar visibility
                     isConversationExpanded.toggle()
-                    // Also toggle sidebar visibility when expanding/restoring conversation
-                    columnVisibility = isConversationExpanded ? .doubleColumn : .all
                 }
             } label: {
                 Image(

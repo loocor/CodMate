@@ -16,18 +16,27 @@ struct EquatableGitChangesContainer: View, Equatable {
   let workingDirectory: URL
   let projectDirectory: URL?
   let presentation: GitChangesPanel.Presentation
+  // Region layout: combined (default), leftOnly, or rightOnly
+  var regionLayout: GitChangesPanel.RegionLayout = .combined
   let preferences: SessionPreferencesStore
   var onRequestAuthorization: (() -> Void)? = nil
+  // Optional external shared VM; when nil, this container owns an internal VM
+  var externalVM: GitChangesViewModel? = nil
   @Binding var savedState: ReviewPanelState
 
+  @StateObject private var internalVM = GitChangesViewModel()
+
   var body: some View {
+    let vm = externalVM ?? internalVM
     GitChangesPanel(
       workingDirectory: workingDirectory,
       projectDirectory: projectDirectory,
       presentation: presentation,
+      regionLayout: regionLayout,
       preferences: preferences,
       onRequestAuthorization: onRequestAuthorization,
-      savedState: $savedState
+      savedState: $savedState,
+      vm: vm
     )
   }
 }

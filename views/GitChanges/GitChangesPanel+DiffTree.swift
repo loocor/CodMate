@@ -209,6 +209,10 @@ extension GitChangesPanel {
                 .onTapGesture {
                     vm.selectedPath = path
                     vm.selectedSide = (scope == .staged ? .staged : .unstaged)
+                    // When interacting with the Diff tree (both Diff and History modes),
+                    // ensure the right pane shows the Diff reader.
+                    if mode != .diff { mode = .diff }
+                    if vm.showPreviewInsteadOfDiff { vm.showPreviewInsteadOfDiff = false }
                     Task { await vm.refreshDetail() }
                 }
                 .onHover { inside in

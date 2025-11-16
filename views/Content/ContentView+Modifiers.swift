@@ -12,13 +12,8 @@ extension ContentView {
   }
 
   fileprivate func syncListHiddenForWorkspaceMode() {
-    // Show session list only in Tasks and Sessions modes
-    let shouldHide = (viewModel.projectWorkspaceMode != .tasks && viewModel.projectWorkspaceMode != .sessions)
-    if shouldHide {
-      if !isListHidden { isListHidden = true }
-    } else {
-      if isListHidden { isListHidden = false }
-    }
+    // Do not auto-hide the session list based on workspace mode.
+    // Respect the user's manual toggle (storeListHidden) and leave isListHidden unchanged.
   }
   fileprivate func navigationTitleForSelection() -> String {
     if isAllSelection() {
@@ -57,43 +52,68 @@ extension ContentView {
     let sidebarMaxWidth = geometry.size.width * 0.25
     _ = storeSidebarHidden
     _ = storeListHidden
-    let baseView = NavigationSplitView(columnVisibility: $columnVisibility) {
-      sidebarContent(sidebarMaxWidth: sidebarMaxWidth)
-    } content: {
-      listContent
-    } detail: {
-      detailColumn
-    }
-    .navigationSplitViewStyle(.prominentDetail)
-    .navigationTitle(navigationTitleForSelection())
-    .onAppear {
-      applyVisibilityFromStorage(animated: false)
-      permissionsManager.restoreAccess()
-      SecurityScopedBookmarks.shared.restoreAllDynamicBookmarks()
-      Task { await permissionsManager.ensureCriticalDirectoriesAccess() }
 
-      // Restore session selection from previous launch
-      let restored = viewModel.windowStateStore.restoreSessionSelection()
-      if !restored.selectedIDs.isEmpty {
-        selection = restored.selectedIDs
-        selectionPrimaryId = restored.primaryId
+    let isSingleContentMode: Bool = {
+      switch viewModel.projectWorkspaceMode {
+      case .overview, .agents, .memory, .settings:
+        return true
+      default:
+        return false
       }
+    }()
 
-      // On initial launch, ensure workspace mode matches the current selection.
-      // We dispatch to next runloop to avoid racing with view initialization.
-      DispatchQueue.main.async {
-        enforceWorkspaceModeForSelection()
-        syncListHiddenForWorkspaceMode()
+    let splitView: AnyView = {
+      if isSingleContentMode {
+        let v = NavigationSplitView(columnVisibility: $columnVisibility) {
+          sidebarContent(sidebarMaxWidth: sidebarMaxWidth)
+        } detail: {
+          detailColumn
+        }
+        .navigationSplitViewStyle(.prominentDetail)
+        return AnyView(v)
+      } else {
+        let v = NavigationSplitView(columnVisibility: $columnVisibility) {
+          sidebarContent(sidebarMaxWidth: sidebarMaxWidth)
+        } content: {
+          contentColumn
+        } detail: {
+          detailColumn
+        }
+        .navigationSplitViewStyle(.prominentDetail)
+        return AnyView(v)
       }
-    }
-    .onChange(of: selection) { _, newSelection in
-      // Save session selection whenever it changes
-      viewModel.windowStateStore.saveSessionSelection(selectedIDs: newSelection, primaryId: selectionPrimaryId)
-    }
-    .onChange(of: selectionPrimaryId) { _, newPrimaryId in
-      // Save primary ID whenever it changes
-      viewModel.windowStateStore.saveSessionSelection(selectedIDs: selection, primaryId: newPrimaryId)
-    }
+    }()
+
+    let baseView = splitView
+      .navigationTitle(navigationTitleForSelection())
+      .onAppear {
+        applyVisibilityFromStorage(animated: false)
+        permissionsManager.restoreAccess()
+        SecurityScopedBookmarks.shared.restoreAllDynamicBookmarks()
+        Task { await permissionsManager.ensureCriticalDirectoriesAccess() }
+
+        // Restore session selection from previous launch
+        let restored = viewModel.windowStateStore.restoreSessionSelection()
+        if !restored.selectedIDs.isEmpty {
+          selection = restored.selectedIDs
+          selectionPrimaryId = restored.primaryId
+        }
+
+        // On initial launch, ensure workspace mode matches the current selection.
+        // We dispatch to next runloop to avoid racing with view initialization.
+        DispatchQueue.main.async {
+          enforceWorkspaceModeForSelection()
+          syncListHiddenForWorkspaceMode()
+        }
+      }
+      .onChange(of: selection) { _, newSelection in
+        // Save session selection whenever it changes
+        viewModel.windowStateStore.saveSessionSelection(selectedIDs: newSelection, primaryId: selectionPrimaryId)
+      }
+      .onChange(of: selectionPrimaryId) { _, newPrimaryId in
+        // Save primary ID whenever it changes
+        viewModel.windowStateStore.saveSessionSelection(selectedIDs: selection, primaryId: newPrimaryId)
+      }
     let viewWithTasks = applyTaskAndChangeModifiers(to: baseView)
     let viewWithNotifications = applyNotificationModifiers(to: viewWithTasks)
     let viewWithDialogs = applyDialogsAndAlerts(to: viewWithNotifications)

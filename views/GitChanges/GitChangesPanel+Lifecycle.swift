@@ -110,23 +110,33 @@ extension GitChangesPanel {
         }
 
         private func restoreState() {
-            if !savedState.expandedDirsStaged.isEmpty || !savedState.expandedDirsUnstaged.isEmpty {
-                expandedDirsStaged = savedState.expandedDirsStaged
-                expandedDirsUnstaged = savedState.expandedDirsUnstaged
-            } else if !savedState.expandedDirs.isEmpty {
-                expandedDirsStaged = savedState.expandedDirs
-                expandedDirsUnstaged = savedState.expandedDirs
+            var initial = savedState
+            // Migrate legacy browser mode to diff mode:
+            // Since the default mode has changed from .browser to .diff,
+            // automatically migrate any saved .browser state to .diff.
+            // User can still manually switch to browser or graph if needed.
+            if initial.mode == .browser {
+                initial.mode = .diff
+                savedState = initial
             }
-            if !savedState.expandedDirsBrowser.isEmpty {
-                expandedDirsBrowser = savedState.expandedDirsBrowser
+
+            if !initial.expandedDirsStaged.isEmpty || !initial.expandedDirsUnstaged.isEmpty {
+                expandedDirsStaged = initial.expandedDirsStaged
+                expandedDirsUnstaged = initial.expandedDirsUnstaged
+            } else if !initial.expandedDirs.isEmpty {
+                expandedDirsStaged = initial.expandedDirs
+                expandedDirsUnstaged = initial.expandedDirs
             }
-            mode = savedState.mode
-            vm.selectedPath = savedState.selectedPath
-            if let stagedSide = savedState.selectedSideStaged {
+            if !initial.expandedDirsBrowser.isEmpty {
+                expandedDirsBrowser = initial.expandedDirsBrowser
+            }
+            mode = initial.mode
+            vm.selectedPath = initial.selectedPath
+            if let stagedSide = initial.selectedSideStaged {
                 vm.selectedSide = stagedSide ? .staged : .unstaged
             }
-            vm.showPreviewInsteadOfDiff = savedState.showPreview
-            vm.commitMessage = savedState.commitMessage
+            vm.showPreviewInsteadOfDiff = initial.showPreview
+            vm.commitMessage = initial.commitMessage
         }
     }
 }

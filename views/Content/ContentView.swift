@@ -8,6 +8,11 @@ struct ContentView: View {
   @StateObject var permissionsManager = SandboxPermissionsManager.shared
   @Environment(\.colorScheme) var colorScheme
   @Environment(\.openWindow) var openWindow
+  // Stable shared cache for project Review VMs to avoid ephemeral lifetimes
+  // that can lead to ObservedObject referencing deallocated instances during
+  // split-view construction. Using a static store prevents state mutations
+  // during body evaluation and keeps a single VM per project across columns.
+  private static var sharedProjectReviewVMs: [String: GitChangesViewModel] = [:]
 
   @State var columnVisibility: NavigationSplitViewVisibility = .all
   @State var selection = Set<SessionSummary.ID>()
@@ -59,6 +64,8 @@ struct ContentView: View {
   static let defaultSearchPopoverSize = CGSize(width: 440, height: 320)
   static let searchPopoverMinSize = CGSize(width: 380, height: 220)
   static let searchPopoverMaxSize = CGSize(width: 640, height: 520)
+  // Deprecated: keep for future removal; no longer used for retention.
+  // @State private var projectReviewVMs: [String: GitChangesViewModel] = [:]
   struct SourcedPrompt: Identifiable, Hashable {
     let id = UUID()
     enum Source: Hashable { case project, user, builtin }
@@ -209,6 +216,14 @@ struct ContentView: View {
     }
     // Avoid unnecessary churn if nothing changed
     if selection == original { return }
+  }
+
+  // Provide a stable GitChangesViewModel per selected project for Review layout
+  func projectReviewVM(for projectId: String) -> GitChangesViewModel {
+    if let existing = ContentView.sharedProjectReviewVMs[projectId] { return existing }
+    let vm = GitChangesViewModel()
+    ContentView.sharedProjectReviewVMs[projectId] = vm
+    return vm
   }
 
   func resumeFromList(_ session: SessionSummary) {
@@ -910,21 +925,10 @@ struct ContentView: View {
   }
 
   func toggleSidebarVisibility() {
+    // Cancel sidebar hiding behavior: always keep sidebar visible.
     withAnimation(.easeInOut(duration: 0.15)) {
-      switch columnVisibility {
-      case .all:
-        columnVisibility = .doubleColumn  // hide sidebar via system behavior
-        storeSidebarHidden = true
-      case .doubleColumn:
-        columnVisibility = .all  // show sidebar
-        storeSidebarHidden = false
-      case .detailOnly:
-        columnVisibility = .doubleColumn
-        storeSidebarHidden = true
-      default:
-        columnVisibility = .doubleColumn
-        storeSidebarHidden = true
-      }
+      columnVisibility = .all
+      storeSidebarHidden = false
     }
   }
 
@@ -939,18 +943,11 @@ struct ContentView: View {
       // Apply list visibility
       isListHidden = storeListHidden
       // Apply sidebar visibility when not maximized
-      switch columnVisibility {
-      case .detailOnly:
-        break  // keep maximized state
-      case .all, .doubleColumn:
-        if storeSidebarHidden {
-          if columnVisibility == .all { columnVisibility = .doubleColumn }
-        } else {
-          if columnVisibility == .doubleColumn { columnVisibility = .all }
-        }
-      default:
-        break
+      // Sidebar hiding is disabled; force sidebar visible unless in detail-only mode
+      if columnVisibility != .detailOnly {
+        columnVisibility = .all
       }
+      storeSidebarHidden = false
     }
     if animated { withAnimation(.easeInOut(duration: 0.12)) { action() } } else { action() }
   }

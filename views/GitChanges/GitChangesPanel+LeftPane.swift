@@ -7,16 +7,32 @@ extension GitChangesPanel {
             GeometryReader { _ in
                 let spacing: CGFloat = 8
                 HStack(spacing: spacing) {
-                    // Search box expands to fill
+                    // Search box expands to fill — match Tasks column styling
                     HStack(spacing: 6) {
-                        Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                        Image(systemName: "magnifyingglass")
+                            .foregroundStyle(.secondary)
+                            .padding(.leading, 4)
                         TextField("Search", text: $treeQuery)
                             .textFieldStyle(.plain)
+                        if !treeQuery.isEmpty {
+                            Button {
+                                treeQuery = ""
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .foregroundStyle(.tertiary)
+                            }
+                            .buttonStyle(.plain)
+                        }
                     }
-                    .padding(.vertical, 4)
+                    .padding(.vertical, 6)
                     .padding(.horizontal, 6)
                     .background(
-                        RoundedRectangle(cornerRadius: 8).stroke(Color.secondary.opacity(0.2))
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(Color(nsColor: .textBackgroundColor))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .stroke(Color.secondary.opacity(0.25), lineWidth: 1)
+                            )
                     )
                     .frame(maxWidth: .infinity)
 
@@ -79,8 +95,9 @@ extension GitChangesPanel {
             }
             .frame(height: 32)
 
-            // Inline commit message (one line, auto-grow; no button) - only in Diff mode
-            if mode == .diff {
+            // Inline commit message (one line, auto-grow; no button)
+            // Show in Diff and History (graph) modes; hide in Explorer.
+            if mode != .browser {
                 GeometryReader { gr in
                     ZStack(alignment: .topLeading) {
                         TextEditor(text: $vm.commitMessage)
@@ -142,7 +159,9 @@ extension GitChangesPanel {
 
             // Trees in VS Code-style sections
             ScrollView {
-                if mode == .diff {
+                // In History (.graph) we still show the Diff tree list.
+                // Only Explorer mode uses the Explorer tree.
+                if mode != .browser {
                     LazyVStack(alignment: .leading, spacing: 0) {
                         // Staged section
                         HStack(spacing: 6) {
@@ -228,5 +247,7 @@ extension GitChangesPanel {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+        // Add inner padding to prevent controls from hugging edges
+        .padding(16)
     }
 }

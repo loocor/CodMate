@@ -9,14 +9,22 @@ extension GitChangesPanel {
         detailContainer {
             if mode == .graph {
                 graphDetailView
-            } else if let path = vm.selectedPath, isImagePath(path) {
+            } else if mode != .diff, let path = vm.selectedPath, isImagePath(path) {
+                // In Explorer mode, show rich preview for images
                 imagePreviewContent
             } else {
+                // In Diff mode, always render the diff reader (no preview switch)
+                let isDiff = (mode == .diff) ? true : !vm.showPreviewInsteadOfDiff
+                let emptyText: String = {
+                    if mode == .diff {
+                        return vm.selectedPath == nil ? "Select a file to view diff." : "(No diff)"
+                    } else {
+                        return vm.selectedPath == nil ? "Select a file to view preview/diff." : (vm.showPreviewInsteadOfDiff ? "(Empty preview)" : "(No diff)")
+                    }
+                }()
                 AttributedTextView(
-                    text: vm.diffText.isEmpty
-                        ? (vm.selectedPath == nil ? "Select a file to view diff/preview." : (vm.showPreviewInsteadOfDiff ? "(Empty preview)" : "(No diff)"))
-                        : vm.diffText,
-                    isDiff: !vm.showPreviewInsteadOfDiff,
+                    text: vm.diffText.isEmpty ? emptyText : vm.diffText,
+                    isDiff: isDiff,
                     wrap: wrapText,
                     showLineNumbers: showLineNumbers,
                     fontSize: 12
@@ -103,9 +111,21 @@ extension GitChangesPanel {
         content()
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(Color(nsColor: .textBackgroundColor))
-                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.secondary.opacity(0.15)))
+                Group {
+                    // In embedded presentation, use a card-like surface similar to other
+                    // insets. In full panel (project Review right side), keep plain to
+                    // match Tasks detail surface styling.
+                    if presentation == .embedded {
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(Color(nsColor: .textBackgroundColor))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 6)
+                                    .stroke(Color.secondary.opacity(0.15))
+                            )
+                    } else {
+                        Color.clear
+                    }
+                }
             )
     }
 

@@ -65,6 +65,78 @@ extension ContentView {
     }
   }
 
+  // Content column that switches between the session list and a simple placeholder
+  // depending on the current project workspace mode. Use AnyView to unify types.
+  var contentColumn: some View {
+    switch viewModel.projectWorkspaceMode {
+    case .tasks, .sessions:
+      AnyView(listContent)
+    case .review:
+      AnyView(reviewLeftColumn)
+    case .overview, .agents, .memory, .settings:
+      AnyView(listPlaceholderContent)
+    }
+  }
+
+  // Neutral placeholder for non-session modes to replace the list column.
+  private var listPlaceholderContent: some View {
+    let (title, icon) = placeholderTitleAndIcon(for: viewModel.projectWorkspaceMode)
+    return placeholderSurface(title: title, systemImage: icon)
+      .frame(maxWidth: .infinity, maxHeight: .infinity)
+      .navigationSplitViewColumnWidth(
+        min: isListHidden ? 0 : 360,
+        ideal: isListHidden ? 0 : 420,
+        max: isListHidden ? 0 : 480
+      )
+      .allowsHitTesting(false)
+      .id(isListHidden ? "list-placeholder-hidden" : "list-placeholder-shown")
+  }
+
+  // Left column for Project Review: Git changes tree/search/commit
+  private var reviewLeftColumn: some View {
+    Group {
+      if let project = currentSelectedProject(), let dir = project.directory, !dir.isEmpty {
+        let ws = dir
+        let stateBinding = Binding<ReviewPanelState>(
+          get: { viewModel.projectReviewPanelStates[project.id] ?? ReviewPanelState() },
+          set: { viewModel.projectReviewPanelStates[project.id] = $0 }
+        )
+        let vm = projectReviewVM(for: project.id)
+        EquatableGitChangesContainer(
+          key: .init(
+            workingDirectoryPath: ws,
+            projectDirectoryPath: ws,
+            state: stateBinding.wrappedValue
+          ),
+          workingDirectory: URL(fileURLWithPath: ws, isDirectory: true),
+          projectDirectory: URL(fileURLWithPath: ws, isDirectory: true),
+          presentation: .full,
+          regionLayout: .leftOnly,
+          preferences: viewModel.preferences,
+          onRequestAuthorization: { ensureRepoAccessForProjectReview(directory: ws) },
+          externalVM: vm,
+          savedState: stateBinding
+        )
+      } else {
+        placeholderSurface(title: "Review", systemImage: "doc.text.magnifyingglass")
+      }
+    }
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
+    .navigationSplitViewColumnWidth(min: 360, ideal: 420, max: 480)
+  }
+
+  private func placeholderTitleAndIcon(for mode: ProjectWorkspaceMode) -> (String, String) {
+    switch mode {
+    case .overview: return ("Overview", "square.grid.2x2")
+    case .agents: return ("Agents", "book.pages")
+    case .memory: return ("Memory", "bookmark")
+    case .settings: return ("Project Settings", "gearshape")
+    case .tasks: return ("", "") // never used
+    case .sessions: return ("", "") // never used
+    case .review: return ("", "") // never used
+    }
+  }
+
   private var guardedListSelectionBinding: Binding<Set<SessionSummary.ID>> {
     Binding(
       get: { selection },

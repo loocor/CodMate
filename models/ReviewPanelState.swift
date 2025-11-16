@@ -19,7 +19,7 @@ struct ReviewPanelState: Equatable {
     var selectedSideStaged: Bool? = nil
     var showPreview: Bool = false
     var commitMessage: String = ""
-    var mode: Mode = .browser
+    var mode: Mode = .diff
     var expandedDirsBrowser: Set<String> = []
     // Whether the Git Graph view is visible in the right detail area.
     // This is a lightweight UI flag; it is safe if not restored.

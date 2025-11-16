@@ -173,7 +173,8 @@ extension GitChangesPanel {
         let repoAvailable = vm.repoRoot != nil
         let isSelected = vm.selectedPath == path
         let bulletColor = change.map { statusColor(for: $0.path) } ?? Color.clear
-        let showStageAction = change != nil
+        // Explorer overlay: do not show Stage/Unstage quick actions; keep them in context menus only
+        let showStageAction = false
         let activeHover = hoverBrowserFilePath == path
         let buttonCount: Int = {
             var count = 1 // Open
@@ -253,29 +254,6 @@ extension GitChangesPanel {
                             }
                         }
 #endif
-                        if repoAvailable, let change {
-                            Button {
-                                Task {
-                                    if change.staged != nil {
-                                        await vm.unstage(paths: [path])
-                                    } else {
-                                        await vm.stage(paths: [path])
-                                    }
-                                }
-                            } label: {
-                                Image(systemName: change.staged != nil ? "minus.circle" : "plus.circle")
-                                    .foregroundStyle((hoverBrowserStagePath == path) ? Color.accentColor : Color.secondary)
-                            }
-                            .buttonStyle(.plain)
-                            .frame(width: quickActionWidth, height: quickActionHeight)
-                            .onHover { inside in
-                                if inside {
-                                    hoverBrowserStagePath = path
-                                } else if hoverBrowserStagePath == path {
-                                    hoverBrowserStagePath = nil
-                                }
-                            }
-                        }
                     }
                     if repoAvailable, let change {
                         statusBadge(for: change)
