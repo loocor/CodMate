@@ -1,4 +1,5 @@
 import Foundation
+import CoreGraphics
 
 /// Persists and restores the main window state across app launches
 @MainActor
@@ -11,8 +12,11 @@ final class WindowStateStore: ObservableObject {
     static let selectedDays = "codmate.window.selectedDays"
     static let monthStart = "codmate.window.monthStart"
     static let projectWorkspaceMode = "codmate.window.projectWorkspaceMode"
+    static let projectWorkspaceModesById = "codmate.window.projectWorkspaceModesById"
     static let selectedSessionIDs = "codmate.window.selectedSessionIDs"
     static let selectionPrimaryId = "codmate.window.selectionPrimaryId"
+    static let contentColumnWidth = "codmate.window.contentColumnWidth"
+    static let reviewLeftPaneWidth = "codmate.window.reviewLeftPaneWidth"
   }
 
   init(defaults: UserDefaults = .standard) {
@@ -43,6 +47,15 @@ final class WindowStateStore: ObservableObject {
     defaults.set(mode.rawValue, forKey: Keys.projectWorkspaceMode)
   }
 
+  // Per-project workspace mode persistence
+  func saveProjectWorkspaceMode(projectId: String, mode: ProjectWorkspaceMode) {
+    // Sessions mode is reserved for the virtual "Other" node; do not persist for real projects
+    guard mode != .sessions else { return }
+    var dict = (defaults.dictionary(forKey: Keys.projectWorkspaceModesById) as? [String: String]) ?? [:]
+    dict[projectId] = mode.rawValue
+    defaults.set(dict, forKey: Keys.projectWorkspaceModesById)
+  }
+
   func saveSessionSelection(selectedIDs: Set<SessionSummary.ID>, primaryId: SessionSummary.ID?) {
     let array = Array(selectedIDs)
     defaults.set(array, forKey: Keys.selectedSessionIDs)
@@ -52,6 +65,25 @@ final class WindowStateStore: ObservableObject {
     } else {
       defaults.removeObject(forKey: Keys.selectionPrimaryId)
     }
+  }
+
+  // MARK: - Column Width Persistence
+  func saveContentColumnWidth(_ width: CGFloat) {
+    defaults.set(Double(width), forKey: Keys.contentColumnWidth)
+  }
+
+  func restoreContentColumnWidth() -> CGFloat? {
+    let w = defaults.double(forKey: Keys.contentColumnWidth)
+    return w > 0 ? CGFloat(w) : nil
+  }
+
+  func saveReviewLeftPaneWidth(_ width: CGFloat) {
+    defaults.set(Double(width), forKey: Keys.reviewLeftPaneWidth)
+  }
+
+  func restoreReviewLeftPaneWidth() -> CGFloat? {
+    let w = defaults.double(forKey: Keys.reviewLeftPaneWidth)
+    return w > 0 ? CGFloat(w) : nil
   }
 
   // MARK: - Restore State
@@ -97,6 +129,14 @@ final class WindowStateStore: ObservableObject {
     return mode
   }
 
+  func restoreWorkspaceMode(for projectId: String) -> ProjectWorkspaceMode? {
+    guard let dict = defaults.dictionary(forKey: Keys.projectWorkspaceModesById) as? [String: String],
+          let raw = dict[projectId], let mode = ProjectWorkspaceMode(rawValue: raw) else {
+      return nil
+    }
+    return mode
+  }
+
   func restoreSessionSelection() -> (
     selectedIDs: Set<SessionSummary.ID>, primaryId: SessionSummary.ID?
   ) {
@@ -120,6 +160,9 @@ final class WindowStateStore: ObservableObject {
     defaults.removeObject(forKey: Keys.selectedDays)
     defaults.removeObject(forKey: Keys.monthStart)
     defaults.removeObject(forKey: Keys.projectWorkspaceMode)
+    defaults.removeObject(forKey: Keys.projectWorkspaceModesById)
+    defaults.removeObject(forKey: Keys.contentColumnWidth)
+    defaults.removeObject(forKey: Keys.reviewLeftPaneWidth)
     defaults.removeObject(forKey: Keys.selectedSessionIDs)
     defaults.removeObject(forKey: Keys.selectionPrimaryId)
   }

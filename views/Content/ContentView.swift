@@ -29,6 +29,8 @@ struct ContentView: View {
   @State var isListHidden = false
   @SceneStorage("cm.sidebarHidden") var storeSidebarHidden: Bool = false
   @SceneStorage("cm.listHidden") var storeListHidden: Bool = false
+  // Persist content column (sessions list / review left pane) preferred width
+  @State var contentColumnIdealWidth: CGFloat = 420
   @State var showNewWithContext = false
   @State var showSidebarNewProjectSheet = false
   // When starting embedded sessions, record the initial command lines per-session
@@ -925,10 +927,19 @@ struct ContentView: View {
   }
 
   func toggleSidebarVisibility() {
-    // Cancel sidebar hiding behavior: always keep sidebar visible.
+    // Toggle sidebar between shown (.all) and hidden (.doubleColumn). If maximized, restore.
     withAnimation(.easeInOut(duration: 0.15)) {
-      columnVisibility = .all
-      storeSidebarHidden = false
+      switch columnVisibility {
+      case .detailOnly:
+        columnVisibility = .all; storeSidebarHidden = false
+      case .all:
+        columnVisibility = .doubleColumn; storeSidebarHidden = true
+      case .doubleColumn:
+        columnVisibility = .all; storeSidebarHidden = false
+      default:
+        columnVisibility = storeSidebarHidden ? .all : .doubleColumn
+        storeSidebarHidden.toggle()
+      }
     }
   }
 
@@ -943,11 +954,9 @@ struct ContentView: View {
       // Apply list visibility
       isListHidden = storeListHidden
       // Apply sidebar visibility when not maximized
-      // Sidebar hiding is disabled; force sidebar visible unless in detail-only mode
       if columnVisibility != .detailOnly {
-        columnVisibility = .all
+        columnVisibility = storeSidebarHidden ? .doubleColumn : .all
       }
-      storeSidebarHidden = false
     }
     if animated { withAnimation(.easeInOut(duration: 0.12)) { action() } } else { action() }
   }

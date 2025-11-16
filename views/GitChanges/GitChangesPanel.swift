@@ -260,6 +260,9 @@ struct GitChangesPanel: View {
       }
     }
     .onChange(of: vm.selectedPath) { _, _ in }
+    .onChange(of: leftColumnWidth) { _, newW in
+      WindowStateStore().saveReviewLeftPaneWidth(newW)
+    }
   }
 
   private var contentWithPresentation: some View {
@@ -291,7 +294,12 @@ struct GitChangesPanel: View {
               .frame(maxWidth: .infinity, maxHeight: .infinity)
               .onAppear {
                 if leftColumnWidth == 0 {
-                  leftColumnWidth = clampLeftWidth(geo.size.width * 0.25, total: geo.size.width)
+                  let store = WindowStateStore()
+                  if let saved = store.restoreReviewLeftPaneWidth() {
+                    leftColumnWidth = clampLeftWidth(saved, total: geo.size.width)
+                  } else {
+                    leftColumnWidth = clampLeftWidth(geo.size.width * 0.25, total: geo.size.width)
+                  }
                 }
               }
           }

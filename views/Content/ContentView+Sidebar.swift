@@ -1,6 +1,17 @@
 import SwiftUI
 
 extension ContentView {
+  // Clamp and persist content column width (sessions list / review tree)
+  fileprivate func captureContentColumnWidth(_ width: CGFloat) {
+    guard width.isFinite, width > 0 else { return }
+    // Ignore when hidden (width may report 0 or tiny values)
+    if isListHidden { return }
+    let clamped = max(360, min(480, width))
+    if abs(Double(clamped - contentColumnIdealWidth)) > 0.5 {
+      contentColumnIdealWidth = clamped
+      viewModel.windowStateStore.saveContentColumnWidth(clamped)
+    }
+  }
   func sidebarContent(sidebarMaxWidth: CGFloat) -> some View {
     let state = viewModel.sidebarStateSnapshot
     let digest = makeSidebarDigest(for: state)
@@ -25,6 +36,12 @@ extension ContentView {
     }
   }
 
+  // Preference key to read current content column width
+  private struct ContentColumnWidthPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
+  }
+
   var listContent: some View {
     SessionListColumnView(
       sections: viewModel.sections,
@@ -47,9 +64,17 @@ extension ContentView {
     .environmentObject(viewModel)
     .navigationSplitViewColumnWidth(
       min: isListHidden ? 0 : 360,
-      ideal: isListHidden ? 0 : 420,
+      ideal: isListHidden ? 0 : contentColumnIdealWidth,
       max: isListHidden ? 0 : 480
     )
+    .background(
+      GeometryReader { gr in
+        Color.clear.preference(key: ContentColumnWidthPreferenceKey.self, value: gr.size.width)
+      }
+    )
+    .onPreferenceChange(ContentColumnWidthPreferenceKey.self) { w in
+      captureContentColumnWidth(w)
+    }
     .allowsHitTesting(listAllowsHitTesting)
     .refuseFirstResponder(when: isSearchPopoverPresented || shouldBlockAutoSelection || selection.isEmpty)
     .environment(\.controlActiveState,
@@ -85,9 +110,17 @@ extension ContentView {
       .frame(maxWidth: .infinity, maxHeight: .infinity)
       .navigationSplitViewColumnWidth(
         min: isListHidden ? 0 : 360,
-        ideal: isListHidden ? 0 : 420,
+        ideal: isListHidden ? 0 : contentColumnIdealWidth,
         max: isListHidden ? 0 : 480
       )
+      .background(
+        GeometryReader { gr in
+          Color.clear.preference(key: ContentColumnWidthPreferenceKey.self, value: gr.size.width)
+        }
+      )
+      .onPreferenceChange(ContentColumnWidthPreferenceKey.self) { w in
+        captureContentColumnWidth(w)
+      }
       .allowsHitTesting(false)
       .id(isListHidden ? "list-placeholder-hidden" : "list-placeholder-shown")
   }
@@ -122,7 +155,19 @@ extension ContentView {
       }
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
-    .navigationSplitViewColumnWidth(min: 360, ideal: 420, max: 480)
+    .navigationSplitViewColumnWidth(
+      min: isListHidden ? 0 : 360,
+      ideal: isListHidden ? 0 : contentColumnIdealWidth,
+      max: isListHidden ? 0 : 480
+    )
+    .background(
+      GeometryReader { gr in
+        Color.clear.preference(key: ContentColumnWidthPreferenceKey.self, value: gr.size.width)
+      }
+    )
+    .onPreferenceChange(ContentColumnWidthPreferenceKey.self) { w in
+      captureContentColumnWidth(w)
+    }
   }
 
   private func placeholderTitleAndIcon(for mode: ProjectWorkspaceMode) -> (String, String) {
@@ -223,9 +268,9 @@ extension ContentView {
       ToolbarCircleButton(
         systemImage: "arrow.clockwise",
         isActive: viewModel.isEnriching,
-        help: "Refresh session index"
+        help: "Refresh"
       ) {
-        Task { await viewModel.refreshSessions(force: true) }
+        NotificationCenter.default.post(name: .codMateGlobalRefresh, object: nil)
       }
       .disabled(viewModel.isEnriching || viewModel.isLoading)
     }

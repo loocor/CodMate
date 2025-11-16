@@ -47,8 +47,8 @@ struct CodMateApp: App {
       }
       // Integrate actions into the system View menu
       CommandGroup(after: .sidebar) {
-        Button("Refresh Sessions") {
-          Task { await listViewModel.refreshSessions(force: true) }
+        Button("Refresh") {
+          NotificationCenter.default.post(name: .codMateGlobalRefresh, object: nil)
         }
         .keyboardShortcut("r", modifiers: [.command])
 

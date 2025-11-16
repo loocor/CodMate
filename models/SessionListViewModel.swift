@@ -250,6 +250,15 @@ final class SessionListViewModel: ObservableObject {
     didSet {
       guard oldValue != projectWorkspaceMode else { return }
       windowStateStore.saveWorkspaceMode(projectWorkspaceMode)
+      // Persist per-project mode when a single real project is selected
+      if selectedProjectIDs.count == 1,
+         let pid = selectedProjectIDs.first,
+         pid != Self.otherProjectId,
+         let project = projects.first(where: { $0.id == pid }),
+         let dir = project.directory, !dir.isEmpty,
+         projectWorkspaceMode != .sessions {
+        windowStateStore.saveProjectWorkspaceMode(projectId: pid, mode: projectWorkspaceMode)
+      }
     }
   }
 

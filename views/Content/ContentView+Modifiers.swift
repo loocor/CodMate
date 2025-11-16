@@ -40,12 +40,28 @@ extension ContentView {
 
   fileprivate func enforceWorkspaceModeForSelection() {
     // "All" is forced to Overview
-    if isAllSelection() && viewModel.projectWorkspaceMode != .overview {
-      viewModel.projectWorkspaceMode = .overview
+    if isAllSelection() {
+      if viewModel.projectWorkspaceMode != .overview {
+        viewModel.projectWorkspaceMode = .overview
+      }
+      return
     }
     // "Other" is forced to Sessions mode (for managing unassigned sessions)
-    else if isOtherSelection() && viewModel.projectWorkspaceMode != .sessions {
-      viewModel.projectWorkspaceMode = .sessions
+    if isOtherSelection() {
+      if viewModel.projectWorkspaceMode != .sessions {
+        viewModel.projectWorkspaceMode = .sessions
+      }
+      return
+    }
+    // Single real project: restore its last workspace mode, or default to Overview
+    if viewModel.selectedProjectIDs.count == 1,
+       let pid = viewModel.selectedProjectIDs.first,
+       let project = viewModel.projects.first(where: { $0.id == pid }),
+       let dir = project.directory, !dir.isEmpty {
+      let restored = viewModel.windowStateStore.restoreWorkspaceMode(for: pid) ?? .overview
+      if viewModel.projectWorkspaceMode != restored {
+        viewModel.projectWorkspaceMode = restored
+      }
     }
   }
   func navigationSplitView(geometry: GeometryProxy) -> some View {
@@ -91,6 +107,11 @@ extension ContentView {
         permissionsManager.restoreAccess()
         SecurityScopedBookmarks.shared.restoreAllDynamicBookmarks()
         Task { await permissionsManager.ensureCriticalDirectoriesAccess() }
+        // Restore preferred content column width (sessions list / review tree)
+        if let w = viewModel.windowStateStore.restoreContentColumnWidth() {
+          let clamped = max(360, min(480, w))
+          if contentColumnIdealWidth != clamped { contentColumnIdealWidth = clamped }
+        }
 
         // Restore session selection from previous launch
         let restored = viewModel.windowStateStore.restoreSessionSelection()
@@ -221,6 +242,17 @@ extension ContentView {
       }
       .onReceive(NotificationCenter.default.publisher(for: .codMateFocusGlobalSearch)) { _ in
         focusGlobalSearchPanel()
+      }
+      .onReceive(NotificationCenter.default.publisher(for: .codMateGlobalRefresh)) { _ in
+        // Always refresh sessions to keep global stats in sync
+        Task { await viewModel.refreshSessions(force: true) }
+        // If in Review mode with a concrete project selected, refresh git status as well
+        if viewModel.projectWorkspaceMode == .review,
+           let project = currentSelectedProject(),
+           let dir = project.directory, !dir.isEmpty {
+          let vm = projectReviewVM(for: project.id)
+          Task { await vm.refreshStatus() }
+        }
       }
   }
 
